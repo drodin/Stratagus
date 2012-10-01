@@ -241,6 +241,8 @@ void Parameters::SetUserDirectory()
 {
 #ifdef USE_WIN32
 	UserDirectory = getenv("APPDATA");
+#elif defined(ANDROID)
+	UserDirectory = StratagusLibPath;
 #else
 	UserDirectory = getenv("HOME");
 #endif
@@ -730,7 +732,7 @@ void ParseCommandLine(int argc, char **argv, Parameters &parameters)
 std::string GetLocalPlayerNameFromEnv()
 {
 	//  Default player name to username on unix systems.
-#if defined(USE_WIN32) || defined(USE_MAEMO)
+#if defined(USE_WIN32) || defined(USE_MAEMO) || defined(ANDROID)
 	return "Anonymous";
 #else
 	const char *userName = getenv("USER");
@@ -749,7 +751,11 @@ std::string GetLocalPlayerNameFromEnv()
 **  @param argc  Number of arguments.
 **  @param argv  Vector of arguments.
 */
+#ifdef ANDROID
+int mainStratagus(int argc, char **argv)
+#else
 int main(int argc, char **argv)
+#endif
 {
 #ifdef REDIRECT_OUTPUT
 	RedirectOutput();
@@ -786,6 +792,9 @@ int main(int argc, char **argv)
 
 	// FIXME: Parse options before or after scripts?
 	ParseCommandLine(argc, argv, parameters);
+#ifdef ANDROID
+	parameters.SetDefaultValues();
+#endif
 	// Init the random number generator.
 	InitSyncRand();
 

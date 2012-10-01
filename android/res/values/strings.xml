@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+	<string name="app_name">Stratagus</string>
+
+	<string name="antialiasing">Antialiasing</string>
+	<string name="define_keys">Define Keys</string>
+	<string name="reset_keys">Reset Keys</string>
+	<string name="keyboard">Keyboard</string>
+
+	<string name="df_title">Press button for \"%s\"</string>
+	<string name="df_message">We are trying to intercept as many hardware keys as
+		possible, but it roughly depends on your hardware/software.</string>
+	<string name="df_btn_cancel">Cancel</string>
+	<string name="df_btn_clear">Clear</string>
+
+	<string name="reset_keys_title">Set default key bindings?</string>
+
+	<string name="sure_message">Are You Sure!?</string>
+	<string name="sure_btn_yes">Yes</string>
+	<string name="sure_btn_no">No</string>
+
+	<string name="select_folder">Please select folder containing game data files:
+	</string>
+	<string name="browse">Browse</string>
+	<string name="start_game">Start Game</string>
+
+	<string name="current_folder">Current folder: </string>
+	<string name="select">Select</string>
+
+	<string name="nodatadir_msg">No Stratagus data files were found in </string>
+	<string name="nodatadir_btn">Select another folder</string>
+
+	<string name="help">
+Stratagus is a real-time strategy gaming engine. You can play several games based on it.\n\
+* Wargus - Warcraft II: Tides of Darkness &amp; Beyond the Dark Portal (expansion pack) clone, which uses content from original Blizzard games CDs.\n\
+* Stargus - partial Starcraft I clone, also uses content from original CD.\n\
+You will need to provide \'game data files\' to actually play anything, for help on creating data, please visit - <b><i>http://stratagus.drodin.com</i></b>
+	</string>
+
+</resources>

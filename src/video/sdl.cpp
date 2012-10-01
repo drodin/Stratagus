@@ -57,7 +57,9 @@
 #include "SDL.h"
 
 #ifdef USE_GLES
+/* TODO: ANDROID GLES
 #include "SDL_gles.h"
+*/
 #include "GLES/gl.h"
 #else
 #include "SDL_opengl.h"
@@ -475,6 +477,7 @@ void InitVideoSdl()
 		}
 
 #if ! defined(USE_WIN32) && ! defined(USE_MAEMO)
+		/* TODO: ANDROID GLES
 		// Make sure, that we not create OpenGL textures (and do not call OpenGL functions), when creating icon surface
 		bool UseOpenGL_orig = UseOpenGL;
 		UseOpenGL = false;
@@ -527,6 +530,7 @@ void InitVideoSdl()
 		}
 
 		UseOpenGL = UseOpenGL_orig;
+		*/
 #endif
 #ifdef USE_WIN32
 		HWND hwnd = NULL;
@@ -571,6 +575,7 @@ void InitVideoSdl()
 	}
 	if (UseOpenGL) {
 #ifdef USE_GLES
+		/* TODO: ANDROID GLES
 		if (SDL_GLES_Init(SDL_GLES_VERSION_1_1) < 0) {
 			fprintf(stderr, "Couldn't initialize SDL_GLES: %s\n", SDL_GetError());
 			exit(1);
@@ -580,6 +585,7 @@ void InitVideoSdl()
 		atexit(SDL_GLES_Quit);
 
 		flags |= SDL_SWSURFACE;
+		*/
 #else
 		flags |= SDL_OPENGL;
 #endif
@@ -617,6 +623,7 @@ void InitVideoSdl()
 
 	if (UseOpenGL) {
 #ifdef USE_GLES
+		/* TODO: ANDROID GLES
 		SDL_GLES_Context *context = SDL_GLES_CreateContext();
 		if (!context) {
 			fprintf(stderr, "Couldn't initialize SDL_GLES_CreateContext: %s\n", SDL_GetError());
@@ -627,6 +634,7 @@ void InitVideoSdl()
 			exit(1);
 		}
 		// atexit(GLES_DeleteContext(context));
+		*/
 #endif
 		InitOpenGL();
 	}
@@ -923,7 +931,9 @@ void RealizeVideoMemory()
 {
 	if (UseOpenGL) {
 #ifdef USE_GLES
+		/* TODO: ANDROID GLES
 		SDL_GLES_SwapBuffers();
+		*/
 #else
 		SDL_GL_SwapBuffers();
 #endif

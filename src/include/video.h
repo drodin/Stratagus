@@ -35,7 +35,9 @@
 
 #include "SDL.h"
 #ifdef USE_GLES
+/* TODO: ANDROID GLES
 #include "SDL_gles.h"
+*/
 #include "GLES/gl.h"
 #else
 #include "SDL_opengl.h"

@@ -1141,6 +1141,9 @@ void HandleKeyRepeat(unsigned, unsigned keychar)
 */
 bool HandleMouseScrollArea(const PixelPos &mousePos)
 {
+#ifdef ANDROID
+	return false;
+#endif
 	if (mousePos.x < SCROLL_LEFT) {
 		if (mousePos.y < SCROLL_UP) {
 			CursorOn = CursorOnScrollLeftUp;

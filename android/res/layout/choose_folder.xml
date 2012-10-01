@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+	android:layout_width="fill_parent" android:layout_height="fill_parent"
+	android:padding="5dp">
+
+	<TextView android:id="@+id/cfolder" android:text="@string/current_folder"
+		android:layout_width="match_parent" android:layout_height="wrap_content"
+		android:layout_alignParentTop="true" />
+		
+	<Button android:id="@+id/select_btn" android:text="@string/select"
+		android:layout_width="100dp" android:layout_height="wrap_content"
+		android:layout_alignRight="@id/cfolder" android:layout_below="@id/cfolder" />
+
+	<EditText android:id="@+id/file_tv" android:text=""
+		android:layout_width="wrap_content" android:layout_height="wrap_content"
+		android:layout_toLeftOf="@id/select_btn" android:layout_alignTop="@id/select_btn"
+		android:layout_alignBottom="@id/select_btn" android:layout_alignLeft="@id/cfolder" />
+
+	<ListView android:id="@id/android:list" android:layout_width="wrap_content"
+		android:layout_height="wrap_content" android:layout_below="@id/file_tv"
+		android:layout_alignLeft="@id/file_tv" android:layout_alignRight="@id/select_btn"
+		android:layout_alignParentBottom="true" />
+
+</RelativeLayout>

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<resources>
+
+	<style name="Theme" parent="android:Theme.Black.NoTitleBar.Fullscreen">
+		<item name="android:textAppearanceLarge">@style/ListText</item>
+		<item name="android:textAppearanceMedium">@style/ListTextSmall</item>
+		<item name="android:textAppearanceSmall">@style/ListTextSmall</item>
+		<item name="android:listPreferredItemHeight">40sp</item>
+		<item name="android:listViewStyle">@style/ListView</item>
+	</style>
+
+	<style name="Theme.Translucent">
+		<item name="android:windowIsTranslucent">true</item>
+		<item name="android:windowBackground">@drawable/translucent</item>
+		<item name="android:windowAnimationStyle">@android:style/Animation.Translucent</item>
+	</style>
+
+	<style name="Theme.Translucent.Dialog" parent="android:Theme.Dialog">
+		<item name="android:windowTitleStyle">@style/DialogWindowTitle</item>
+		<item name="android:listViewStyle">@style/ListViewDialog</item>
+	</style>
+
+	<style name="DialogWindowTitle">
+		<item name="android:maxLines">1</item>
+		<item name="android:textAppearance">@style/ListText</item>
+		<item name="android:gravity">center_vertical|center_horizontal</item>
+	</style>
+
+	<style name="ListViewDialog">
+		<item name="android:scrollbars">vertical</item>
+		<item name="android:fadingEdge">vertical</item>
+		<item name="android:scrollbarStyle">outsideInset</item>
+		<item name="android:paddingLeft">30dp</item>
+		<item name="android:paddingRight">30dp</item>
+		<item name="android:background">@drawable/dimmed</item>
+		<item name="android:divider">@drawable/black</item>
+		<item name="android:dividerHeight">1dp</item>
+		<item name="android:footerDividersEnabled">false</item>
+	</style>
+
+	<style name="ListView">
+		<item name="android:background">@drawable/transparent</item>
+		<item name="android:scrollbars">vertical</item>
+		<item name="android:fadingEdge">vertical</item>
+		<item name="android:scrollbarStyle">outsideInset</item>
+	</style>
+
+	<style name="ListText">
+		<item name="android:textSize">22sp</item>
+		<item name="android:textColor">@color/white</item>
+	</style>
+
+	<style name="ListTextSmall">
+		<item name="android:textSize">15sp</item>
+		<item name="android:textColor">@color/white</item>
+	</style>
+
+</resources>

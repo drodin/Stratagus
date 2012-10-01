@@ -365,6 +365,7 @@ static void NetworkSendRateLimitedClientMessage(CInitMessage *msg, unsigned long
 		}
 		const int n = NetworkSendICMessage(NetworkServerIP, htons(NetworkServerPort), msg);
 		UNUSED(n); // not used in release
+#ifdef DEBUG
 		if (!NetStateMsgCnt) {
 			DebugPrint
 			("Sending Init Message (%s:%d): %d:%d(%d) %d.%d.%d.%d:%d\n" _C_
@@ -372,6 +373,7 @@ static void NetworkSendRateLimitedClientMessage(CInitMessage *msg, unsigned long
 			 msg->Type _C_ msg->SubType _C_ n _C_
 			 NIPQUAD(ntohl(NetworkServerIP)) _C_ NetworkServerPort);
 		}
+#endif
 	}
 }
 
@@ -1917,9 +1919,11 @@ static int CheckVersions(const CInitMessage &msg)
 */
 static void NetworkParseMenuPacket(const CInitMessage &msg)
 {
+#ifdef DEBUG
 	DebugPrint("Received %s Init Message %d:%d from %d.%d.%d.%d:%d (%ld)\n" _C_
 			   icmsgsubtypenames[msg.SubType] _C_ msg.Type _C_ msg.SubType _C_ NIPQUAD(ntohl(NetLastHost)) _C_
 			   ntohs(NetLastPort) _C_ FrameCounter);
+#endif
 
 	if (NetConnectRunning == 2) { // client
 		if (msg.Type == MessageInitReply) {

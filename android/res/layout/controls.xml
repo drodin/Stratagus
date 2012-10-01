@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+	android:layout_width="fill_parent" android:layout_height="fill_parent"
+	android:gravity="bottom|center_horizontal"
+	android:background="@drawable/transparent">
+	<com.drodin.stratagus.SoftControls
+		android:id="@+id/keyboardView" android:keyBackground="@drawable/key"
+		android:layout_width="fill_parent" android:layout_height="fill_parent"
+		android:keyTextSize="22sp" android:labelTextSize="13sp"
+		android:keyTextColor="#88ffffff"
+		android:background="@drawable/transparent" />
+</LinearLayout>

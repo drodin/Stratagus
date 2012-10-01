@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+	android:layout_width="fill_parent" android:layout_height="fill_parent"
+	android:padding="5dp">
+
+	<TextView android:id="@+id/folder_label" android:text="@string/select_folder"
+		android:layout_width="match_parent" android:layout_height="wrap_content"
+		android:layout_alignParentTop="true" />
+
+	<Button android:text="@string/start_game" android:id="@+id/start_btn"
+		android:layout_width="match_parent" android:layout_height="wrap_content"
+		android:layout_alignParentBottom="true" android:textStyle="bold" />
+
+	<Button android:id="@+id/browse_btn" android:text="@string/browse"
+		android:layout_width="100dp" android:layout_height="wrap_content"
+		android:layout_alignRight="@id/folder_label" android:layout_below="@id/folder_label" />
+
+	<EditText android:id="@+id/folder" android:text=""
+		android:layout_width="wrap_content" android:layout_height="wrap_content"
+		android:layout_toLeftOf="@id/browse_btn" android:layout_alignTop="@id/browse_btn"
+		android:layout_alignBottom="@id/browse_btn" android:layout_alignLeft="@id/folder_label" />
+
+	<TextView android:id="@+id/help_text" android:text="@string/help"
+		android:layout_width="wrap_content" android:layout_height="wrap_content"
+		android:layout_alignRight="@id/folder" android:layout_alignLeft="@id/folder"
+		android:layout_below="@id/folder" android:layout_above="@id/start_btn"
+		android:autoLink="web" android:textColorLink="@color/blue" />
+
+	<Button android:id="@+id/define_keys_btn" android:text="@string/define_keys"
+		android:layout_width="wrap_content" android:layout_height="wrap_content"
+		android:layout_alignRight="@id/browse_btn" android:layout_alignLeft="@id/browse_btn"
+		android:layout_below="@id/browse_btn" />
+
+	<Button android:id="@+id/reset_keys_btn" android:text="@string/reset_keys"
+		android:layout_width="wrap_content" android:layout_height="wrap_content"
+		android:layout_alignRight="@id/browse_btn" android:layout_alignLeft="@id/browse_btn"
+		android:layout_below="@id/define_keys_btn" />
+
+	<ToggleButton android:id="@+id/antialiasing_btn"
+		android:textOn="@string/antialiasing" android:textOff="@string/antialiasing"
+		android:layout_width="wrap_content" android:layout_height="wrap_content"
+		android:layout_alignRight="@id/browse_btn" android:layout_alignLeft="@id/browse_btn"
+		android:layout_below="@id/reset_keys_btn" />
+
+</RelativeLayout>
