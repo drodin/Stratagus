@@ -2423,8 +2423,8 @@ void LetUnitDie(CUnit &unit)
 	unit.Orders[0] = COrder::NewActionDie();
 	if (type->CorpseType) {
 #ifdef DYNAMIC_LOAD
-		if (!type->Sprite) {
-			LoadUnitTypeSprite(type);
+		if (!type->CorpseType->Sprite) {
+			LoadUnitTypeSprite(*(CUnitType*)type->CorpseType);
 		}
 #endif
 		unit.IX = (type->CorpseType->Width - type->CorpseType->Sprite->Width) / 2;

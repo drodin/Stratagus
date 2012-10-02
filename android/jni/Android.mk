@@ -23,7 +23,7 @@ LOCAL_CFLAGS := \
     -fsigned-char \
     -D_GNU_SOURCE=1 -D_REENTRANT -DUSE_ZLIB \
     -DUSE_GLES \
-    #-DDYNAMIC_LOAD \
+    -DDYNAMIC_LOAD \
     -DDEBUG \
 
 STRATAGUS_SRCS := \
