@@ -108,10 +108,8 @@ public class MainView extends SurfaceView implements SurfaceHolder.Callback{
 
 	@Override
 	public boolean dispatchTouchEvent(MotionEvent ev) {
-		if (needScale)
+		if (ev.getPointerCount() == 1)
 			touchQueue.add(new TouchState(ev.getAction(), Math.round(ev.getX()*xScale), Math.round(ev.getY()*yScale)));
-		else
-			touchQueue.add(new TouchState(ev.getAction(), Math.round(ev.getX()), Math.round(ev.getY())));
 		return true;
 	}
 
@@ -130,7 +128,17 @@ public class MainView extends SurfaceView implements SurfaceHolder.Callback{
 			} else if (keyAction == KeyEvent.ACTION_UP) {
 				getKeyDispatcherState().handleUpEvent(event);
 				if (event.isTracking() && !event.isCanceled()) {
-					mMainActivity.openOptionsMenu();
+					//mMainActivity.openOptionsMenu();
+					if (DefineKeys.definiedKeys[keyCode]==DefineKeys.sdlMouseMiddle) {
+						castMouseBtn = 3;
+						return true;
+					}
+					if (DefineKeys.definiedKeys[keyCode]==DefineKeys.sdlMouseRight) {
+						castMouseBtn = 6;
+						return true;
+					}
+					keyQueue.add(new KeyState(KeyEvent.ACTION_DOWN, DefineKeys.definiedKeys[keyCode]));
+					keyQueue.add(new KeyState(KeyEvent.ACTION_UP, DefineKeys.definiedKeys[keyCode]));
 					return true;
 				}
 			}

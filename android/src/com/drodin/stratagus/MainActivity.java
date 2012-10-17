@@ -24,7 +24,7 @@ public class MainActivity extends Activity{
 	public static View mControlsView = null;
 	public static SoftControls mSoftControls = null;
 	
-	public MainView mMainView = null;
+	public static MainView mMainView = null;
 	public SharedPreferences settings;
 	
 	public static String dataDir = "/sdcard/Stratagus";
@@ -48,18 +48,11 @@ public class MainActivity extends Activity{
 		DefineKeys.loadDefinedKeys(settings);
 		
 		mFrameLayout = new FrameLayout(getApplicationContext());
-		
-		mControlsView = getLayoutInflater().inflate(R.layout.controls, null);
-		mSoftControls = (SoftControls) mControlsView.findViewById(R.id.keyboardView);
-		
-		mControlsView.setVisibility(View.INVISIBLE);
 
 		mMainView = new MainView(this);
 		mMainView.antialiasing = settings.getBoolean("antialiasing", false);
 		
 		mFrameLayout.addView(mMainView,
-				new LayoutParams(LayoutParams.FILL_PARENT, LayoutParams.FILL_PARENT));
-		mFrameLayout.addView(mControlsView,
 				new LayoutParams(LayoutParams.FILL_PARENT, LayoutParams.FILL_PARENT));
 
 		setContentView(mFrameLayout,
@@ -108,7 +101,7 @@ public class MainActivity extends Activity{
 			}
 			return true;
 		case R.id.keyboard:
-			if (mMainView!=null && mControlsView!=null) {
+			if (mMainView!=null) {
 				switchKeyboard();
 			}
 		default:
@@ -132,6 +125,14 @@ public class MainActivity extends Activity{
 	}
 	
 	public static void switchKeyboard() {
+		if (mControlsView == null) {					
+			mControlsView = mMainView.mMainActivity.getLayoutInflater().inflate(R.layout.controls, null);
+			mSoftControls = (SoftControls) mControlsView.findViewById(R.id.keyboardView);
+			
+			mControlsView.setVisibility(View.INVISIBLE);
+			mFrameLayout.addView(mControlsView,
+				new LayoutParams(LayoutParams.FILL_PARENT, LayoutParams.FILL_PARENT));
+		}
 		if (onScreenKeyboard) {
 			mControlsView.setVisibility(View.INVISIBLE);
 			onScreenKeyboard = false;

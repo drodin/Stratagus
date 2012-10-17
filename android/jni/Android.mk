@@ -1,9 +1,9 @@
 PROJECT_PATH := $(call my-dir)/../..
 
-include $(PROJECT_PATH)/../SDL-1.2.14/Android.mk
-include $(PROJECT_PATH)/../lua-5.1.4-2/Android.mk
-include $(PROJECT_PATH)/../toluapp/Android.mk
-include $(PROJECT_PATH)/../lpng1243/Android.mk
+include $(PROJECT_PATH)/../SDL/android/jni/Android-static.mk
+include $(PROJECT_PATH)/../lua/android/jni/Android-static.mk
+include $(PROJECT_PATH)/../toluapp/android/jni/Android-static.mk
+include $(PROJECT_PATH)/../libpng/android/jni/Android-static.mk
 
 LOCAL_PATH := $(PROJECT_PATH)
 
@@ -14,10 +14,10 @@ LOCAL_MODULE := application
 LOCAL_C_INCLUDES := \
     $(LOCAL_PATH)/src/include \
     $(LOCAL_PATH)/src/guichan/include \
-    $(LOCAL_PATH)/../SDL-1.2.14/include \
-    $(LOCAL_PATH)/../lua-5.1.4-2/src \
+    $(LOCAL_PATH)/../SDL/include \
+    $(LOCAL_PATH)/../lua/src \
     $(LOCAL_PATH)/../toluapp/include \
-    $(LOCAL_PATH)/../lpng1243 \
+    $(LOCAL_PATH)/../libpng \
 
 LOCAL_CFLAGS := \
     -fsigned-char \
@@ -53,7 +53,7 @@ LOCAL_CPP_EXTENSION := .cpp
 
 LOCAL_SRC_FILES := $(foreach F, $(STRATAGUS_SRCS), $(addprefix $(dir $(F)),$(notdir $(wildcard $(LOCAL_PATH)/$(F)))))
 
-LOCAL_STATIC_LIBRARIES := sdl lua tolua png
+LOCAL_STATIC_LIBRARIES := sdl lua toluapp png
 
 LOCAL_LDLIBS := -ljnigraphics -lz -ldl -llog -lGLESv1_CM
 

@@ -791,6 +791,10 @@ void MouseScrollMap(int x, int y)
 		speed = UI.MouseScrollSpeedDefault;
 	}
 
+#ifdef ANDROID
+	speed = 1;
+#endif
+
 	const PixelDiff diff(x - CursorStartScreenPos.x, y - CursorStartScreenPos.y);
 
 	UI.MouseViewport->Set(UI.MouseViewport->MapPos, UI.MouseViewport->Offset + speed * diff);

@@ -52,13 +52,13 @@ public class DefineKeys extends ListActivity {
 		super.onActivityResult(requestCode, resultCode, data);
 		if (resultCode == RESULT_OK && requestCode == 0) {
 			int androidKeyCode = data.getIntExtra("androidKeyCode", 0);
-			if (androidKeyCode!=KeyEvent.KEYCODE_MENU) {
+			//if (androidKeyCode!=KeyEvent.KEYCODE_MENU) {
 				for (int i=0; i<definiedKeys.length; i++)
 					if (definiedKeys[i] == sdlKeyCode)
 						definiedKeys[i] = 0;
 				if (androidKeyCode!=0)
 					definiedKeys[androidKeyCode] = sdlKeyCode;
-			}
+			//}
 			drawListAdapter();
 		}
 	}
