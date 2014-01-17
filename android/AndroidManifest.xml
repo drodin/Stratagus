@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
 	android:installLocation="preferExternal" package="com.drodin.stratagus"
-	android:versionCode="9" android:versionName="0.9 beta">
+	android:versionCode="9" android:versionName="2.2.7-android1">
 	<supports-screens android:anyDensity="true"
 		android:smallScreens="true" android:normalScreens="true"
 		android:largeScreens="true" />
