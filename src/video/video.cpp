@@ -281,7 +281,7 @@ bool CVideo::ResizeScreen(int w, int h)
 			UI.Minimap.FreeOpenGL();
 		}
 #endif
-		TheScreen = SDL_SetVideoMode(w, h, TheScreen->format->BitsPerPixel, TheScreen->flags);
+		SDL_SetWindowSize(TheWindow, w, h);
 		ViewportWidth = w;
 		ViewportHeight = h;
 #if defined(USE_OPENGL) || defined(USE_GLES)

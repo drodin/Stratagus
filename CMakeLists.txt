@@ -1094,7 +1094,7 @@ if(WIN32 AND MINGW AND ENABLE_STATIC)
 endif()
 
 if(APPLE)
-	set_target_properties(stratagus PROPERTIES LINK_FLAGS "${LINK_FLAGS} -lSDLmain")
+	set_target_properties(stratagus PROPERTIES LINK_FLAGS "${LINK_FLAGS} -lSDL2main")
 endif()
 
 ########### next target ###############
@@ -1119,7 +1119,7 @@ source_group(metaserver FILES ${metaserver_SRCS} ${metaserver_HDRS})
 
 if(SQLITE_FOUND)
 	add_executable(metaserver ${metaserver_SRCS} ${metaserver_HDRS})
-	target_link_libraries(metaserver ${SDL_LIBRARY} ${SQLITE_LIBRARIES})
+	target_link_libraries(metaserver ${SDL2_LIBRARY} ${SQLITE_LIBRARIES})
 
 	if(WIN32)
 		target_link_libraries(metaserver winmm ws2_32)
