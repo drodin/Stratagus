@@ -105,6 +105,9 @@ static EGLDisplay eglDisplay;
 static EGLSurface eglSurface;
 #endif
 
+SDL_Window *TheWindow; /// Internal screen
+SDL_Renderer *TheRenderer = NULL; /// Internal screen
+SDL_Texture *TheTexture; /// Internal screen
 SDL_Surface *TheScreen; /// Internal screen
 
 static SDL_Rect Rects[100];
@@ -419,8 +422,8 @@ static void InitKey2Str()
 
 	Key2Str[SDLK_DELETE] = "delete";
 
-	for (i = SDLK_KP0; i <= SDLK_KP9; ++i) {
-		snprintf(str, sizeof(str), "kp_%d", i - SDLK_KP0);
+	for (i = SDLK_KP_0; i <= SDLK_KP_9; ++i) {
+		snprintf(str, sizeof(str), "kp_%d", i - SDLK_KP_0);
 		Key2Str[i] = str;
 	}
 
@@ -449,12 +452,12 @@ static void InitKey2Str()
 	}
 
 	Key2Str[SDLK_HELP] = "help";
-	Key2Str[SDLK_PRINT] = "print";
+	Key2Str[SDLK_PRINTSCREEN] = "print";
 	Key2Str[SDLK_SYSREQ] = "sysreq";
-	Key2Str[SDLK_BREAK] = "break";
+	Key2Str[SDLK_PAUSE] = "break";
 	Key2Str[SDLK_MENU] = "menu";
 	Key2Str[SDLK_POWER] = "power";
-	Key2Str[SDLK_EURO] = "euro";
+	//Key2Str[SDLK_EURO] = "euro";
 	Key2Str[SDLK_UNDO] = "undo";
 }
 
@@ -609,7 +612,9 @@ void InitVideoSdl()
 	}
 #endif
 
-	if (!Video.Width || !Video.Height) {
+	if (true || !Video.Width || !Video.Height) {
+		Video.ViewportWidth = Video.Width;
+		Video.ViewportHeight = Video.Height;
 		Video.Width = 640;
 		Video.Height = 480;
 	}
@@ -1094,7 +1099,7 @@ int Str2SdlKey(const char *str)
 */
 bool SdlGetGrabMouse()
 {
-	return SDL_WM_GrabInput(SDL_GRAB_QUERY) == SDL_GRAB_ON;
+	return SDL_GetWindowGrab(TheWindow);
 }
 
 /**
@@ -1107,9 +1112,9 @@ void ToggleGrabMouse(int mode)
 	bool grabbed = SdlGetGrabMouse();
 
 	if (mode <= 0 && grabbed) {
-		SDL_WM_GrabInput(SDL_GRAB_OFF);
+		SDL_SetWindowGrab(TheWindow, SDL_FALSE);
 	} else if (mode >= 0 && !grabbed) {
-		SDL_WM_GrabInput(SDL_GRAB_ON);
+		SDL_SetWindowGrab(TheWindow, SDL_TRUE);
 	}
 }
 

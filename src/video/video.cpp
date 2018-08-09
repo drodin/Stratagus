@@ -417,7 +417,7 @@ void ColorCycleSurface(SDL_Surface &surface)
 		memcpy(colors + range.begin, palcolors + range.begin + 1, (range.end - range.begin) * sizeof(SDL_Color));
 		colors[range.end] = palcolors[range.begin];
 	}
-	SDL_SetPalette(&surface, SDL_LOGPAL | SDL_PHYSPAL, colors, 0, 256);
+	SDL_SetPaletteColors(surface.format->palette, colors, 0, 256);
 }
 
 /**
@@ -438,7 +438,7 @@ static void ColorCycleSurface_Reverse(SDL_Surface &surface, unsigned int count)
 			memcpy(colors + range.begin + 1, palcolors + range.begin, (range.end - range.begin) * sizeof(SDL_Color));
 			colors[range.begin] = palcolors[range.end];
 		}
-		SDL_SetPalette(&surface, SDL_LOGPAL | SDL_PHYSPAL, colors, 0, 256);
+		SDL_SetPaletteColors(surface.format->palette, colors, 0, 256);
 	}
 }
 

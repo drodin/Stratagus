@@ -221,19 +221,11 @@ int LoadGraphicPNG(CGraphic *g)
 		}
 	}
 	SDL_Surface *surface =
-		SDL_AllocSurface(SDL_SWSURFACE, width, height,
+		SDL_CreateRGBSurface(SDL_SWSURFACE, width, height,
 						 bit_depth * png_get_channels(png_ptr, info_ptr), Rmask, Gmask, Bmask, Amask);
 	if (surface == NULL) {
 		fprintf(stderr, "Out of memory");
 		return -1;
-	}
-
-	if (ckey != -1) {
-		if (color_type != PNG_COLOR_TYPE_PALETTE) {
-			/* FIXME: Should these be truncated or shifted down? */
-			ckey = SDL_MapRGB(surface->format, (Uint8)transv->red, (Uint8)transv->green, (Uint8)transv->blue);
-		}
-		SDL_SetColorKey(surface, SDL_SRCCOLORKEY, ckey);
 	}
 
 	/* Create the array of pointers to image data */
@@ -259,6 +251,7 @@ int LoadGraphicPNG(CGraphic *g)
 				palette->colors[i].r = i;
 				palette->colors[i].g = i;
 				palette->colors[i].b = i;
+				palette->colors[i].a = 0xff;
 			}
 		} else {
 			png_colorp pngpalette;
@@ -270,9 +263,18 @@ int LoadGraphicPNG(CGraphic *g)
 					palette->colors[i].b = pngpalette[i].blue;
 					palette->colors[i].g = pngpalette[i].green;
 					palette->colors[i].r = pngpalette[i].red;
+					palette->colors[i].a = 0xff;
 				}
 			}
 		}
+	}
+
+	if (ckey != -1) {
+		if (color_type != PNG_COLOR_TYPE_PALETTE) {
+			/* FIXME: Should these be truncated or shifted down? */
+			ckey = SDL_MapRGB(surface->format, (Uint8)transv->red, (Uint8)transv->green, (Uint8)transv->blue);
+		}
+		SDL_SetColorKey(surface, SDL_TRUE, ckey);
 	}
 
 	g->Surface = surface;

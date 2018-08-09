@@ -1205,13 +1205,15 @@ void GraphicPlayerPixels(CPlayer &player, const CGraphic &sprite)
 {
 	Assert(PlayerColorIndexCount);
 
-	SDL_LockSurface(sprite.Surface);
+	//SDL_LockSurface(sprite.Surface);
 	std::vector<SDL_Color> sdlColors(player.UnitColors.Colors.begin(), player.UnitColors.Colors.end());
-	SDL_SetColors(sprite.Surface, &sdlColors[0], PlayerColorIndexStart, PlayerColorIndexCount);
+	SDL_SetPaletteColors(sprite.Surface->format->palette, &sdlColors[0], PlayerColorIndexStart, PlayerColorIndexCount);
 	if (sprite.SurfaceFlip) {
-		SDL_SetColors(sprite.SurfaceFlip, &sdlColors[0], PlayerColorIndexStart, PlayerColorIndexCount);
+		//SDL_LockSurface(sprite.SurfaceFlip);
+		SDL_SetPaletteColors(sprite.SurfaceFlip->format->palette, &sdlColors[0], PlayerColorIndexStart, PlayerColorIndexCount);
+		//SDL_UnlockSurface(sprite.SurfaceFlip);
 	}
-	SDL_UnlockSurface(sprite.Surface);
+	//SDL_UnlockSurface(sprite.Surface);
 }
 
 /**
