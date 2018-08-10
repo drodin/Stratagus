@@ -526,7 +526,7 @@ void InitVideoSdl()
 	if (Video.FullScreen) {
 		flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
 	} else {
-		flags |= SDL_RESIZABLE;
+		flags |= SDL_WINDOW_RESIZABLE;
 	}
 
 #if defined(USE_OPENGL) || defined(USE_GLES)
@@ -573,12 +573,14 @@ void InitVideoSdl()
 	if (TheWindow == NULL) {
 		fprintf(stderr, "Couldn't set %dx%dx%d video mode: %s\n",
 				Video.Width, Video.Height, Video.Depth, SDL_GetError());
+#if defined(USE_OPENGL) || defined(USE_GLES)
 		if (UseOpenGL) {
 			fprintf(stderr, "Re-trying video without OpenGL\n");
 			UseOpenGL = false;
 			InitVideoSdl();
 			return;
 		}
+#endif
 		if (Video.FullScreen) {
 			fprintf(stderr, "Re-trying video without fullscreen mode\n");
 			Video.FullScreen = false;
@@ -915,8 +917,8 @@ static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
 								  event.key.keysym.sym, event.key.keysym.sym < 128 ? event.key.keysym.sym : 0);
 			break;
 
-		case SDL_VIDEORESIZE:
-			Video.ResizeScreen(event.resize.w, event.resize.h);
+		case SDL_WINDOWEVENT_RESIZED:
+			Video.ResizeScreen(event.window.data1, event.window.data2);
 			break;
 
 		case SDL_QUIT:

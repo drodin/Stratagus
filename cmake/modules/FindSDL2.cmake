@@ -36,7 +36,13 @@ if(SDL2_LIBRARY_TEMP)
   # So I use a temporary variable until the end so I can set the
   # "real" variable in one-shot.
   if(APPLE)
-    set(SDL2_LIBRARY_TEMP ${SDL2_LIBRARY_TEMP} "-framework Cocoa")
+    find_library(SDL2mail_LIBRARY
+      NAMES SDL2main
+      HINTS
+        ENV SDLDIR
+      PATH_SUFFIXES lib
+    )
+    set(SDL2_LIBRARY_TEMP ${SDL2_LIBRARY_TEMP} ${SDL2mail_LIBRARY} "-framework Cocoa")
   endif()
 
   # For threads, as mentioned Apple doesn't need this.
@@ -76,11 +82,11 @@ endif()
 
 if (SDL2_FOUND)
   if (NOT SDL2_FIND_QUIETLY)
-     MESSAGE( STATUS "sdl2 found: includes in ${SDL2_INCLUDE_DIR}, library in ${SDL2_LIBRARY}")
+     MESSAGE( STATUS "Found SDL2: includes in ${SDL2_INCLUDE_DIR}, library in ${SDL2_LIBRARY}")
   endif (NOT SDL2_FIND_QUIETLY)
 else (THEORA_FOUND)
   if (SDL2_FIND_REQUIRED)
-     MESSAGE( FATAL_ERROR "sdl2 not found")
+     MESSAGE( FATAL_ERROR "Could NOT find SDL2 libraries")
   endif (SDL2_FIND_REQUIRED)
 endif (SDL2_FOUND)
 
