@@ -6,7 +6,7 @@
 		android:smallScreens="true" android:normalScreens="true"
 		android:largeScreens="true" />
 	<application android:label="Stratagus" android:icon="@drawable/icon"
-		android:debuggable="false" android:theme="@style/Theme">
+		android:theme="@style/Theme">
 		<activity android:name=".MainActivity" android:label="Stratagus"
 			android:screenOrientation="landscape" android:configChanges="orientation"
 			android:multiprocess="false" android:launchMode="singleTask">
@@ -25,7 +25,6 @@
 		<activity android:name=".menu.ChooseFolder"
 			android:screenOrientation="landscape" android:configChanges="orientation" />
 	</application>
-	<uses-sdk android:minSdkVersion="5" android:targetSdkVersion="8" />
 	<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"></uses-permission>
 	<uses-permission android:name="android.permission.INTERNET"></uses-permission>
 </manifest>
