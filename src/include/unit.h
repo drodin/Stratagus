@@ -10,7 +10,7 @@
 //
 /**@name unit.h - The unit headerfile. */
 //
-//      (c) Copyright 1998-2007 by Lutz Sammer and Jimmy Salmon
+//      (c) Copyright 1998-2015 by Lutz Sammer, Jimmy Salmon and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -77,19 +77,19 @@ typedef COrder *COrderPtr;
 /*
 ** Configuration of the small (unit) AI.
 */
-#define PRIORITY_FACTOR   0x00001000
+#define PRIORITY_FACTOR   0x00080000
 #define HEALTH_FACTOR     0x00000001
 #define DISTANCE_FACTOR   0x00010000
-#define INRANGE_FACTOR    0x00001000
-#define INRANGE_BONUS     0x00100000
-#define CANATTACK_BONUS   0x00010000
-#define AIPRIORITY_BONUS  0x01000000
+#define INRANGE_FACTOR    0x00008000
+#define INRANGE_BONUS     0x01000000
+#define CANATTACK_BONUS   0x00080000
+#define AIPRIORITY_BONUS  0x04000000
 
 
 /// Called whenever the selected unit was updated
 extern void SelectedUnitChanged();
 
-/// Returns the map diestance between to unittype as locations
+/// Returns the map distance between to unittype as locations
 extern int MapDistanceBetweenTypes(const CUnitType &src, const Vec2i &pos1,
 								   const CUnitType &dst, const Vec2i &pos2);
 
@@ -166,15 +166,17 @@ public:
 	bool CanStoreOrder(COrder *order);
 
 	// Cowards and invisible units don't attack unless ordered.
-	bool IsAgressive() const {
-		return (Type->CanAttack && !Type->Coward
+	bool IsAgressive() const
+	{
+		return (Type->BoolFlag[CANATTACK_INDEX].value && !Type->BoolFlag[COWARD_INDEX].value
 				&& Variable[INVISIBLE_INDEX].Value == 0);
 	}
 
 	/// Returns true, if unit is directly seen by an allied unit.
 	bool IsVisible(const CPlayer &player) const;
 
-	inline bool IsInvisibile(const CPlayer &player) const {
+	inline bool IsInvisibile(const CPlayer &player) const
+	{
 		return (&player != Player && !!Variable[INVISIBLE_INDEX].Value
 				&& !player.IsBothSharedVision(*Player));
 	}
@@ -193,7 +195,8 @@ public:
 	**
 	**  @return        True if alive, false otherwise.
 	*/
-	inline bool IsAliveOnMap() const {
+	inline bool IsAliveOnMap() const
+	{
 		return !Removed && IsAlive();
 	}
 
@@ -204,20 +207,21 @@ public:
 	**
 	**  @return        True if visible, false otherwise.
 	*/
-	inline bool IsVisibleAsGoal(const CPlayer &player) const {
+	inline bool IsVisibleAsGoal(const CPlayer &player) const
+	{
 		// Invisibility
 		if (IsInvisibile(player)) {
 			return false;
 		}
 		// Don't attack revealers
-		if (this->Type->Revealer) {
+		if (this->Type->BoolFlag[REVEALER_INDEX].value) {
 			return false;
 		}
-		if ((player.Type == PlayerComputer && !this->Type->PermanentCloak)
+		if ((player.Type == PlayerComputer && !this->Type->BoolFlag[PERMANENTCLOAK_INDEX].value)
 			|| IsVisible(player) || IsVisibleOnRadar(player)) {
 			return IsAliveOnMap();
 		} else {
-			return Type->VisibleUnderFog
+			return Type->BoolFlag[VISIBLEUNDERFOG_INDEX].value
 				   && (Seen.ByPlayer & (1 << player.Index))
 				   && !(Seen.Destroyed & (1 << player.Index));
 		}
@@ -231,7 +235,8 @@ public:
 	**
 	**  @return        True if visible, false otherwise.
 	*/
-	inline bool IsVisibleOnMap(const CPlayer &player) const {
+	inline bool IsVisibleOnMap(const CPlayer &player) const
+	{
 		return IsAliveOnMap() && !IsInvisibile(player) && IsVisible(player);
 	}
 
@@ -264,7 +269,8 @@ public:
 	 **
 	 **  @return     The distance between in tiles.
 	 */
-	int MapDistanceTo(const CUnit &dst) const {
+	int MapDistanceTo(const CUnit &dst) const
+	{
 		return MapDistanceBetweenTypes(*Type, tilePos, *dst.Type, dst.tilePos);
 	}
 
@@ -279,6 +285,8 @@ public:
 	bool CanMove() const { return Type->CanMove(); }
 
 	int GetDrawLevel() const;
+
+	bool IsAttackRanged(CUnit *goal, const Vec2i &goalPos);
 
 	PixelPos GetMapPixelPosTopLeft() const;
 	PixelPos GetMapPixelPosCenter() const;
@@ -331,6 +339,7 @@ public:
 	// DISPLAY:
 	int         Frame;      /// Image frame: <0 is mirrored
 	CUnitColors *Colors;    /// Player colors
+	bool IndividualUpgrades[UpgradeMax];      /// individual upgrades which the unit has
 
 	signed char IX;         /// X image displacement to map position
 	signed char IY;         /// Y image displacement to map position
@@ -339,26 +348,25 @@ public:
 	int ResourcesHeld;      /// Resources Held by a unit
 
 	unsigned char DamagedType;   /// Index of damage type of unit which damaged this unit
-	unsigned long Attacked; /// gamecycle unit was last attacked
-	unsigned Blink : 3;     /// Let selection rectangle blink
-	unsigned Moving : 1;    /// The unit is moving
-	unsigned ReCast : 1;    /// Recast again next cycle
-	unsigned AutoRepair : 1;    /// True if unit tries to repair on still action.
+	unsigned long Attacked;      /// gamecycle unit was last attacked
+	unsigned Blink : 3;          /// Let selection rectangle blink
+	unsigned Moving : 1;         /// The unit is moving
+	unsigned ReCast : 1;         /// Recast again next cycle
+	unsigned AutoRepair : 1;     /// True if unit tries to repair on still action.
 
-	unsigned Burning : 1;   /// unit is burning
-	unsigned Destroyed : 1; /// unit is destroyed pending reference
-	unsigned Removed : 1;   /// unit is removed (not on map)
-	unsigned Selected : 1;  /// unit is selected
+	unsigned Burning : 1;        /// unit is burning
+	unsigned Destroyed : 1;      /// unit is destroyed pending reference
+	unsigned Removed : 1;        /// unit is removed (not on map)
+	unsigned Selected : 1;       /// unit is selected
 
 	unsigned Constructed : 1;    /// Unit is in construction
 	unsigned Active : 1;         /// Unit is active for AI
 	unsigned Boarded : 1;        /// Unit is on board a transporter.
-	unsigned CacheLock : 1;        /// Unit is on lock by unitcache operations.
+	unsigned CacheLock : 1;      /// Unit is on lock by unitcache operations.
 
-	/** set to random 1..100 when MakeUnit()
-	** used for fancy buildings
-	*/
-	unsigned Rs : 8;
+	unsigned Summoned : 1;       /// Unit is summoned using spells.
+	unsigned Waiting : 1;        /// Unit is waiting and playing its still animation
+	unsigned MineLow : 1;        /// This mine got a notification about its resources being low
 
 	unsigned TeamSelected;  /// unit is selected by a team member.
 	CPlayer *RescuedFrom;        /// The original owner of a rescued unit.
@@ -375,16 +383,16 @@ public:
 		signed char IY;                     /// seen Y image displacement to map position
 		unsigned    Constructed : 1;        /// Unit seen construction
 		unsigned    State : 3;              /// Unit seen build/upgrade state
-		unsigned    Destroyed : PlayerMax;  /// Unit seen destroyed or not
-		unsigned    ByPlayer : PlayerMax;   /// Track unit seen by player
+unsigned    Destroyed : PlayerMax;  /// Unit seen destroyed or not
+unsigned    ByPlayer : PlayerMax;   /// Track unit seen by player
 	} Seen;
 
 	CVariable *Variable; /// array of User Defined variables.
 
 	unsigned long TTL;  /// time to live
 
-	int GroupId;        /// unit belongs to this group id
-	int LastGroup;      /// unit belongs to this last group
+	unsigned int GroupId;       /// unit belongs to this group id
+	unsigned int LastGroup;     /// unit belongs to this last group
 
 	unsigned int Wait;          /// action counter
 	int Threshold;              /// The counter while ai unit couldn't change target.
@@ -394,7 +402,7 @@ public:
 		const CAnimation *CurrAnim;  /// CurrAnim
 		int Wait;                    /// Wait
 		int Unbreakable;             /// Unbreakable
-	} Anim;
+	} Anim, WaitBackup;
 
 
 	std::vector<COrder *> Orders; /// orders to process
@@ -403,6 +411,7 @@ public:
 	COrder *CriticalOrder;      /// order to do as possible in breakable animation.
 
 	char *AutoCastSpell;        /// spells to auto cast
+	int *SpellCoolDownTimers;   /// how much time unit need to wait before spell will be ready
 
 	CUnit *Goal; /// Generic/Teleporter goal pointer
 };
@@ -421,18 +430,36 @@ class CPreference
 {
 public:
 	CPreference() : ShowSightRange(false), ShowReactionRange(false),
-		ShowAttackRange(false), ShowMessages(true),
-		BigScreen(false), ShowOrders(0), ShowNameDelay(0), ShowNameTime(0) {};
+		ShowAttackRange(false), ShowMessages(true), BigScreen(false),
+		PauseOnLeave(true), AiExplores(true), GrayscaleIcons(false),
+		IconsShift(false), StereoSound(true), MineNotifications(false),
+		DeselectInMine(false), NoStatusLineTooltips(false),
+		IconFrameG(NULL), PressedIconFrameG(NULL),
+		ShowOrders(0), ShowNameDelay(0), ShowNameTime(0), AutosaveMinutes(5) {};
 
-	bool ShowSightRange;     /// Show sight range.
-	bool ShowReactionRange;  /// Show reaction range.
-	bool ShowAttackRange;    /// Show attack range.
-	bool ShowMessages;		 /// Show messages.
-	bool BigScreen;			 /// If true, shows the big screen(without panels)
+	bool ShowSightRange;       /// Show sight range.
+	bool ShowReactionRange;    /// Show reaction range.
+	bool ShowAttackRange;      /// Show attack range.
+	bool ShowMessages;		   /// Show messages.
+	bool BigScreen;			   /// If true, shows the big screen(without panels)
+	bool PauseOnLeave;         /// If true, game pauses when cursor is gone
+	bool AiExplores;           /// If true, AI sends explorers to search for resources (almost useless thing)
+	bool GrayscaleIcons;       /// Use grayscaled icons for unavailable units, upgrades, etc
+	bool IconsShift;           /// Shift icons slightly when you press on them
+	bool StereoSound;          /// Enables/disables stereo sound effects
+	bool MineNotifications;    /// Show mine is running low/depleted messages
+	bool DeselectInMine;       /// Deselect peasants in mines
+	bool NoStatusLineTooltips; /// Don't show messages on status line
 
-	int  ShowOrders;         /// How many second show orders of unit on map.
-	int  ShowNameDelay;      /// How many cycles need to wait until unit's name popup will appear.
-	int  ShowNameTime;       /// How many cycles need to show unit's name popup.
+	int ShowOrders;			/// How many second show orders of unit on map.
+	int ShowNameDelay;		/// How many cycles need to wait until unit's name popup will appear.
+	int ShowNameTime;		/// How many cycles need to show unit's name popup.
+	int AutosaveMinutes;	/// Autosave the game every X minutes; autosave is disabled if the value is 0
+
+	std::string SF2Soundfont;/// Path to SF2 soundfont
+
+	CGraphic *IconFrameG;
+	CGraphic *PressedIconFrameG;
 };
 
 extern CPreference Preference;
@@ -448,17 +475,14 @@ extern unsigned long ShowNameDelay;     /// Delay to show unit's name
 extern unsigned long ShowNameTime;      /// Show unit's name for some time
 extern bool EnableTrainingQueue;               /// Config: training queues enabled
 extern bool EnableBuildingCapture;             /// Config: building capture enabled
-extern bool RevealAttacker;				       /// Config: reveal attacker enabled
+extern bool RevealAttacker;                    /// Config: reveal attacker enabled
 extern int ResourcesMultiBuildersMultiplier;   /// Config: spend resources for building with multiple workers
 extern const CViewport *CurrentViewport; /// CurrentViewport
 extern void DrawUnitSelection(const CViewport &vp, const CUnit &unit);
 extern void (*DrawSelection)(IntColor, int, int, int, int);
-extern int MaxSelectable;                  /// How many units could be selected
 
-extern CUnit **Selected;                    /// currently selected units
-extern CUnit **TeamSelected[PlayerMax];     /// teams currently selected units
-extern int     NumSelected;                 /// how many units selected
-extern int     TeamNumSelected[PlayerMax];  /// Number of Units a team member has selected
+extern unsigned int MaxSelectable;    /// How many units could be selected
+extern std::vector<CUnit *> Selected; /// currently selected units
 
 /*----------------------------------------------------------------------------
 -- Functions
@@ -474,6 +498,8 @@ void UpdateUnitSightRange(CUnit &unit);
 extern CUnit *MakeUnit(const CUnitType &type, CPlayer *player);
 /// Create a new unit and place on map
 extern CUnit *MakeUnitAndPlace(const Vec2i &pos, const CUnitType &type, CPlayer *player);
+/// Find the nearest position at which unit can be placed.
+void FindNearestDrop(const CUnitType &type, const Vec2i &goalPos, Vec2i &resPos, int heading);
 /// Handle the loss of a unit (food,...)
 extern void UnitLost(CUnit &unit);
 /// Remove the Orders of a Unit
@@ -535,7 +561,7 @@ extern int ExtraDeathIndex(const char *death);
 extern CUnit *UnitOnScreen(int x, int y);
 
 /// Let a unit die
-extern void LetUnitDie(CUnit &unit);
+extern void LetUnitDie(CUnit &unit, bool suicide = false);
 /// Destroy all units inside another unit
 extern void DestroyAllInside(CUnit &source);
 /// Calculate some value to measure the unit's priority for AI
@@ -549,7 +575,7 @@ extern int ViewPointDistance(const Vec2i &pos);
 extern int ViewPointDistanceToUnit(const CUnit &dest);
 
 /// Can this unit-type attack the other (destination)
-extern int CanTarget(const CUnitType *type, const CUnitType *dest);
+extern int CanTarget(const CUnitType &type, const CUnitType &dest);
 /// Can transporter transport the other unit
 extern int CanTransport(const CUnit &transporter, const CUnit &unit);
 
@@ -598,25 +624,19 @@ extern void ShowOrder(const CUnit &unit);
 
 // in groups.c
 
-/// Initialize data structures for groups
-extern void InitGroups();
 /// Save groups
 extern void SaveGroups(CFile &file);
 /// Cleanup groups
 extern void CleanGroups();
-
-// 2 functions to conseal the groups internal data structures...
-/// Get the number of units in a particular group
-extern int GetNumberUnitsOfGroup(int num, GroupSelectionMode mode = SELECTABLE_BY_RECTANGLE_ONLY);
 /// Get the array of units of a particular group
-extern CUnit **GetUnitsOfGroup(int num);
+extern const std::vector<CUnit *> &GetUnitsOfGroup(int num);
 
 /// Remove all units from a group
 extern void ClearGroup(int num);
 /// Add the array of units to the group
-extern void AddToGroup(CUnit **units, int nunits, int num);
+extern void AddToGroup(CUnit **units, unsigned int nunits, int num);
 /// Set the contents of a particular group with an array of units
-extern void SetGroup(CUnit **units, int nunits, int num);
+extern void SetGroup(CUnit **units, unsigned int nunits, int num);
 /// Remove a unit from a group
 extern void RemoveUnitFromGroups(CUnit &unit);
 /// Register CCL group features
@@ -626,7 +646,7 @@ extern bool IsGroupTainted(int num);
 // in selection.c
 
 /// Check if unit is the currently only selected
-#define IsOnlySelected(unit) (NumSelected == 1 && Selected[0] == &(unit))
+extern bool IsOnlySelected(const CUnit &unit);
 
 ///  Save selection to restore after.
 extern void SaveSelection();
@@ -635,7 +655,7 @@ extern void RestoreSelection();
 /// Clear current selection
 extern void UnSelectAll();
 /// Changed TeamUnit Selection
-extern void ChangeTeamSelectedUnits(CPlayer &player, const std::vector<CUnit *> &units, int adjust);
+extern void ChangeTeamSelectedUnits(CPlayer &player, const std::vector<CUnit *> &units);
 /// Add a unit to selection
 extern int SelectUnit(CUnit &unit);
 /// Select one unit as selection
@@ -667,8 +687,6 @@ extern int AddSelectedGroundUnitsInRectangle(const PixelPos &corner_topleft, con
 /// Add flying units in the selection rectangle to the current selection
 extern int AddSelectedAirUnitsInRectangle(const PixelPos &corner_topleft, const PixelPos &corner_bottomright);
 
-/// Init selections
-extern void InitSelections();
 /// Save current selection state
 extern void SaveSelections(CFile &file);
 /// Clean up selections

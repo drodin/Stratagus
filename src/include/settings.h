@@ -32,6 +32,7 @@
 
 //@{
 
+#include <string>
 #include <vector>
 
 /*----------------------------------------------------------------------------
@@ -47,9 +48,11 @@ class CMap;
 ----------------------------------------------------------------------------*/
 
 struct SettingsPresets {
-	int Race;  /// Race of the player
-	int Team;  /// Team of player -- NOT SELECTABLE YET
-	int Type;  /// Type of player (for network games)
+	int PlayerColor;          /// Color of a player
+	std::string AIScript;     /// AI script for computer to use
+	int Race;                 /// Race of the player
+	int Team;                 /// Team of player
+	int Type;                 /// Type of player (for network games)
 };
 
 /**
@@ -57,7 +60,7 @@ struct SettingsPresets {
 **
 **  This structure one day should contain all common game settings,
 **  in-game, or pre-start, and the individual (per player) presets.
-**  This allows central maintainance, easy (network-)negotiation,
+**  This allows central maintenance, easy (network-)negotiation,
 **  simplifies load/save/reinitialization, etc...
 **
 */
@@ -75,6 +78,7 @@ struct Settings {
 	int Difficulty;  /// Terrain type (summer,winter,...)
 	int GameType;    /// Game type (melee, free for all,...)
 	bool NoFogOfWar; /// No fog of war
+	bool Inside;     /// If game uses interior tileset
 	int RevealMap;   /// Reveal map
 	int MapRichness; /// Map richness
 };

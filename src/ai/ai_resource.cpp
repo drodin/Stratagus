@@ -10,7 +10,8 @@
 //
 /**@name ai_resource.cpp - AI resource manager. */
 //
-//      (c) Copyright 2000-2005 by Lutz Sammer and Antonis Chaniotis.
+//      (c) Copyright 2000-2015 by Lutz Sammer, Antonis Chaniotis
+//		and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -45,6 +46,7 @@
 #include "map.h"
 #include "pathfinder.h"
 #include "player.h"
+#include "tileset.h"
 #include "unit.h"
 #include "unit_find.h"
 #include "unittype.h"
@@ -129,13 +131,13 @@ static int AiCheckSupply(const PlayerAi &pai, const CUnitType &type)
 	int remaining = 0;
 	for (unsigned int i = 0; i < pai.UnitTypeBuilt.size(); ++i) {
 		const AiBuildQueue &queue = pai.UnitTypeBuilt[i];
-		if (queue.Type->Supply) {
-			remaining += queue.Made * queue.Type->Supply;
+		if (queue.Type->Stats[pai.Player->Index].Variables[SUPPLY_INDEX].Value) {
+			remaining += queue.Made * queue.Type->Stats[pai.Player->Index].Variables[SUPPLY_INDEX].Value;
 		}
 	}
 
 	// We are already out of food.
-	remaining += pai.Player->Supply - pai.Player->Demand - type.Demand;
+	remaining += pai.Player->Supply - pai.Player->Demand - type.Stats[pai.Player->Index].Variables[DEMAND_INDEX].Value;
 	if (remaining < 0) {
 		return 0;
 	}
@@ -143,7 +145,7 @@ static int AiCheckSupply(const PlayerAi &pai, const CUnitType &type)
 	for (unsigned int i = 0; i < pai.UnitTypeBuilt.size(); ++i) {
 		const AiBuildQueue &queue = pai.UnitTypeBuilt[i];
 
-		remaining -= queue.Made * queue.Type->Demand;
+		remaining -= queue.Made * queue.Type->Stats[pai.Player->Index].Variables[DEMAND_INDEX].Value;
 		if (remaining < 0) {
 			return 0;
 		}
@@ -169,7 +171,8 @@ class IsAEnemyUnitOf
 {
 public:
 	explicit IsAEnemyUnitOf(const CPlayer &_player) : player(&_player) {}
-	bool operator()(const CUnit *unit) const {
+	bool operator()(const CUnit *unit) const
+	{
 		return unit->IsVisibleAsGoal(*player) && unit->IsEnemy(*player);
 	}
 private:
@@ -182,10 +185,11 @@ public:
 	explicit IsAEnemyUnitWhichCanCounterAttackOf(const CPlayer &_player, const CUnitType &_type) :
 		player(&_player), type(&_type)
 	{}
-	bool operator()(const CUnit *unit) const {
+	bool operator()(const CUnit *unit) const
+	{
 		return unit->IsVisibleAsGoal(*player)
 			   && unit->IsEnemy(*player)
-			   && CanTarget(unit->Type, type);
+			   && CanTarget(*unit->Type, *type);
 	}
 private:
 	const CPlayer *player;
@@ -267,7 +271,7 @@ static int AiBuildBuilding(const CUnitType &type, CUnitType &building, const Vec
 {
 	std::vector<CUnit *> table;
 
-	FindPlayerUnitsByType(*AiPlayer->Player, type, table);
+	FindPlayerUnitsByType(*AiPlayer->Player, type, table, true);
 
 	int num = 0;
 
@@ -313,7 +317,7 @@ static bool AiRequestedTypeAllowed(const CPlayer &player, const CUnitType &type)
 	for (size_t i = 0; i != size; ++i) {
 		CUnitType &builder = *AiHelpers.Build[type.Slot][i];
 
-		if (player.UnitTypesCount[builder.Slot] > 0
+		if (player.UnitTypesAiActiveCount[builder.Slot] > 0
 			&& CheckDependByType(player, type)) {
 			return true;
 		}
@@ -357,10 +361,12 @@ void AiNewDepotRequest(CUnit &worker)
 #endif
 	Assert(worker.CurrentAction() == UnitActionResource);
 	COrder_Resource &order = *static_cast<COrder_Resource *>(worker.CurrentOrder());
+	const int resource = order.GetCurrentResource();
 
 	const Vec2i pos = order.GetHarvestLocation();
+	const int range = 15;
 
-	if (pos.x != -1 && NULL != FindDepositNearLoc(*worker.Player, pos, 10, worker.CurrentResource)) {
+	if (pos.x != -1 && NULL != FindDepositNearLoc(*worker.Player, pos, range, resource)) {
 		/*
 		 * New Depot has just be finished and worker just return to old depot
 		 * (far away) from new Deopt.
@@ -375,10 +381,10 @@ void AiNewDepotRequest(CUnit &worker)
 
 	AiGetBuildRequestsCount(*worker.Player->Ai, counter);
 
-	const int n = AiHelpers.Depots[worker.CurrentResource - 1].size();
+	const int n = AiHelpers.Depots[resource - 1].size();
 
 	for (int i = 0; i < n; ++i) {
-		CUnitType &type = *AiHelpers.Depots[worker.CurrentResource - 1][i];
+		CUnitType &type = *AiHelpers.Depots[resource - 1][i];
 
 		if (counter[type.Slot]) { // Already ordered.
 			return;
@@ -421,6 +427,82 @@ void AiNewDepotRequest(CUnit &worker)
 		}
 		*/
 	}
+}
+
+class IsAWorker
+{
+public:
+	explicit IsAWorker() {}
+	bool operator()(const CUnit *const unit) const
+	{
+		return (unit->Type->BoolFlag[HARVESTER_INDEX].value && unit->Type->ResInfo && !unit->Removed);
+	}
+};
+
+class CompareDepotsByDistance
+{
+public:
+	explicit CompareDepotsByDistance(const CUnit &worker) : worker(worker) {}
+	bool operator()(const CUnit *lhs, const CUnit *rhs) const
+	{
+		return lhs->MapDistanceTo(worker) < rhs->MapDistanceTo(worker);
+	}
+private:
+	const CUnit &worker;
+};
+
+/**
+**  Get a suitable depot for better resource harvesting.
+**
+**  @param worker    Worker itself.
+**  @param oldDepot  Old assigned depot.
+**  @param resUnit   Resource to harvest from, if succeed
+**
+**  @return          new depot if found, NULL otherwise.
+*/
+CUnit *AiGetSuitableDepot(const CUnit &worker, const CUnit &oldDepot, CUnit **resUnit)
+{
+	Assert(worker.CurrentAction() == UnitActionResource);
+	COrder_Resource &order = *static_cast<COrder_Resource *>(worker.CurrentOrder());
+	const int resource = order.GetCurrentResource();
+	std::vector<CUnit *> depots;
+	const Vec2i offset(MaxMapWidth, MaxMapHeight);
+
+	for (std::vector<CUnit *>::iterator it = worker.Player->UnitBegin(); it != worker.Player->UnitEnd(); ++it) {
+		CUnit &unit = **it;
+
+		if (unit.Type->CanStore[resource] && !unit.IsUnusable()) {
+			depots.push_back(&unit);
+		}
+	}
+	// If there aren't any alternatives, exit
+	if (depots.size() < 2) {
+		return NULL;
+	}
+	std::sort(depots.begin(), depots.end(), CompareDepotsByDistance(worker));
+
+	for (std::vector<CUnit *>::iterator it = depots.begin(); it != depots.end(); ++it) {
+		CUnit &unit = **it;
+
+		const unsigned int tooManyWorkers = 15;
+		const int range = 15;
+
+		if (&oldDepot == &unit) {
+			continue;
+		}
+		if (unit.Refs > tooManyWorkers) {
+			continue;
+		}
+		if (AiEnemyUnitsInDistance(worker, range)) {
+			continue;
+		}
+		CUnit *res = UnitFindResource(worker, unit, range, resource, unit.Player->AiEnabled);
+		if (res) {
+			*resUnit = res;
+			return &unit;
+		}
+	}
+	return NULL;
 }
 
 /**
@@ -472,8 +554,8 @@ static bool AiRequestSupply()
 		for (int c = 1; c < MaxCosts; ++c) {
 			cache[j].unit_cost += type.Stats[AiPlayer->Player->Index].Costs[c];
 		}
-		cache[j].unit_cost += type.Supply - 1;
-		cache[j].unit_cost /= type.Supply;
+		cache[j].unit_cost += type.Stats[AiPlayer->Player->Index].Variables[SUPPLY_INDEX].Value - 1;
+		cache[j].unit_cost /= type.Stats[AiPlayer->Player->Index].Variables[SUPPLY_INDEX].Value;
 		cache[j++].type = &type;
 		Assert(j < 16);
 	}
@@ -546,7 +628,7 @@ static bool AiTrainUnit(const CUnitType &type, CUnitType &what)
 {
 	std::vector<CUnit *> table;
 
-	FindPlayerUnitsByType(*AiPlayer->Player, type, table);
+	FindPlayerUnitsByType(*AiPlayer->Player, type, table, true);
 	for (size_t i = 0; i != table.size(); ++i) {
 		CUnit &unit = *table[i];
 
@@ -589,18 +671,18 @@ static int AiMakeUnit(CUnitType &typeToMake, const Vec2i &nearPos)
 			tablep = &AiHelpers.Train;
 		}
 		if (type.Slot > n) { // Oops not known.
-			DebugPrint("%d: AiMakeUnit I: Nothing known about `%s'\n"
+			DebugPrint("%d: AiMakeUnit I: Nothing known about '%s'\n"
 					   _C_ AiPlayer->Player->Index _C_ type.Ident.c_str());
 			continue;
 		}
 		std::vector<CUnitType *> &table = (*tablep)[type.Slot];
 		if (table.empty()) { // Oops not known.
-			DebugPrint("%d: AiMakeUnit II: Nothing known about `%s'\n"
+			DebugPrint("%d: AiMakeUnit II: Nothing known about '%s'\n"
 					   _C_ AiPlayer->Player->Index _C_ type.Ident.c_str());
 			continue;
 		}
 
-		const int *unit_count = AiPlayer->Player->UnitTypesCount;
+		const int *unit_count = AiPlayer->Player->UnitTypesAiActiveCount;
 		for (unsigned int i = 0; i < table.size(); ++i) {
 			//
 			// The type for builder/trainer is available
@@ -635,7 +717,7 @@ static bool AiResearchUpgrade(const CUnitType &type, CUpgrade &what)
 {
 	std::vector<CUnit *> table;
 
-	FindPlayerUnitsByType(*AiPlayer->Player, type, table);
+	FindPlayerUnitsByType(*AiPlayer->Player, type, table, true);
 	for (size_t i = 0; i != table.size(); ++i) {
 		CUnit &unit = *table[i];
 
@@ -668,18 +750,18 @@ void AiAddResearchRequest(CUpgrade *upgrade)
 	std::vector<std::vector<CUnitType *> > &tablep = AiHelpers.Research;
 
 	if (upgrade->ID > n) { // Oops not known.
-		DebugPrint("%d: AiAddResearchRequest I: Nothing known about `%s'\n"
+		DebugPrint("%d: AiAddResearchRequest I: Nothing known about '%s'\n"
 				   _C_ AiPlayer->Player->Index _C_ upgrade->Ident.c_str());
 		return;
 	}
 	std::vector<CUnitType *> &table = tablep[upgrade->ID];
 	if (table.empty()) { // Oops not known.
-		DebugPrint("%d: AiAddResearchRequest II: Nothing known about `%s'\n"
+		DebugPrint("%d: AiAddResearchRequest II: Nothing known about '%s'\n"
 				   _C_ AiPlayer->Player->Index _C_ upgrade->Ident.c_str());
 		return;
 	}
 
-	const int *unit_count = AiPlayer->Player->UnitTypesCount;
+	const int *unit_count = AiPlayer->Player->UnitTypesAiActiveCount;
 	for (unsigned int i = 0; i < table.size(); ++i) {
 		// The type is available
 		if (unit_count[table[i]->Slot]
@@ -704,7 +786,7 @@ static bool AiUpgradeTo(const CUnitType &type, CUnitType &what)
 	std::vector<CUnit *> table;
 
 	// Remove all units already doing something.
-	FindPlayerUnitsByType(*AiPlayer->Player, type, table);
+	FindPlayerUnitsByType(*AiPlayer->Player, type, table, true);
 	for (size_t i = 0; i != table.size(); ++i) {
 		CUnit &unit = *table[i];
 
@@ -729,6 +811,9 @@ void AiAddUpgradeToRequest(CUnitType &type)
 		AiPlayer->NeededMask |= resourceNeeded;
 		return;
 	}
+	if (AiPlayer->Player->CheckLimits(type) < 0) {
+		return;
+	}
 	//
 	// Check if we have a place for the upgrade to.
 	//
@@ -736,18 +821,18 @@ void AiAddUpgradeToRequest(CUnitType &type)
 	std::vector<std::vector<CUnitType *> > &tablep = AiHelpers.Upgrade;
 
 	if (type.Slot > n) { // Oops not known.
-		DebugPrint("%d: AiAddUpgradeToRequest I: Nothing known about `%s'\n"
+		DebugPrint("%d: AiAddUpgradeToRequest I: Nothing known about '%s'\n"
 				   _C_ AiPlayer->Player->Index _C_ type.Ident.c_str());
 		return;
 	}
 	std::vector<CUnitType *> &table = tablep[type.Slot];
 	if (table.empty()) { // Oops not known.
-		DebugPrint("%d: AiAddUpgradeToRequest II: Nothing known about `%s'\n"
+		DebugPrint("%d: AiAddUpgradeToRequest II: Nothing known about '%s'\n"
 				   _C_ AiPlayer->Player->Index _C_ type.Ident.c_str());
 		return;
 	}
 
-	const int *unit_count = AiPlayer->Player->UnitTypesCount;
+	const int *unit_count = AiPlayer->Player->UnitTypesAiActiveCount;
 	for (unsigned int i = 0; i < table.size(); ++i) {
 		//
 		// The type is available
@@ -765,9 +850,9 @@ void AiAddUpgradeToRequest(CUnitType &type)
 */
 static void AiCheckingWork()
 {
-	// Suppy has the highest priority
+	// Supply has the highest priority
 	if (AiPlayer->NeedSupply) {
-		if (AiPlayer->UnitTypeBuilt.empty() || AiPlayer->UnitTypeBuilt[0].Type->Supply == 0) {
+		if (AiPlayer->UnitTypeBuilt.empty() || AiPlayer->UnitTypeBuilt[0].Type->Stats[AiPlayer->Player->Index].Variables[SUPPLY_INDEX].Value == 0) {
 			AiPlayer->NeedSupply = false;
 			AiRequestSupply();
 		}
@@ -777,14 +862,15 @@ static void AiCheckingWork()
 	for (int i = 0; i < sz; ++i) {
 		AiBuildQueue &queue = AiPlayer->UnitTypeBuilt[AiPlayer->UnitTypeBuilt.size() - sz + i];
 		CUnitType &type = *queue.Type;
+		bool new_supply = false;
 
 		// FIXME: must check if requirements are fulfilled.
 		// Buildings can be destroyed.
 
 		// Check if we have enough food.
-		if (type.Demand && !AiCheckSupply(*AiPlayer, type)) {
+		if (type.Stats[AiPlayer->Player->Index].Variables[DEMAND_INDEX].Value && !AiCheckSupply(*AiPlayer, type)) {
 			AiPlayer->NeedSupply = true;
-			AiRequestSupply();
+			new_supply = true;
 		}
 		// Check limits, AI should be broken if reached.
 		if (queue.Want > queue.Made && AiPlayer->Player->CheckLimits(type) < 0) {
@@ -811,6 +897,10 @@ static void AiCheckingWork()
 					queue.Wait = GameCycle + 450;
 				}
 			}
+		}
+		if (new_supply) {
+			// trigger this last, because it may re-arrange the queue and invalidate our queue item
+			AiRequestSupply();
 		}
 	}
 }
@@ -947,7 +1037,7 @@ static void AiCollectResources()
 	const int n = AiPlayer->Player->GetUnitCount();
 	for (int i = 0; i < n; ++i) {
 		CUnit &unit = AiPlayer->Player->GetUnit(i);
-		if (!unit.Type->Harvester) {
+		if (!unit.Type->BoolFlag[HARVESTER_INDEX].value) {
 			continue;
 		}
 
@@ -1159,17 +1249,11 @@ static bool AiRepairBuilding(const CPlayer &player, const CUnitType &type, CUnit
 		return false;
 	}
 
-	// Remove all workers not mining. on the way building something
-	// FIXME: It is not clever to use workers with gold
-	// Idea: Antonis: Put the rest of the workers in a table in case
-	// miners can't reach but others can. This will be useful if AI becomes
-	// more flexible (e.g.: transports workers to an island)
-	// FIXME: too hardcoded, not nice, needs improvement.
-	// FIXME: too many workers repair the same building!
-
+	// We need to send all nearby free workers to repair that building
+	// AI shouldn't send workers that are far away from repair point
 	// Selection of mining workers.
 	std::vector<CUnit *> table;
-	FindPlayerUnitsByType(*AiPlayer->Player, type, table);
+	FindPlayerUnitsByType(*AiPlayer->Player, type, table, true);
 	int num = 0;
 	for (size_t i = 0; i != table.size(); ++i) {
 		CUnit &unit = *table[i];
@@ -1190,7 +1274,7 @@ static bool AiRepairBuilding(const CPlayer &player, const CUnitType &type, CUnit
 
 	terrainTraversal.PushUnitPosAndNeighboor(building);
 
-	const int maxRange = 100;
+	const int maxRange = 15;
 	const int movemask = type.MovementMask & ~(MapFieldLandUnit | MapFieldAirUnit | MapFieldSeaUnit);
 	CUnit *unit = NULL;
 	UnitFinder unitFinder(player, table, maxRange, movemask, &unit);
@@ -1216,18 +1300,18 @@ static int AiRepairUnit(CUnit &unit)
 	std::vector<std::vector<CUnitType *> > &tablep = AiHelpers.Repair;
 	const CUnitType &type = *unit.Type;
 	if (type.Slot > n) { // Oops not known.
-		DebugPrint("%d: AiRepairUnit I: Nothing known about `%s'\n"
+		DebugPrint("%d: AiRepairUnit I: Nothing known about '%s'\n"
 				   _C_ AiPlayer->Player->Index _C_ type.Ident.c_str());
 		return 0;
 	}
 	std::vector<CUnitType *> &table = tablep[type.Slot];
 	if (table.empty()) { // Oops not known.
-		DebugPrint("%d: AiRepairUnit II: Nothing known about `%s'\n"
+		DebugPrint("%d: AiRepairUnit II: Nothing known about '%s'\n"
 				   _C_ AiPlayer->Player->Index _C_ type.Ident.c_str());
 		return 0;
 	}
 
-	const int *unit_count = AiPlayer->Player->UnitTypesCount;
+	const int *unit_count = AiPlayer->Player->UnitTypesAiActiveCount;
 	for (unsigned int i = 0; i < table.size(); ++i) {
 		//
 		// The type is available
@@ -1356,6 +1440,9 @@ void AiAddUnitTypeRequest(CUnitType &type, int count)
 */
 void AiExplore(const Vec2i &pos, int mask)
 {
+	if (!Preference.AiExplores) {
+		return;
+	}
 	AiExplorationRequest req(pos, mask);
 
 	// Link into the exploration requests list

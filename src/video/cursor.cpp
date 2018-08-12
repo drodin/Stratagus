@@ -42,6 +42,9 @@
 #include "editor.h"
 #include "interface.h"
 #include "map.h"
+#include "settings.h"
+#include "tileset.h"
+#include "translate.h"
 #include "ui.h"
 #include "unit.h"
 #include "unittype.h"
@@ -99,7 +102,7 @@ void LoadCursors(const std::string &race)
 		}
 
 		if (cursor.G && !cursor.G->IsLoaded()) {
-			ShowLoadProgress("Cursor %s", cursor.G->File.c_str());
+			ShowLoadProgress(_("Cursor %s"), cursor.G->File.c_str());
 			cursor.G->Load();
 			cursor.G->UseDisplayFormat();
 		}
@@ -127,7 +130,7 @@ CCursor *CursorByIdent(const std::string &ident)
 			return &cursor;
 		}
 	}
-	DebugPrint("Cursor `%s' not found, please check your code.\n" _C_ ident.c_str());
+	DebugPrint("Cursor '%s' not found, please check your code.\n" _C_ ident.c_str());
 	return NULL;
 }
 
@@ -180,7 +183,7 @@ static void DrawBuildingCursor()
 	PushClipping();
 	vp.SetClipping();
 	DrawShadow(*CursorBuilding, CursorBuilding->StillFrame, screenPos);
-	DrawUnitType(*CursorBuilding, CursorBuilding->Sprite, ThisPlayer->Index,
+	DrawUnitType(*CursorBuilding, CursorBuilding->Sprite, GameSettings.Presets[ThisPlayer->Index].PlayerColor,
 				 CursorBuilding->StillFrame, screenPos);
 	if (CursorBuilding->CanAttack && CursorBuilding->Stats->Variables[ATTACKRANGE_INDEX].Value > 0) {
 		const PixelPos center(screenPos + CursorBuilding->GetPixelSize() / 2);
@@ -192,9 +195,9 @@ static void DrawBuildingCursor()
 	//  Draw the allow overlay
 	//
 	int f;
-	if (NumSelected) {
+	if (!Selected.empty()) {
 		f = 1;
-		for (int i = 0; f && i < NumSelected; ++i) {
+		for (size_t i = 0; f && i < Selected.size(); ++i) {
 			f = ((ontop = CanBuildHere(Selected[i], *CursorBuilding, mpos)) != NULL);
 			// Assign ontop or NULL
 			ontop = (ontop == Selected[i] ? NULL : ontop);
@@ -221,7 +224,7 @@ static void DrawBuildingCursor()
 
 			if (f && (ontop ||
 					  CanBuildOn(posIt, MapFogFilterFlags(*ThisPlayer, posIt,
-														  mask & ((NumSelected && Selected[0]->tilePos == posIt) ?
+														  mask & ((!Selected.empty() && Selected[0]->tilePos == posIt) ?
 																  ~(MapFieldLandUnit | MapFieldSeaUnit) : -1))))
 				&& Map.Field(posIt)->playerInfo.IsExplored(*ThisPlayer)) {
 				color = ColorGreen;
@@ -258,7 +261,12 @@ void DrawCursor()
 	}
 	const PixelPos pos = CursorScreenPos - GameCursor->HotPos;
 
-	if (!UseOpenGL && !GameRunning && !Editor.Running) {
+#if defined(USE_OPENGL) || defined(USE_GLES)
+	if (!UseOpenGL &&
+#else
+	if (
+#endif
+		!GameRunning && !Editor.Running) {
 		if (!HiddenSurface
 			|| HiddenSurface->w != GameCursor->G->getWidth()
 			|| HiddenSurface->h != GameCursor->G->getHeight()) {
@@ -277,7 +285,7 @@ void DrawCursor()
 												 TheScreen->format->Amask);
 		}
 
-		SDL_Rect srcRect = { pos.x, pos.y, GameCursor->G->getWidth(), GameCursor->G->getHeight()};
+		SDL_Rect srcRect = { Sint16(pos.x), Sint16(pos.y), Uint16(GameCursor->G->getWidth()), Uint16(GameCursor->G->getHeight())};
 		SDL_BlitSurface(TheScreen, &srcRect, HiddenSurface, NULL);
 	}
 
@@ -293,9 +301,14 @@ void DrawCursor()
 */
 void HideCursor()
 {
-	if (!UseOpenGL && !GameRunning && !Editor.Running && GameCursor) {
+#if defined(USE_OPENGL) || defined(USE_GLES)
+	if (!UseOpenGL &&
+#else
+	if (
+#endif
+		!GameRunning && !Editor.Running && GameCursor) {
 		const PixelPos pos = CursorScreenPos - GameCursor->HotPos;
-		SDL_Rect dstRect = {pos.x, pos.y, 0, 0 };
+		SDL_Rect dstRect = {Sint16(pos.x), Sint16(pos.y), 0, 0 };
 		SDL_BlitSurface(HiddenSurface, NULL, TheScreen, &dstRect);
 	}
 }
@@ -373,25 +386,9 @@ static int CclDefineCursor(lua_State *l)
 		} else if (!strcmp(value, "File")) {
 			file = LuaToString(l, -1);
 		} else if (!strcmp(value, "HotSpot")) {
-			if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 2) {
-				LuaError(l, "incorrect argument");
-			}
-			lua_rawgeti(l, -1, 1);
-			hotpos.x = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, -1, 2);
-			hotpos.y = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			CclGetPos(l, &hotpos.x, &hotpos.y);
 		} else if (!strcmp(value, "Size")) {
-			if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 2) {
-				LuaError(l, "incorrect argument");
-			}
-			lua_rawgeti(l, -1, 1);
-			w = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, -1, 2);
-			h = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			CclGetPos(l, &w, &h);
 		} else if (!strcmp(value, "Rate")) {
 			rate = LuaToNumber(l, -1);
 		} else {

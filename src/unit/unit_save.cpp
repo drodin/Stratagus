@@ -177,6 +177,15 @@ void SaveUnit(const CUnit &unit, CFile &file)
 	if (unit.Selected) {
 		file.printf(" \"selected\",");
 	}
+	if (unit.Summoned) {
+		file.printf(" \"summoned\",");
+	}
+	if (unit.Waiting) {
+		file.printf(" \"waiting\",");
+	}
+	if (unit.MineLow) {
+		file.printf(" \"mine-low\",");
+	}
 	if (unit.RescuedFrom) {
 		file.printf(" \"rescued-from\", %d,", unit.RescuedFrom->Index);
 	}
@@ -266,7 +275,6 @@ void SaveUnit(const CUnit &unit, CFile &file)
 		Assert(unit.Resource.Active == 0);
 		Assert(unit.Resource.Assigned == 0);
 	}
-	file.printf(" \"rs\", %d,", unit.Rs);
 	file.printf(" \"units-boarded-count\", %d,", unit.BoardCount);
 
 	if (unit.UnitInside) {
@@ -310,6 +318,16 @@ void SaveUnit(const CUnit &unit, CFile &file)
 				file.printf(",\n  \"auto-cast\", \"%s\"", SpellTypeTable[i]->Ident.c_str());
 			}
 		}
+	}
+	if (unit.SpellCoolDownTimers) {
+		file.printf(",\n  \"spell-cooldown\", {");
+		for (size_t i = 0; i < SpellTypeTable.size(); ++i) {
+			if (i) {
+				file.printf(" ,");
+			}
+			file.printf("%d", unit.SpellCoolDownTimers[i]);
+		}
+		file.printf("}");
 	}
 
 	file.printf("})\n");

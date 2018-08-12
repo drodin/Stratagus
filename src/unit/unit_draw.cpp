@@ -10,7 +10,8 @@
 //
 /**@name unit_draw.cpp - The draw routines for units. */
 //
-//      (c) Copyright 1998-2007 by Lutz Sammer, Jimmy Salmon, Nehal Mistry
+//      (c) Copyright 1998-2015 by Lutz Sammer, Jimmy Salmon, Nehal Mistry
+//		and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -49,8 +50,9 @@
 #include "map.h"
 #include "player.h"
 #include "script.h"
+#include "settings.h"
 #include "sound.h"
-#include "tileset.h"
+#include "translate.h"
 #include "unit.h"
 #include "unit_find.h"
 #include "unitsound.h"
@@ -142,11 +144,11 @@ void DrawUnitSelection(const CViewport &vp, const CUnit &unit)
 		} else if (ThisPlayer->IsEnemy(unit)) {
 			color = ColorRed;
 		} else {
-			color = unit.Player->Color;
+			color = PlayerColors[GameSettings.Presets[unit.Player->Index].PlayerColor][0];
 
 			for (int i = 0; i < PlayerMax; ++i) {
 				if (unit.TeamSelected & (1 << i)) {
-					color = Players[i].Color;
+					color = PlayerColors[GameSettings.Presets[i].PlayerColor][0];
 				}
 			}
 		}
@@ -161,8 +163,8 @@ void DrawUnitSelection(const CViewport &vp, const CUnit &unit)
 
 	const CUnitType &type = *unit.Type;
 	const PixelPos screenPos = vp.MapToScreenPixelPos(unit.GetMapPixelPosCenter());
-	const int x = screenPos.x - type.BoxWidth / 2 - (type.Width - type.Sprite->Width) / 2;
-	const int y = screenPos.y - type.BoxHeight / 2 - (type.Height - type.Sprite->Height) / 2;
+	const int x = screenPos.x - type.BoxWidth / 2 - (type.Width - (type.Sprite ? type.Sprite->Width : 0)) / 2;
+	const int y = screenPos.y - type.BoxHeight / 2 - (type.Height - (type.Sprite ? type.Sprite->Height : 0)) / 2;
 
 	DrawSelection(color, x + type.BoxOffsetX, y + type.BoxOffsetY, x + type.BoxWidth + type.BoxOffsetX, y + type.BoxHeight + type.BoxOffsetY);
 }
@@ -296,23 +298,9 @@ static int CclDefineSprites(lua_State *l)
 			} else if (!strcmp(key, "File")) {
 				deco.File = LuaToString(l, -1);
 			} else if (!strcmp(key, "Offset")) {
-				if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 2) {
-					LuaError(l, "incorrect argument");
-				}
-				lua_rawgeti(l, -1, 1); // offsetX
-				lua_rawgeti(l, -2, 2); // offsetY
-				deco.HotPos.x = LuaToNumber(l, -2);
-				deco.HotPos.y = LuaToNumber(l, -1);
-				lua_pop(l, 2); // Pop offsetX and Y
+				CclGetPos(l, &deco.HotPos.x, &deco.HotPos.y);
 			} else if (!strcmp(key, "Size")) {
-				if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 2) {
-					LuaError(l, "incorrect argument");
-				}
-				lua_rawgeti(l, -1, 1); // Width
-				lua_rawgeti(l, -2, 2); // Height
-				deco.Width = LuaToNumber(l, -2);
-				deco.Height = LuaToNumber(l, -1);
-				lua_pop(l, 2); // Pop Width and Height
+				CclGetPos(l, &deco.Width, &deco.Height);
 			} else { // Error.
 				LuaError(l, "incorrect field '%s' for the DefineSprite." _C_ key);
 			}
@@ -357,7 +345,7 @@ void LoadDecorations()
 {
 	std::vector<Decoration>::iterator i;
 	for (i = DecoSprite.SpriteArray.begin(); i != DecoSprite.SpriteArray.end(); ++i) {
-		ShowLoadProgress("Decorations `%s'", (*i).File.c_str());
+		ShowLoadProgress(_("Decorations '%s'"), (*i).File.c_str());
 		(*i).Sprite = CGraphic::New((*i).File, (*i).Width, (*i).Height);
 		(*i).Sprite->Load();
 	}
@@ -385,26 +373,25 @@ void CleanDecorations()
 **  @todo fix color configuration.
 */
 void CDecoVarBar::Draw(int x, int y,
-					   const CUnitType *Type, const CVariable &Variable) const
+					   const CUnitType &type, const CVariable &var) const
 {
-	Assert(Type);
-	Assert(Variable.Max);
+	Assert(var.Max);
 
 	int height = this->Height;
 	if (height == 0) { // Default value
-		height = Type->BoxHeight; // Better size ? {,Box, Tile}
+		height = type.BoxHeight; // Better size ? {,Box, Tile}
 	}
 	int width = this->Width;
 	if (width == 0) { // Default value
-		width = Type->BoxWidth; // Better size ? {,Box, Tile}
+		width = type.BoxWidth; // Better size ? {,Box, Tile}
 	}
 	int h;
 	int w;
 	if (this->IsVertical)  { // Vertical
 		w = width;
-		h = Variable.Value * height / Variable.Max;
+		h = var.Value * height / var.Max;
 	} else {
-		w = Variable.Value * width / Variable.Max;
+		w = var.Value * width / var.Max;
 		h = height;
 	}
 	if (this->IsCenteredInX) {
@@ -416,7 +403,7 @@ void CDecoVarBar::Draw(int x, int y,
 
 	char b = this->BorderSize; // BorderSize.
 	// Could depend of (value / max)
-	int f = Variable.Value * 100 / Variable.Max;
+	int f = var.Value * 100 / var.Max;
 	IntColor bcolor = ColorBlack; // Deco->Data.Bar.BColor  // Border color.
 	IntColor color = f > 50 ? (f > 75 ? ColorGreen : ColorYellow) : (f > 25 ? ColorOrange : ColorRed);// inside color.
 	// Deco->Data.Bar.Color
@@ -447,8 +434,7 @@ void CDecoVarBar::Draw(int x, int y,
 **  @param unit    Unit pointer
 **  @todo fix font/color configuration.
 */
-void CDecoVarText::Draw(int x, int y,
-						const CUnitType *, const CVariable &Variable) const
+void CDecoVarText::Draw(int x, int y, const CUnitType &/*type*/, const CVariable &var) const
 {
 	if (this->IsCenteredInX) {
 		x -= 2; // GetGameFont()->Width(buf) / 2, with buf = str(Value)
@@ -456,7 +442,7 @@ void CDecoVarText::Draw(int x, int y,
 	if (this->IsCenteredInY) {
 		y -= this->Font->Height() / 2;
 	}
-	CLabel(*this->Font).DrawClip(x, y, Variable.Value);
+	CLabel(*this->Font).DrawClip(x, y, var.Value);
 }
 
 /**
@@ -467,19 +453,18 @@ void CDecoVarText::Draw(int x, int y,
 **  @param unit    Unit pointer
 **  @todo fix sprite configuration.
 */
-void CDecoVarSpriteBar::Draw(int x, int y,
-							 const CUnitType *, const CVariable &Variable) const
+void CDecoVarSpriteBar::Draw(int x, int y, const CUnitType &/*type*/, const CVariable &var) const
 {
-	Assert(Variable.Max);
+	Assert(var.Max);
 	Assert(this->NSprite != -1);
 
 	Decoration &decosprite = DecoSprite.SpriteArray[(int)this->NSprite];
 	CGraphic &sprite = *decosprite.Sprite;
-	x += decosprite.HotPos.x; // in addition of OffsetX... Usefull ?
-	y += decosprite.HotPos.y; // in addition of OffsetY... Usefull ?
+	x += decosprite.HotPos.x; // in addition of OffsetX... Useful ?
+	y += decosprite.HotPos.y; // in addition of OffsetY... Useful ?
 
 	int n = sprite.NumFrames - 1; // frame of the sprite to show.
-	n -= (n * Variable.Value) / Variable.Max;
+	n -= (n * var.Value) / var.Max;
 
 	if (this->IsCenteredInX) {
 		x -= sprite.Width / 2;
@@ -499,40 +484,41 @@ void CDecoVarSpriteBar::Draw(int x, int y,
 **
 **  @todo fix sprite configuration configuration.
 */
-void CDecoVarStaticSprite::Draw(int x, int y,
-								const CUnitType *, const CVariable &) const
+void CDecoVarStaticSprite::Draw(int x, int y, const CUnitType &/*type*/, const CVariable &var) const
 {
 	Decoration &decosprite = DecoSprite.SpriteArray[(int)this->NSprite];
 	CGraphic &sprite = *decosprite.Sprite;
 
-	x += decosprite.HotPos.x; // in addition of OffsetX... Usefull ?
-	y += decosprite.HotPos.y; // in addition of OffsetY... Usefull ?
+	x += decosprite.HotPos.x; // in addition of OffsetX... Useful ?
+	y += decosprite.HotPos.y; // in addition of OffsetY... Useful ?
 	if (this->IsCenteredInX) {
 		x -= sprite.Width / 2;
 	}
 	if (this->IsCenteredInY) {
 		y -= sprite.Height / 2;
 	}
-	sprite.DrawFrameClip(this->n, x, y);
+	if (this->FadeValue && var.Value < this->FadeValue) {
+		int alpha = var.Value * 255 / this->FadeValue;
+		sprite.DrawFrameClipTrans(this->n, x, y, alpha);
+	} else {
+		sprite.DrawFrameClip(this->n, x, y);
+	}
 }
-
-
-extern void UpdateUnitVariables(CUnit &unit);
-
 
 /**
 **  Draw decoration (invis, for the unit.)
 **
-**  @param unit  Pointer to the unit.
-**  @param type  Type of the unit.
-**  @param x     Screen X position of the unit.
-**  @param y     Screen Y position of the unit.
+**  @param unit       Pointer to the unit.
+**  @param type       Type of the unit.
+**  @param screenPos  Screen position of the unit.
 */
-static void DrawDecoration(const CUnit &unit, const CUnitType *type, int x, int y)
+static void DrawDecoration(const CUnit &unit, const CUnitType &type, const PixelPos &screenPos)
 {
-#ifdef REFS_DEBUG
+	int x = screenPos.x;
+	int y = screenPos.y;
+#ifdef DEBUG
 	// Show the number of references.
-	VideoDrawNumberClip(x + 1, y + 1, GetGameFont(), unit.Refs);
+	CLabel(GetGameFont()).DrawClip(x + 1, y + 1, unit.Refs);
 #endif
 
 	UpdateUnitVariables(const_cast<CUnit &>(unit));
@@ -627,7 +613,7 @@ void DrawShadow(const CUnitType &type, int frame, const PixelPos &screenPos)
 */
 void ShowOrder(const CUnit &unit)
 {
-	if (unit.Destroyed) {
+	if (unit.Destroyed || unit.Removed) {
 		return;
 	}
 #ifndef DEBUG
@@ -670,22 +656,19 @@ void ShowOrder(const CUnit &unit)
 */
 static void DrawInformations(const CUnit &unit, const CUnitType &type, const PixelPos &screenPos)
 {
-	int x = screenPos.x;
-	int y = screenPos.y;
-
 #if 0 && DEBUG // This is for showing vis counts and refs.
 	char buf[10];
 	sprintf(buf, "%d%c%c%d", unit.VisCount[ThisPlayer->Index],
 			unit.Seen.ByPlayer & (1 << ThisPlayer->Index) ? 'Y' : 'N',
 			unit.Seen.Destroyed & (1 << ThisPlayer->Index) ? 'Y' : 'N',
 			unit.Refs);
-	CLabel(GetSmallFont()).Draw(x + 10, y + 10, buf);
+	CLabel(GetSmallFont()).Draw(screenPos.x + 10, screenPos.y + 10, buf);
 #endif
 
 	const CUnitStats &stats = *unit.Stats;
 
 	// For debug draw sight, react and attack range!
-	if (NumSelected == 1 && unit.Selected) {
+	if (IsOnlySelected(unit)) {
 		const PixelPos center(screenPos + type.GetPixelSize() / 2);
 
 		if (Preference.ShowSightRange) {
@@ -719,66 +702,10 @@ static void DrawInformations(const CUnit &unit, const CUnitType &type, const Pix
 	}
 
 	// FIXME: johns: ugly check here, should be removed!
-	if (unit.CurrentAction() != UnitActionDie && unit.IsVisible(*ThisPlayer)) {
-		DrawDecoration(unit, &type, x, y);
+	if (unit.CurrentAction() != UnitActionDie && (unit.IsVisible(*ThisPlayer) || ReplayRevealMap)) {
+		DrawDecoration(unit, type, screenPos);
 	}
 }
-
-#if 0
-/**
-**  Draw the sprite with the player colors
-**
-**  @param type      Unit type
-**  @param sprite    Original sprite
-**  @param player    Player number
-**  @param frame     Frame number to draw.
-**  @param x         X position.
-**  @param y         Y position.
-*/
-void DrawUnitPlayerColor(const CUnitType *type, CGraphic *sprite,
-						 int player, int frame, int x, int y)
-{
-	int f;
-
-	if (type->Flip) {
-		if (frame < 0) {
-			f = -frame - 1;
-		} else {
-			f = frame;
-		}
-	} else {
-		const int row = type->NumDirections / 2 + 1;
-		if (frame < 0) {
-			f = ((-frame - 1) / row) * type->NumDirections + type->NumDirections - (-frame - 1) % row;
-		} else {
-			f = (frame / row) * type->NumDirections + frame % row;
-		}
-	}
-	if (!sprite->PlayerColorTextures[player]) {
-		MakePlayerColorTexture(sprite, player, &Players[player].UnitColors);
-	}
-
-	// FIXME: move this calculation to high level.
-	x -= (type->Width - type->TileWidth * PixelTileSize.x) / 2;
-	y -= (type->Height - type->TileHeight * PixelTileSize.y) / 2;
-
-	if (type->Flip) {
-		if (frame < 0) {
-			VideoDrawClipX(glsprite[player], -frame - 1, x, y);
-		} else {
-			VideoDrawClip(glsprite[player], frame, x, y);
-		}
-	} else {
-		const int row = type->NumDirections / 2 + 1;
-		if (frame < 0) {
-			frame = ((-frame - 1) / row) * type->NumDirections + type->NumDirections - (-frame - 1) % row;
-		} else {
-			frame = (frame / row) * type->NumDirections + frame % row;
-		}
-		VideoDrawClip(glsprite[player], frame, x, y);
-	}
-}
-#endif
 
 /**
 **  Draw construction shadow.
@@ -866,14 +793,14 @@ void CUnit::Draw(const CViewport &vp) const
 	const CConstructionFrame *cframe;
 	const CUnitType *type;
 
-	if (this->Destroyed || this->Container || this->Type->Revealer) { // Revealers are not drawn
+	if (this->Destroyed || this->Container || this->Type->BoolFlag[REVEALER_INDEX].value) { // Revealers are not drawn
 		return;
 	}
 
 	bool IsVisible = this->IsVisible(*ThisPlayer);
 
 	// Those should have been filtered. Check doesn't make sense with ReplayRevealMap
-	Assert(ReplayRevealMap || this->Type->VisibleUnderFog || IsVisible);
+	Assert(ReplayRevealMap || this->Type->BoolFlag[VISIBLEUNDERFOG_INDEX].value || IsVisible);
 
 	int player = this->RescuedFrom ? this->RescuedFrom->Index : this->Player->Index;
 	int action = this->CurrentAction();
@@ -923,7 +850,7 @@ void CUnit::Draw(const CViewport &vp) const
 	}
 
 
-	if (state == 1 && constructed) {
+	if (state == 1 && constructed && cframe) {
 		DrawConstructionShadow(*type, cframe, frame, screenPos);
 	} else {
 		if (action != UnitActionDie) {
@@ -940,7 +867,7 @@ void CUnit::Draw(const CViewport &vp) const
 	// Adjust sprite for Harvesters.
 	//
 	CPlayerColorGraphic *sprite = type->Sprite;
-	if (type->Harvester && this->CurrentResource) {
+	if (type->BoolFlag[HARVESTER_INDEX].value && this->CurrentResource) {
 		ResourceInfo *resinfo = type->ResInfo[this->CurrentResource];
 		if (this->ResourcesHeld) {
 			if (resinfo->SpriteWhenLoaded) {
@@ -958,17 +885,17 @@ void CUnit::Draw(const CViewport &vp) const
 	// Buildings under construction/upgrade/ready.
 	//
 	if (state == 1) {
-		if (constructed) {
+		if (constructed && cframe) {
 			const PixelPos pos(screenPos + (type->GetPixelSize()) / 2);
-			DrawConstruction(player, cframe, *type, frame, pos);
+			DrawConstruction(GameSettings.Presets[player].PlayerColor, cframe, *type, frame, pos);
 		} else {
-			DrawUnitType(*type, sprite, player, frame, screenPos);
+			DrawUnitType(*type, sprite, GameSettings.Presets[player].PlayerColor, frame, screenPos);
 		}
 		//
 		// Draw the future unit type, if upgrading to it.
 		//
 	} else {
-		DrawUnitType(*type, sprite, player, frame, screenPos);
+		DrawUnitType(*type, sprite, GameSettings.Presets[player].PlayerColor, frame, screenPos);
 	}
 
 	// Unit's extras not fully supported.. need to be decorations themselves.

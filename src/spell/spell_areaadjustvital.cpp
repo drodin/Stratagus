@@ -41,18 +41,18 @@
 /* virtual */ void Spell_AreaAdjustVital::Parse(lua_State *l, int startIndex, int endIndex)
 {
 	for (int j = startIndex; j < endIndex; ++j) {
-		lua_rawgeti(l, -1, j + 1);
-		const char *value = LuaToString(l, -1);
-		lua_pop(l, 1);
+		const char *value = LuaToString(l, -1, j + 1);
 		++j;
 		if (!strcmp(value, "hit-points")) {
-			lua_rawgeti(l, -1, j + 1);
-			this->HP = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			this->HP = LuaToNumber(l, -1, j + 1);
 		} else if (!strcmp(value, "mana-points")) {
-			lua_rawgeti(l, -1, j + 1);
-			this->Mana = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			this->Mana = LuaToNumber(l, -1, j + 1);
+		} else if (!strcmp(value, "shield-points")) {
+			this->Shield = LuaToNumber(l, -1, j + 1);
+		} else if (!strcmp(value, "range")) {
+			this->Range = LuaToNumber(l, -1, j + 1);
+		} else if (!strcmp(value, "use-mana")) {
+			this->UseMana = LuaToBoolean(l, -1, j + 1);
 		} else {
 			LuaError(l, "Unsupported area-adjust-vitals tag: %s" _C_ value);
 		}
@@ -71,15 +71,15 @@
 */
 /* virtual */ int Spell_AreaAdjustVital::Cast(CUnit &caster, const SpellType &spell, CUnit *target, const Vec2i &goalPos)
 {
-	const Vec2i range(spell.Range, spell.Range);
-	const Vec2i typeSize(caster.Type->Width, caster.Type->Height);
+	const Vec2i range(this->Range, this->Range);
+	const Vec2i typeSize(caster.Type->TileWidth, caster.Type->TileHeight);
 	std::vector<CUnit *> units;
 
 	// Get all the units around the unit
 	Select(goalPos - range, goalPos + typeSize + range, units);
 	int hp = this->HP;
 	int mana = this->Mana;
-	caster.Variable[MANA_INDEX].Value -= spell.ManaCost;
+	int shield = this->Shield;
 	for (size_t j = 0; j != units.size(); ++j) {
 		target = units[j];
 		// if (!PassCondition(caster, spell, target, goalPos) {
@@ -90,17 +90,15 @@
 			HitUnit(&caster, *target, -hp);
 		} else {
 			target->Variable[HP_INDEX].Value += hp;
-			if (target->Variable[HP_INDEX].Value > target->Variable[HP_INDEX].Max) {
-				target->Variable[HP_INDEX].Value = target->Variable[HP_INDEX].Max;
-			}
+			target->Variable[HP_INDEX].Value = std::min(target->Variable[HP_INDEX].Max, target->Variable[HP_INDEX].Value);
 		}
 		target->Variable[MANA_INDEX].Value += mana;
-		if (target->Variable[MANA_INDEX].Value < 0) {
-			target->Variable[MANA_INDEX].Value = 0;
-		}
-		if (target->Variable[MANA_INDEX].Value > target->Variable[MANA_INDEX].Max) {
-			target->Variable[MANA_INDEX].Value = target->Variable[MANA_INDEX].Max;
-		}
+		clamp(&target->Variable[MANA_INDEX].Value, 0, target->Variable[MANA_INDEX].Max);
+		target->Variable[SHIELD_INDEX].Value += shield;
+		clamp(&target->Variable[SHIELD_INDEX].Value, 0, target->Variable[SHIELD_INDEX].Max);
+	}
+	if (UseMana) {
+		caster.Variable[MANA_INDEX].Value -= spell.ManaCost;
 	}
 	return 0;
 }

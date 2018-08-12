@@ -37,11 +37,9 @@
 ----------------------------------------------------------------------------*/
 
 /**
-**  @struct _depend_rule_ depend.h
+**  @struct DependRule depend.h
 **
 **  \#include "depend.h"
-**
-**  typedef struct _depend_rule_ DependRule;
 **
 **  This structure is used define the requirements of upgrades or
 **  unit-types. The structure is used to define the base (the wanted)
@@ -97,6 +95,7 @@
 class CPlayer;
 class CUnitType;
 class CUpgrade;
+class ButtonAction;
 
 enum {
 	DependRuleUnitType,  /// Kind is an unit-type
@@ -128,6 +127,8 @@ extern void InitDependencies();
 /// Cleanup dependencies module
 extern void CleanDependencies();
 
+/// Print all unit dependencies into string
+extern std::string PrintDependencies(const CPlayer &player, const ButtonAction &button);
 /// Check a dependency by identifier
 extern bool CheckDependByIdent(const CPlayer &player, const std::string &target);
 /// Check a dependency by unit type

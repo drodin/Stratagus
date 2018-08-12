@@ -45,6 +45,7 @@
 #include "replay.h"
 #include "results.h"
 #include "sound.h"
+#include "translate.h"
 #include "trigger.h"
 #include "ui.h"
 #include "unit.h"
@@ -79,13 +80,15 @@ EventCallback EditorCallbacks; /// Editor callbacks
 **  @todo  Support dynamic acceleration of scroll speed.
 **  @todo  If the scroll key is longer pressed the area is scrolled faster.
 */
-void DoScrollArea(int state, bool fast)
+void DoScrollArea(int state, bool fast, bool isKeyboard)
 {
 	CViewport *vp;
 	int stepx;
 	int stepy;
 	static int remx = 0; // FIXME: docu
 	static int remy = 0; // FIXME: docu
+
+	int speed = isKeyboard ? UI.KeyScrollSpeed : UI.MouseScrollSpeed;
 
 	if (state == ScrollNone) {
 		return;
@@ -94,12 +97,12 @@ void DoScrollArea(int state, bool fast)
 	vp = UI.SelectedViewport;
 
 	if (fast) {
-		stepx = (int)(UI.MouseScrollSpeed * vp->MapWidth / 2 * PixelTileSize.x * FRAMES_PER_SECOND / 4);
-		stepy = (int)(UI.MouseScrollSpeed * vp->MapHeight / 2 * PixelTileSize.y * FRAMES_PER_SECOND / 4);
-	} else {// dynamic: let these variables increase upto fast..
+		stepx = (int)(speed * vp->MapWidth / 2 * PixelTileSize.x * FRAMES_PER_SECOND / 4);
+		stepy = (int)(speed * vp->MapHeight / 2 * PixelTileSize.y * FRAMES_PER_SECOND / 4);
+	} else {// dynamic: let these variables increase up to fast..
 		// FIXME: pixels per second should be configurable
-		stepx = (int)(UI.MouseScrollSpeed * PixelTileSize.x * FRAMES_PER_SECOND / 4);
-		stepy = (int)(UI.MouseScrollSpeed * PixelTileSize.y * FRAMES_PER_SECOND / 4);
+		stepx = (int)(speed * PixelTileSize.x * FRAMES_PER_SECOND / 4);
+		stepy = (int)(speed * PixelTileSize.y * FRAMES_PER_SECOND / 4);
 	}
 	if ((state & (ScrollLeft | ScrollRight)) && (state & (ScrollLeft | ScrollRight)) != (ScrollLeft | ScrollRight)) {
 		stepx = stepx * 100 * 100 / VideoSyncSpeed / FRAMES_PER_SECOND / (SkipFrames + 1);
@@ -166,6 +169,12 @@ void DrawMapArea()
 void UpdateDisplay()
 {
 	if (GameRunning || Editor.Running == EditorEditing) {
+		// to prevent empty spaces in the UI
+#if defined(USE_OPENGL) || defined(USE_GLES)
+		Video.FillRectangleClip(ColorBlack, 0, 0, Video.ViewportWidth, Video.ViewportHeight);
+#else
+		Video.FillRectangleClip(ColorBlack, 0, 0, Video.Width, Video.Height);
+#endif
 		DrawMapArea();
 		DrawMessages();
 
@@ -185,17 +194,18 @@ void UpdateDisplay()
 											 UI.Fillers[i].X, UI.Fillers[i].Y);
 			}
 			DrawMenuButtonArea();
+			DrawUserDefinedButtons();
 
 			UI.Minimap.Draw();
 			UI.Minimap.DrawViewportArea(*UI.SelectedViewport);
 
 			UI.InfoPanel.Draw();
-			UI.ButtonPanel.Draw();
 			DrawResources();
 			UI.StatusLine.Draw();
+			UI.StatusLine.DrawCosts();
+			UI.ButtonPanel.Draw();
 		}
 
-		DrawCosts();
 		DrawTimer();
 	}
 
@@ -239,10 +249,12 @@ static void GameLogicLoop()
 		++GameCycle;
 		MultiPlayerReplayEachCycle();
 		NetworkCommands(); // Get network commands
+		TriggersEachCycle();// handle triggers
 		UnitActions();      // handle units
 		MissileActions();   // handle missiles
 		PlayersEachCycle(); // handle players
 		UpdateTimer();      // update game timer
+
 
 		//
 		// Work todo each second.
@@ -286,9 +298,14 @@ static void GameLogicLoop()
 				}
 			}
 		}
+		
+		if (Preference.AutosaveMinutes != 0 && !IsNetworkGame() && GameCycle > 0 && (GameCycle % (CYCLES_PER_SECOND * 60 * Preference.AutosaveMinutes)) == 0) { // autosave every X minutes (default is 5), if the option is enabled
+		//Wyrmgus end
+			UI.StatusLine.Set(_("Autosave"));
+			SaveGame("autosave.sav");
+		}
 	}
 
-	TriggersEachCycle();  // handle triggers
 	UpdateMessages();     // update messages
 	ParticleManager.update(); // handle particles
 	CheckMusicFinished(); // Check for next song
@@ -300,7 +317,6 @@ static void GameLogicLoop()
 	if (!NetworkInSync) {
 		NetworkRecover(); // recover network
 	}
-
 }
 
 //#define REALVIDEO
@@ -310,18 +326,13 @@ static	int RealVideoSyncSpeed;
 
 static void DisplayLoop()
 {
-#ifdef USE_MAEMO
-	if (!IsSDLWindowVisible) {
-		// On Maemo do not redraw/update screen when SDL window is not visible
-		// This stop draining battery power on Nokia N900
-		return;
-	}
-#endif
-
+	
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		/* update only if screen changed */
 		ValidateOpenGLScreen();
 	}
+#endif
 
 	/* update only if viewmode changed */
 	CheckViewportMode();
@@ -338,7 +349,7 @@ static void DisplayLoop()
 	//
 	// Map scrolling
 	//
-	DoScrollArea(MouseScrollState | KeyScrollState, (KeyModifiers & ModifierControl) != 0);
+	DoScrollArea(MouseScrollState | KeyScrollState, (KeyModifiers & ModifierControl) != 0, MouseScrollState == 0 && KeyScrollState > 0);
 
 	ColorCycle();
 
@@ -366,12 +377,6 @@ static void DisplayLoop()
 		VideoSyncSpeed = RealVideoSyncSpeed;
 	}
 #endif
-
-	if (!UseOpenGL) {
-		if ((GameRunning || Editor.Running) && (FastForwardCycle <= GameCycle || !(GameCycle & 0x3f))) {
-			Video.ClearScreen();
-		}
-	}
 }
 
 static void SingleGameLoop()
@@ -430,7 +435,7 @@ void GameMainLoop()
 		VideoSyncSpeed = RealVideoSyncSpeed;
 	}
 #endif
-	NetworkQuit();
+	NetworkQuitGame();
 	EndReplayLog();
 
 	GameCycle = 0;//????

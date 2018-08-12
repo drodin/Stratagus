@@ -39,7 +39,9 @@
 
 #include "menus.h"
 #include "player.h"
+#include "translate.h"
 #include "ui.h"
+#include "unit.h"
 #include "video.h"
 
 #include <map>
@@ -59,7 +61,7 @@ static IconMap Icons;   /// Map of ident to icon.
 /**
 **  CIcon constructor
 */
-CIcon::CIcon(const std::string &ident) : G(NULL), Frame(0), Ident(ident)
+CIcon::CIcon(const std::string &ident) : G(NULL), GScale(NULL), Frame(0), Ident(ident)
 {
 }
 
@@ -68,7 +70,8 @@ CIcon::CIcon(const std::string &ident) : G(NULL), Frame(0), Ident(ident)
 */
 CIcon::~CIcon()
 {
-	CGraphic::Free(this->G);
+	CPlayerColorGraphic::Free(this->G);
+	CPlayerColorGraphic::Free(this->GScale);
 }
 
 /**
@@ -80,14 +83,12 @@ CIcon::~CIcon()
 */
 /* static */ CIcon *CIcon::New(const std::string &ident)
 {
-	CIcon *icon = Icons[ident];
-	if (icon) {
-		return icon;
-	} else {
+	CIcon *&icon = Icons[ident];
+
+	if (icon == NULL) {
 		icon = new CIcon(ident);
-		Icons[ident] = icon;
-		return icon;
 	}
+	return icon;
 }
 
 /**
@@ -99,17 +100,20 @@ CIcon::~CIcon()
 */
 /* static */ CIcon *CIcon::Get(const std::string &ident)
 {
-	CIcon *icon = Icons[ident];
-	if (!icon) {
+	IconMap::iterator it = Icons.find(ident);
+	if (it == Icons.end()) {
 		DebugPrint("icon not found: %s\n" _C_ ident.c_str());
 	}
-	return icon;
+	return it->second;
 }
 
 void CIcon::Load()
 {
 	Assert(G);
 	G->Load();
+	if (Preference.GrayscaleIcons) {
+		GScale = G->Clone(true);
+	}
 	if (Frame >= G->NumFrames) {
 		DebugPrint("Invalid icon frame: %s - %d\n" _C_ Ident.c_str() _C_ Frame);
 		Frame = 0;
@@ -122,13 +126,48 @@ void CIcon::Load()
 **  @param player  Player pointer used for icon colors
 **  @param pos     display pixel position
 */
-void CIcon::DrawIcon(const CPlayer &player, const PixelPos &pos) const
+void CIcon::DrawIcon(const PixelPos &pos, const int player) const
 {
-	CPlayerColorGraphic *g = dynamic_cast<CPlayerColorGraphic *>(this->G);
-	if (g) {
-		g->DrawPlayerColorFrameClip(player.Index, this->Frame, pos.x, pos.y);
+	if (player != -1 ) {
+		this->G->DrawPlayerColorFrameClip(player, this->Frame, pos.x, pos.y);
 	} else {
 		this->G->DrawFrameClip(this->Frame, pos.x, pos.y);
+	}
+}
+
+/**
+**  Draw grayscale icon at pos.
+**
+**  @param pos     display pixel position
+*/
+void CIcon::DrawGrayscaleIcon(const PixelPos &pos, const int player) const
+{
+	if (this->GScale) {
+		if (player != -1) {
+			this->GScale->DrawPlayerColorFrameClip(player, this->Frame, pos.x, pos.y);
+		} else {
+			this->GScale->DrawFrameClip(this->Frame, pos.x, pos.y);
+		}
+	}
+}
+
+/**
+**  Draw cooldown spell effect on icon at pos.
+**
+**  @param pos       display pixel position
+**  @param percent   cooldown percent
+*/
+void CIcon::DrawCooldownSpellIcon(const PixelPos &pos, const int percent) const
+{
+	// TO-DO: implement more effect types (clock-like)
+	if (this->GScale) {
+		this->GScale->DrawFrameClip(this->Frame, pos.x, pos.y);
+		const int height = (G->Height * (100 - percent)) / 100;
+		this->G->DrawSubClip(G->frame_map[Frame].x, G->frame_map[Frame].y + G->Height - height,
+							 G->Width, height, pos.x, pos.y + G->Height - height);
+	} else {
+		DebugPrint("Enable grayscale icon drawing in your game to achieve special effects for cooldown spell icons");
+		this->DrawIcon(pos);
 	}
 }
 
@@ -140,8 +179,8 @@ void CIcon::DrawIcon(const CPlayer &player, const PixelPos &pos) const
 **  @param pos     display pixel position
 **  @param text    Optional text to display
 */
-void CIcon::DrawUnitIcon(const ButtonStyle &style,
-						 unsigned flags, const PixelPos &pos, const std::string &text) const
+void CIcon::DrawUnitIcon(const ButtonStyle &style, unsigned flags,
+						 const PixelPos &pos, const std::string &text, int player) const
 {
 	ButtonStyle s(style);
 
@@ -150,25 +189,90 @@ void CIcon::DrawUnitIcon(const ButtonStyle &style,
 	if (!(flags & IconSelected) && (flags & IconAutoCast)) {
 		s.Default.BorderColorRGB = UI.ButtonPanel.AutoCastBorderColorRGB;
 		s.Default.BorderColor = 0;
+		s.Default.BorderSize = 2;
 	}
-	// FIXME: player colors
-	DrawMenuButton(&s, flags, pos.x, pos.y, text);
+	if (Preference.IconsShift && Preference.IconFrameG && Preference.PressedIconFrameG) {
+		int shift = 0;
+		if (!(flags & IconClicked)) {
+			int xoffset = (s.Width - Preference.IconFrameG->Width) / 2;
+			int yoffset = (s.Height - Preference.IconFrameG->Height) / 2;
+			Preference.IconFrameG->DrawClip(pos.x + xoffset, pos.y + yoffset);
+		} else { // Shift the icon a bit to make it look like it's been pressed.
+			shift = 1;
+			int xoffset = (s.Width - Preference.PressedIconFrameG->Width) / 2 + shift;
+			int yoffset = (s.Height - Preference.PressedIconFrameG->Height) / 2 + shift;
+			Preference.PressedIconFrameG->DrawClip(pos.x + xoffset, pos.y + yoffset);
+		}
+		DrawUIButton(&s, flags, pos.x + shift, pos.y + shift, text, player);
+		if (flags & IconSelected) {
+			Video.DrawRectangle(ColorGreen, pos.x + shift, pos.y + shift, s.Width, s.Height);
+		}
+	} else if (Preference.IconsShift) {
+		// Left and top edge of Icon
+		Video.DrawHLine(ColorWhite, pos.x - 1, pos.y - 1, 49);
+		Video.DrawVLine(ColorWhite, pos.x - 1, pos.y, 40);
+		Video.DrawVLine(ColorWhite, pos.x, pos.y + 38, 2);
+		Video.DrawHLine(ColorWhite, pos.x + 46, pos.y, 2);
+
+		// Bottom and Right edge of Icon
+		Video.DrawHLine(ColorGray, pos.x + 1, pos.y + 38, 47);
+		Video.DrawHLine(ColorGray, pos.x + 1, pos.y + 39, 47);
+		Video.DrawVLine(ColorGray, pos.x + 46, pos.y + 1, 37);
+		Video.DrawVLine(ColorGray, pos.x + 47, pos.y + 1, 37);
+
+		Video.DrawRectangle(ColorBlack, pos.x - 3, pos.y - 3, 52, 44);
+		Video.DrawRectangle(ColorBlack, pos.x - 4, pos.y - 4, 54, 46);
+
+		if (flags & IconActive) { // Code to make a border appear around the icon when the mouse hovers over it.
+			Video.DrawRectangle(ColorGray, pos.x - 4, pos.y - 4, 54, 46);
+			DrawUIButton(&s, flags, pos.x, pos.y, text, player);
+		}
+
+		if (flags & IconClicked) { // Shift the icon a bit to make it look like it's been pressed.
+			DrawUIButton(&s, flags, pos.x + 1, pos.y + 1, text, player);
+			if (flags & IconSelected) {
+				Video.DrawRectangle(ColorGreen, pos.x + 1, pos.y + 1, 46, 38);
+			}
+			Video.DrawRectangle(ColorGray, pos.x, pos.y, 48, 40);
+			Video.DrawVLine(ColorDarkGray, pos.x - 1, pos.y - 1, 40);
+			Video.DrawHLine(ColorDarkGray, pos.x - 1, pos.y - 1, 49);
+			Video.DrawHLine(ColorDarkGray, pos.x - 1, pos.y + 39, 2);
+
+			Video.DrawRectangle(ColorGray, pos.x - 4, pos.y - 4, 54, 46);
+		} else {
+			DrawUIButton(&s, flags, pos.x, pos.y, text, player);
+			if (flags & IconSelected) {
+				Video.DrawRectangle(ColorGreen, pos.x, pos.y, 46, 38);
+			}
+		}
+	} else {
+		DrawUIButton(&s, flags, pos.x, pos.y, text, player);
+	}
 }
 
 /**
 **  Load the Icon
 */
-void IconConfig::Load()
+bool IconConfig::LoadNoLog()
 {
 	Assert(!Name.empty());
 
 	Icon = CIcon::Get(Name);
-#if 0
-	if (!Icon) {
-		fprintf(stderr, "Can't find icon %s\n", Name.c_str());
-		ExitFatal(-1);
+	return Icon != NULL;
+}
+
+/**
+**  Load the Icon
+*/
+bool IconConfig::Load()
+{
+	if (LoadNoLog() == true) {
+		ShowLoadProgress(_("Icon %s"), this->Name.c_str());
+		return true;
+	} else {
+		fprintf(stderr, _("Can't find icon %s\n"), this->Name.c_str());
+		return false;
 	}
-#endif
 }
 
 /**
@@ -179,7 +283,7 @@ void LoadIcons()
 	for (IconMap::iterator it = Icons.begin(); it != Icons.end(); ++it) {
 		CIcon &icon = *(*it).second;
 
-		ShowLoadProgress("Icons %s", icon.G->File.c_str());
+		ShowLoadProgress(_("Icons %s"), icon.G->File.c_str());
 		icon.Load();
 	}
 }

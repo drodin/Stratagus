@@ -105,7 +105,7 @@ static CSound *CclGetSound(lua_State *l)
 **  Create a sound.
 **
 **  Glue between c and scheme. This function asks the sound system to
-**  register a sound under a given name, wiht an associated list of files
+**  register a sound under a given name, with an associated list of files
 **  (the list can be replaced by only one file).
 **
 **  @param l  Lua state.
@@ -128,9 +128,7 @@ static int CclMakeSound(lua_State *l)
 		const int args = lua_rawlen(l, 2);
 		files.reserve(args);
 		for (int j = 0; j < args; ++j) {
-			lua_rawgeti(l, 2, j + 1);
-			files.push_back(LuaToString(l, -1));
-			lua_pop(l, 1);
+			files.push_back(LuaToString(l, 2, j + 1));
 		}
 		id = MakeSound(c_name, files);
 	} else {
@@ -200,12 +198,19 @@ static int CclMapSound(lua_State *l)
 */
 static int CclPlaySound(lua_State *l)
 {
-	CSound *id;
+	const int args = lua_gettop(l);
+	if (args < 1 || args > 2) {
+		LuaError(l, "incorrect argument");
+	}
 
-	LuaCheckArgs(l, 1);
-
-	id = CclGetSound(l);
-	PlayGameSound(id, MaxSampleVolume);
+	lua_pushvalue(l, 1);
+	CSound *id = CclGetSound(l);
+	lua_pop(l, 1);
+	bool always = false;
+	if (args == 2) {
+		always = LuaToBoolean(l, 2);
+	}
+	PlayGameSound(id, MaxSampleVolume, always);
 	return 0;
 }
 
@@ -214,9 +219,7 @@ static void SetSoundConfigRace(lua_State *l, int j, SoundConfig soundConfigs[])
 	if (!lua_istable(l, j + 1) || lua_rawlen(l, j + 1) != 2) {
 		LuaError(l, "incorrect argument");
 	}
-	lua_rawgeti(l, j + 1, 1);
-	const char *raceName = LuaToString(l, -1);
-	lua_pop(l, 1);
+	const char *raceName = LuaToString(l, j + 1, 1);
 	const int raceIndex = PlayerRaces.GetRaceIndexByName(raceName);
 	if (raceIndex == -1) {
 		LuaError(l, "Unknown race: %s" _C_ raceName);
@@ -273,13 +276,9 @@ static int CclDefineGameSounds(lua_State *l)
 			if (!lua_istable(l, j + 1) || lua_rawlen(l, j + 1) != 3) {
 				LuaError(l, "incorrect argument");
 			}
-			lua_rawgeti(l, j + 1, 1);
-			const char *resName = LuaToString(l, -1);
-			lua_pop(l, 1);
+			const char *resName = LuaToString(l, j + 1, 1);
 			const int resId = GetResourceIdByName(l, resName);
-			lua_rawgeti(l, j + 1, 2);
-			const char *raceName = LuaToString(l, -1);
-			lua_pop(l, 1);
+			const char *raceName = LuaToString(l, j + 1, 2);
 			const int raceIndex = PlayerRaces.GetRaceIndexByName(raceName);
 			if (raceIndex == -1) {
 				LuaError(l, "Unknown race: %s" _C_ raceName);

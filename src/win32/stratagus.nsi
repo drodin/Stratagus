@@ -45,16 +45,18 @@
 
 !define NAME "Stratagus"
 !define DESCRIPTION "Strategy Gaming Engine"
-!define VERSION "2.2.7"
-!define VIVERSION "${VERSION}.0"
-!define HOMEPAGE "https://launchpad.net/stratagus"
+!define HOMEPAGE "https://github.com/Wargus/stratagus"
 !define LICENSE "GPL v2"
-!define COPYRIGHT "Copyright (c) 1998-2012 by The Stratagus Project"
+!define COPYRIGHT "Copyright (c) 1998-2017 by The Stratagus Project"
 
 ;--------------------------------
 
 !define ICON "stratagus.ico"
 !define EXE "stratagus.exe"
+; copy, in case VS put the exe under Release or Debug
+!system "powershell -Command $\"& {cp **\${EXE} ${EXE}}$\""
+
+
 !define UNINSTALL "uninstall.exe"
 !define INSTALLER "${NAME}-${VERSION}.exe"
 !define INSTALLDIR "$PROGRAMFILES\${NAME}\"
@@ -213,6 +215,13 @@ Section "${NAME}"
 
 	SetOutPath $INSTDIR
 	File "${EXE}"
+	File "${SDL}"
+	File "${LUADLL}"
+	!ifdef FLUID
+		File "${FLUIDDLL}"
+		File "${GLIBDLL}"
+		File "${GTHREADDLL}"
+	!endif
 	WriteRegStr HKLM "${REGKEY}" "DisplayName" "${NAME}"
 	WriteRegStr HKLM "${REGKEY}" "UninstallString" "$\"$INSTDIR\${UNINSTALL}$\""
 	WriteRegStr HKLM "${REGKEY}" "QuietUninstallString" "$\"$INSTDIR\${UNINSTALL}$\" /S"
@@ -235,6 +244,9 @@ Section "un.${NAME}" Executable
 	SectionIn RO
 
 	Delete "$INSTDIR\${EXE}"
+	Delete "$INSTDIR\${SDL}"
+	IfFileExists "$INSTDIR\libfluidsynth.dll" 0 +2
+	Delete "$INSTDIR\libfluidsynth.dll"
 	Delete "$INSTDIR\${UNINSTALL}"
 	RMDir "$INSTDIR"
 	DeleteRegKey /ifempty HKLM "${REGKEY}"

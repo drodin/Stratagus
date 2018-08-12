@@ -40,6 +40,7 @@
 #include "map.h"
 #include "pathfinder.h"
 #include "player.h"
+#include "tileset.h"
 #include "unit.h"
 #include "unit_find.h"
 #include "unittype.h"
@@ -86,8 +87,10 @@ static bool IsPosFree(const Vec2i &pos, const CUnit &exceptionUnit)
 */
 static bool AiCheckSurrounding(const CUnit &worker, const CUnitType &type, const Vec2i &pos, bool &backupok)
 {
-	const Vec2i pos_topLeft(pos.x - 1, pos.y - 1);
-	const Vec2i pos_bottomRight(pos.x + type.TileWidth, pos.y + type.TileWidth);
+	const int surroundRange = type.AiAdjacentRange != -1 ? type.AiAdjacentRange : 1;
+	const Vec2i pos_topLeft(pos.x - surroundRange, pos.y - surroundRange);
+	const Vec2i pos_bottomRight(pos.x + type.TileWidth + surroundRange - 1,
+								pos.y + type.TileHeight + surroundRange - 1);
 	Vec2i it = pos_topLeft;
 	const bool firstVal = IsPosFree(it, worker);
 	bool lastval = firstVal;
@@ -129,7 +132,7 @@ static bool AiCheckSurrounding(const CUnit &worker, const CUnitType &type, const
 		++obstacleCount;
 	}
 
-	if (!type.ShoreBuilding) {
+	if (!type.BoolFlag[SHOREBUILDING_INDEX].value) {
 		backupok = obstacleCount < 5;
 	} else {
 		// Shore building have at least 2 obstacles : sea->ground & ground->sea
@@ -143,9 +146,12 @@ class BuildingPlaceFinder
 public:
 	BuildingPlaceFinder(const CUnit &worker, const CUnitType &type, bool checkSurround, Vec2i *resultPos) :
 		worker(worker), type(type),
-		movemask(worker.Type->MovementMask & ~(MapFieldLandUnit | MapFieldAirUnit | MapFieldSeaUnit)),
+			movemask(worker.Type->MovementMask 
+			& ~((type.BoolFlag[SHOREBUILDING_INDEX].value ? (MapFieldCoastAllowed | MapFieldLandUnit | MapFieldAirUnit | MapFieldSeaUnit) 
+			:  (MapFieldLandUnit | MapFieldAirUnit | MapFieldSeaUnit)))),
 		checkSurround(checkSurround),
-		resultPos(resultPos) {
+		resultPos(resultPos)
+	{
 		resultPos->x = -1;
 		resultPos->y = -1;
 	}
@@ -175,7 +181,8 @@ VisitResult BuildingPlaceFinder::Visit(TerrainTraversal &terrainTraversal, const
 			*resultPos = pos;
 		}
 	}
-	if (CanMoveToMask(pos, movemask)) { // reachable
+	if (CanMoveToMask(pos, movemask)
+		|| (worker.Type->RepairRange == InfiniteRepairRange && type.BoolFlag[BUILDEROUTSIDE_INDEX].value)) { // reachable, or unit can build from outside and anywhere
 		return VisitResult_Ok;
 	} else { // unreachable
 		return VisitResult_DeadEnd;
@@ -218,7 +225,9 @@ class HallPlaceFinder
 public:
 	HallPlaceFinder(const CUnit &worker, const CUnitType &type, int resource, Vec2i *resultPos) :
 		worker(worker), type(type),
-		movemask(worker.Type->MovementMask & ~(MapFieldLandUnit | MapFieldAirUnit | MapFieldSeaUnit)),
+		movemask(worker.Type->MovementMask 
+			& ~((type.BoolFlag[SHOREBUILDING_INDEX].value ? (MapFieldCoastAllowed | MapFieldLandUnit | MapFieldAirUnit | MapFieldSeaUnit) 
+			:  (MapFieldLandUnit | MapFieldAirUnit | MapFieldSeaUnit)))),
 		resource(resource),
 		resultPos(resultPos)
 	{}
@@ -259,7 +268,7 @@ bool HallPlaceFinder::IsAUsableMine(const CUnit &mine) const
 		}
 		// Town hall may not be near but we may be using it, check
 		// for 2 buildings near it and assume it's been used
-		if (unit.Type->Building && !unit.Type->GivesResource == resource) {
+		if (unit.Type->Building && !(unit.Type->GivesResource == resource)) {
 			++buildings;
 			if (buildings == 2) {
 				return false;
@@ -327,7 +336,10 @@ static bool AiFindHallPlace(const CUnit &worker,
 
 	HallPlaceFinder hallPlaceFinder(worker, type, resource, resultPos);
 
-	return terrainTraversal.Run(hallPlaceFinder);
+	if (terrainTraversal.Run(hallPlaceFinder)) {
+		return true;
+	}
+	return AiFindBuildingPlace2(worker, type, startPos, NULL, true, resultPos);
 }
 
 class LumberMillPlaceFinder
@@ -356,7 +368,7 @@ VisitResult LumberMillPlaceFinder::Visit(TerrainTraversal &terrainTraversal, con
 	}
 #endif
 	if (Map.Field(pos)->IsTerrainResourceOnMap(resource)) {
-		if (AiFindBuildingPlace2(worker, type, pos, NULL, true, resultPos)) {
+		if (AiFindBuildingPlace2(worker, type, from, NULL, true, resultPos)) {
 			return VisitResult_Finished;
 		}
 	}

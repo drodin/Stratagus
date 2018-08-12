@@ -10,7 +10,7 @@
 //
 /**@name unittype.h - The unit-types headerfile. */
 //
-//      (c) Copyright 1998-2007 by Lutz Sammer and Jimmy Salmon
+//      (c) Copyright 1998-2015 by Lutz Sammer, Jimmy Salmon and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -33,484 +33,6 @@
 //@{
 
 /*----------------------------------------------------------------------------
--- Documentation
-----------------------------------------------------------------------------*/
-
-/**
-**  @class CUnitType unittype.h
-**
-**  \#include "unittype.h"
-**
-**  This class contains the information that is shared between all
-**  units of the same type and determins if a unit is a building,
-**  a person, ...
-**
-**  The unit-type class members:
-**
-**  CUnitType::Ident
-**
-**    Unique identifier of the unit-type, used to reference it in
-**    config files and during startup. As convention they start with
-**    "unit-" fe. "unit-farm".
-**  @note Don't use this member in game, use instead the pointer
-**  to this structure. See UnitTypeByIdent().
-**
-**  CUnitType::Name
-**
-**    Pretty name shown by the engine. The name should be shorter
-**    than 17 characters and no word can be longer than 8 characters.
-**
-**  CUnitType::File
-**
-**    Path file name of the sprite file.
-**
-**  CUnitType::ShadowFile
-**
-**    Path file name of shadow sprite file.
-**
-**  CUnitType::DrawLevel
-**
-**    The Level/Order to draw this type of unit in. 0-255 usually.
-**
-**  CUnitType::Width CUnitType::Height
-**
-**    Size of a sprite frame in pixels. All frames of a sprite have
-**    the same size. Also all sprites (tilesets) must have the same
-**    size.
-**
-**  CUnitType::ShadowWidth CUnitType::ShadowHeight
-**
-**    Size of a shadow sprite frame in pixels. All frames of a sprite
-**    have the same size. Also all sprites (tilesets) must have the
-**    same size.
-**
-**  CUnitType::ShadowOffsetX CUnitType::ShadowOffsetY
-**
-**    Vertical offset to draw the shadow in pixels.
-**
-**  CUnitType::Animations
-**
-**    Animation scripts for the different actions. Currently the
-**    animations still, move, attack and die are supported.
-**  @see CAnimations
-**  @see CAnimation
-**
-**  CUnitType::Icon
-**
-**    Icon to display for this unit-type. Contains configuration and
-**    run time variable.
-**  @note This icon can be used for training, but isn't used.
-**
-**  CUnitType::Missile
-**
-**    Configuration and run time variable of the missile weapon.
-**  @note It is planned to support more than one weapons.
-**  And the sound of the missile should be used as fire sound.
-**
-**  CUnitType::Explosion
-**
-**    Configuration and run time variable of the missile explosion.
-**    This is the explosion that happens if unit is set to
-**    ExplodeWhenKilled
-**
-**  CUnitType::CorpseName
-**
-**    Corpse unit-type name, should only be used during setup.
-**
-**  CUnitType::CorpseType
-**
-**    Corpse unit-type pointer, only this should be used during run
-**    time. Many unit-types can share the same corpse.
-**
-**
-**  @todo continue this documentation
-**
-**  CUnitType::Construction
-**
-**    What is shown in construction phase.
-**
-**  CUnitType::SightRange
-**
-**    Sight range
-**
-**  CUnitType::_HitPoints
-**
-**    Maximum hit points
-**
-**
-**  CUnitType::_Costs[::MaxCosts]
-**
-**    How many resources needed
-**
-**  CUnitType::RepairHP
-**
-**    The HP given to a unit each cycle it's repaired.
-**    If zero, unit cannot be repaired
-**
-**    CUnitType::RepairCosts[::MaxCosts]
-**
-**    Costs per repair cycle to fix a unit.
-**
-**  CUnitType::TileWidth
-**
-**    Tile size on map width
-**
-**  CUnitType::TileHeight
-**
-**    Tile size on map height
-**
-**  CUnitType::BoxWidth
-**
-**    Selected box size width
-**
-**  CUnitType::BoxHeight
-**
-**    Selected box size height
-**
-**  CUnitType::NumDirections
-**
-**    Number of directions the unit can face
-**
-**  CUnitType::MinAttackRange
-**
-**    Minimal attack range
-**
-**  CUnitType::ReactRangeComputer
-**
-**    Reacts on enemy for computer
-**
-**  CUnitType::ReactRangePerson
-**
-**    Reacts on enemy for person player
-**
-**  CUnitType::Priority
-**
-**    Priority value / AI Treatment
-**
-**  CUnitType::BurnPercent
-**
-**    The burning limit in percents. If the unit has lees than
-**    this it will start to burn.
-**
-**  CUnitType::BurnDamageRate
-**
-**    Burn rate in HP per second
-**
-**  CUnitType::UnitType
-**
-**    Land / fly / naval
-**
-**  @note original only visual effect, we do more with this!
-**
-**  CUnitType::DecayRate
-**
-**    Decay rate in 1/6 seconds
-**
-**  CUnitType::AnnoyComputerFactor
-**
-**    How much this annoys the computer
-**
-**  @todo not used
-**
-**  CUnitType::MouseAction
-**
-**    Right click action
-**
-**  CUnitType::Points
-**
-**    How many points you get for unit. Used in the final score table.
-**
-**  CUnitType::CanTarget
-**
-**    Which units can it attack
-**
-**  Unit::Revealer
-**
-**    A special unit used to reveal the map for a time. This unit
-**    has active sight even when Removed. It's used for Reveal map
-**    type of spells.
-**
-**  CUnitType::LandUnit
-**
-**    Land animated
-**
-**  CUnitType::AirUnit
-**
-**    Air animated
-**
-**  CUnitType::SeaUnit
-**
-**    Sea animated
-**
-**  CUnitType::ExplodeWhenKilled
-**
-**    Death explosion animated
-**
-**  CUnitType::RandomMovementProbability
-**
-**    When the unit is idle this is the probability that it will
-**    take a step in a random direction, in percents.
-**
-**  CUnitType::ClicksToExplode
-**
-**    If this is non-zero, then after that many clicks the unit will
-**    commit suicide. Doesn't work with resource workers/resources.
-**
-**  CUnitType::Building
-**
-**    Unit is a Building
-**
-**  CUnitType::VisibleUnderFog
-**
-**    Unit is visible under fog of war.
-**
-**  CUnitType::PermanentCloak
-**
-**    Unit is permanently cloaked.
-**
-**  CUnitType::DetectCloak
-**
-**    These units can detect Cloaked units.
-**
-**  CUnitType::Coward
-**
-**    Unit is a coward, and acts defensively. it will not attack
-**    at will and auto-casters will not buff it(bloodlust).
-**
-**  CUnitType::Transporter
-**
-**    Can transport units
-**
-**  CUnitType::AttackFromTransporter
-**
-**    Units inside this transporter can attack with missiles.
-**
-**  CUnitType::MaxOnBoard
-**
-**    Maximum units on board (for transporters), and resources
-**
-**  CUnitType::StartingResources
-**    Amount of Resources a unit has when It's Built
-**
-**  CUnitType::DamageType
-**    Unit's missile damage type (used for extra death animations)
-**
-**  CUnitType::GivesResource
-**
-**    This equals to the resource Id of the resource given
-**    or 0 (TimeCost) for other buildings.
-**
-**  CUnitType::CanHarvest
-**
-**    Resource can be harvested. It's false for things like
-**    oil patches.
-**  @todo crappy name.
-**
-**  CUnitType::Harvester
-**
-**    Unit is a resource worker. Faster than examining ResInfo
-**
-**  CUnitType::ResInfo[::MaxCosts]
-**
-**    Information about resource harvesting. If NULL, it can't
-**    harvest it.
-**
-**  CUnitType::NeutralMinimapColorRGB
-**
-**    Says what color a unit will have when it's neutral and
-**    is displayed on the minimap.
-**
-**  CUnitType::CanStore[::MaxCosts]
-**
-**    What resource types we can store here.
-**
-**  CUnitType::Vanishes
-**
-**    Corpes & destroyed places
-**
-**  CUnitType::GroundAttack
-**
-**    Can do command ground attack
-**
-**  CUnitType::ShoreBuilding
-**
-**    Building must be build on coast
-**
-**  CUnitType::CanCastSpell
-**
-**    Unit is able to use spells
-**
-**  CUnitType::CanAttack
-**
-**    Unit is able to attack.
-**
-**  CUnitType::RepairRange
-**
-**    Unit can repair buildings. It will use the actack animation.
-**    It will heal 4 points for every repair cycle, and cost 1 of
-**    each resource, alternatively(1 cycle wood, 1 cycle gold)
-**  @todo The above should be more configurable.
-**    If units have a repair range, they can repair, and this is the
-**    distance.
-**
-**  CUnitType::BuilderOutside
-**
-**    Only valid for buildings. When building the worker will
-**    remain outside inside the building.
-**
-**  @warning Workers that can build buildings with the
-**  @warning BuilderOutside flag must have the CanRepair flag.
-**
-**  CUnitType::BuilderLost
-**
-**    Only valid for buildings without the BuilderOutside flag.
-**    The worker is lost when the building is completed.
-**
-**  CUnitType::SelectableByRectangle
-**
-**    Selectable with mouse rectangle
-**
-**    CUnitType::Teleporter
-**
-**    Can teleport other units.
-**
-**    CUnitType::ShieldPiercing
-**
-**    Can directly damage shield-protected units, without shield damaging.
-**
-**    CUnitType::SaveCargo
-**
-**    Unit unloads his passengers after death.
-**
-**  CUnitType::Sound
-**
-**    Sounds for events
-**
-**  CUnitType::Weapon
-**
-**    Current sound for weapon
-**
-**  @todo temporary solution
-**
-**  CUnitType::Supply
-**
-**    How much food does this unit supply.
-**
-**  CUnitType::Demand
-**
-**    Food demand
-**
-**  CUnitType::ImproveIncomes[::MaxCosts]
-**
-**    Gives the player an improved income.
-**
-**  CUnitType::FieldFlags
-**
-**    Flags that are set, if a unit enters a map field or cleared, if
-**    a unit leaves a map field.
-**
-**  CUnitType::MovementMask
-**
-**    Movement mask, this value is and'ed to the map field flags, to
-**    see if a unit can enter or placed on the map field.
-**
-**  CUnitType::Stats[::PlayerMax]
-**
-**    Unit status for each player
-**  @todo This stats should? be moved into the player struct
-**
-**  CUnitType::Type
-**
-**    Type as number
-**  @todo Should us a general name f.e. Slot here?
-**
-**  CUnitType::Sprite
-**
-**    Sprite images
-**
-**  CUnitType::ShadowSprite
-**
-**    Shadow sprite images
-**
-**  CUnitType::PlayerColorSprite
-**
-**    Sprite images of the player colors.  This image is drawn
-**    over CUnitType::Sprite.  Used with OpenGL only.
-**
-**
-*/
-/**
-**
-**  @class ResourceInfo unittype.h
-**
-** \#include "unittype.h"
-**
-**    This class contains information about how a unit will harvest a resource.
-**
-**  ResourceInfo::FileWhenLoaded
-**
-**    The harvester's animation file will change when it's loaded.
-**
-**  ResourceInfo::FileWhenEmpty;
-**
-**    The harvester's animation file will change when it's empty.
-**    The standard animation is used only when building/repairing.
-**
-**
-**  ResourceInfo::HarvestFromOutside
-**
-**    Unit will harvest from the outside. The unit will use it's
-**    Attack animation (seems it turned into a generic Action anim.)
-**
-**  ResourceInfo::ResourceId
-**
-**    The resource this is for. Mostly redundant.
-**
-**  ResourceInfo::FinalResource
-**
-**    The resource is converted to this at the depot. Usefull for
-**    a fisherman who harvests fish, but it all turns to food at the
-**    depot.
-**
-**  ResourceInfo::WaitAtResource
-**
-**    Cycles the unit waits while inside a resource.
-**
-**  ResourceInfo::ResourceStep
-**
-**    The unit makes so-caled mining cycles. Each mining cycle
-**    it does some sort of animation and gains ResourceStep
-**    resources. You can stop after any number of steps.
-**    when the quantity in the harvester reaches the maximum
-**    (ResourceCapacity) it will return home. I this is 0 then
-**    it's considered infinity, and ResourceCapacity will now
-**    be the limit.
-**
-**  ResourceInfo::ResourceCapacity
-**
-**    Maximum amount of resources a harvester can carry. The
-**    actual amount can be modified while unloading.
-**
-**  ResourceInfo::LoseResources
-**
-**    Special lossy behaviour for loaded harvesters. Harvesters
-**    with loads other than 0 and ResourceCapacity will lose their
-**    cargo on any new order.
-**
-**  ResourceInfo::WaitAtDepot
-**
-**    Cycles the unit waits while inside the depot to unload.
-**
-**  ResourceInfo::TerrainHarvester
-**
-**    The unit will harvest terrain. For now this only works
-**    for wood. maybe it could be made to work for rocks, but
-**    more than that requires a tileset rewrite.
-**  @todo more configurable.
-**
-*/
-
-/*----------------------------------------------------------------------------
 --  Includes
 ----------------------------------------------------------------------------*/
 
@@ -530,6 +52,7 @@
 #include "missileconfig.h"
 #include "vec2i.h"
 
+#include <climits>
 #include <vector>
 #include <algorithm>
 #include <map>
@@ -577,10 +100,10 @@ public:
 	unsigned WaitAtDepot;           /// Cycles the unit waits while returning.
 	unsigned ResourceId;            /// Id of the resource harvested. Redundant.
 	unsigned FinalResource;         /// Convert resource when delivered.
-	unsigned char TerrainHarvester;      /// Unit will harvest terrain(wood only for now).
-	unsigned char LoseResources;         /// The unit will lose it's resource when distracted.
-	unsigned char HarvestFromOutside;    /// Unit harvests without entering the building.
-	unsigned char RefineryHarvester;    /// Unit have to build Refinery buildings for harvesting.
+	unsigned char TerrainHarvester;    /// Unit will harvest terrain(wood only for now).
+	unsigned char LoseResources;       /// The unit will lose it's resource when distracted.
+	unsigned char HarvestFromOutside;  /// Unit harvests without entering the building.
+	unsigned char RefineryHarvester;   /// Unit have to build Refinery buildings for harvesting.
 	//  Runtime info:
 	CPlayerColorGraphic *SpriteWhenLoaded; /// The graphic corresponding to FileWhenLoaded.
 	CPlayerColorGraphic *SpriteWhenEmpty;  /// The graphic corresponding to FileWhenEmpty
@@ -597,7 +120,8 @@ class CVariable
 public:
 	CVariable() : Max(0), Value(0), Increase(0), Enable(0) {}
 
-	bool operator ==(const CVariable &rhs) const {
+	bool operator ==(const CVariable &rhs) const
+	{
 		return this->Max == rhs.Max
 			   && this->Value == rhs.Value
 			   && this->Increase == rhs.Increase
@@ -606,44 +130,47 @@ public:
 	bool operator !=(const CVariable &rhs) const { return !(*this == rhs); }
 
 public:
-	int Max;           /// Maximum for the variable. (Assume min is 0.)
-	int Value;         /// Current (or initial) value of the variable (or initial value).
-	char Increase;     /// Number to increase(decrease) Value by second.
-	char Enable;       /// True if the unit doesn't have this variable. (f.e shield)
+	int Max;        /// Maximum for the variable. (Assume min is 0.)
+	int Value;      /// Current (or initial) value of the variable (or initial value).
+	char Increase;  /// Number to increase(decrease) Value by second.
+	char Enable;    /// True if the unit doesn't have this variable. (f.e shield)
 };
 
-// Index for boolflag aready defined
+// Index for boolflag already defined
 enum {
-	COWARD_INDEX = 0,
+	COWARD_INDEX = 0,				/// Unit will only attack if instructed.
 	BUILDING_INDEX,
 	FLIP_INDEX,
-	REVEALER_INDEX,
+	REVEALER_INDEX,					/// reveal the fog of war
 	LANDUNIT_INDEX,
 	AIRUNIT_INDEX,
 	SEAUNIT_INDEX,
 	EXPLODEWHENKILLED_INDEX,
-	VISIBLEUNDERFOG_INDEX,
-	PERMANENTCLOAK_INDEX,
-	DETECTCLOAK_INDEX,
-	ATTACKFROMTRANSPORTER_INDEX,
-	VANISHES_INDEX,
-	GROUNDATTACK_INDEX,
-	SHOREBUILDING_INDEX,
+	VISIBLEUNDERFOG_INDEX,			/// Unit is visible under fog of war.
+	PERMANENTCLOAK_INDEX,			/// Is only visible by CloakDetectors.
+	DETECTCLOAK_INDEX,				/// Can see Cloaked units.
+	ATTACKFROMTRANSPORTER_INDEX,	/// Can attack from transporter
+	VANISHES_INDEX,					/// Corpses & destroyed places.
+	GROUNDATTACK_INDEX,				/// Can do ground attack command.
+	SHOREBUILDING_INDEX,			/// Building must be built on coast.
 	CANATTACK_INDEX,
-	BUILDEROUTSIDE_INDEX,
-	BUILDERLOST_INDEX,
-	CANHARVEST_INDEX,
-	HARVESTER_INDEX,
-	SELECTABLEBYRECTANGLE_INDEX,
+	BUILDEROUTSIDE_INDEX,			/// The builder stays outside during the construction.
+	BUILDERLOST_INDEX,				/// The builder is lost after the construction.
+	CANHARVEST_INDEX,				/// Resource can be harvested.
+	HARVESTER_INDEX,				/// Unit is a resource harvester.
+	SELECTABLEBYRECTANGLE_INDEX,	/// Selectable with mouse rectangle.
 	ISNOTSELECTABLE_INDEX,
-	DECORATION_INDEX,
-	INDESTRUCTIBLE_INDEX,
-	TELEPORTER_INDEX,
+	DECORATION_INDEX,				/// Unit is a decoration (act as tile).
+	INDESTRUCTIBLE_INDEX,			/// Unit is indestructible (take no damage).
+	TELEPORTER_INDEX,				/// Can teleport other units.
 	SHIELDPIERCE_INDEX,
-	SAVECARGO_INDEX,
-	NONSOLID_INDEX,
-	WALL_INDEX,
-	NORANDOMPLACING_INDEX,
+	SAVECARGO_INDEX,				/// Unit unloads his passengers after death.
+	NONSOLID_INDEX,					/// Unit can be entered by other units.
+	WALL_INDEX,						/// Use special logic for Direction field.
+	NORANDOMPLACING_INDEX,			/// Don't use random frame rotation
+	ORGANIC_INDEX,					/// Organic unit (used for death coil spell)
+	SIDEATTACK_INDEX,
+	NOFRIENDLYFIRE_INDEX,           /// Unit accepts friendly fire for splash attacks
 	NBARALREADYDEFINED
 };
 
@@ -660,8 +187,8 @@ enum {
 	CARRYRESOURCE_INDEX,
 	XP_INDEX,
 	KILL_INDEX,
-	SUPPLY_INDEX,
-	DEMAND_INDEX,
+	SUPPLY_INDEX,					/// Food supply
+	DEMAND_INDEX,					/// Food demand
 	ARMOR_INDEX,
 	SIGHTRANGE_INDEX,
 	ATTACKRANGE_INDEX,
@@ -669,6 +196,8 @@ enum {
 	BASICDAMAGE_INDEX,
 	POSX_INDEX,
 	POSY_INDEX,
+	TARGETPOSX_INDEX,
+	TARGETPOSY_INDEX,
 	RADAR_INDEX,
 	RADARJAMMER_INDEX,
 	AUTOREPAIRRANGE_INDEX,
@@ -681,6 +210,12 @@ enum {
 	SHIELD_INDEX,
 	POINTS_INDEX,
 	MAXHARVESTERS_INDEX,
+	POISON_INDEX,
+	SHIELDPERMEABILITY_INDEX,
+	SHIELDPIERCING_INDEX,
+	ISALIVE_INDEX,
+	PLAYER_INDEX,
+	PRIORITY_INDEX,
 	NVARALREADYDEFINED
 };
 
@@ -691,7 +226,7 @@ class CFont;
 /**
 **  Decoration for user defined variable.
 **
-**    It is used to show variables graphicly.
+**  It is used to show variables graphicly.
 **  @todo add more stuff in this struct.
 */
 class CDecoVar
@@ -699,39 +234,40 @@ class CDecoVar
 public:
 
 	CDecoVar() {};
-	virtual ~CDecoVar() {
+	virtual ~CDecoVar()
+	{
 	};
 
 	/// function to draw the decorations.
-	virtual void Draw(int x, int y, const CUnitType *Type, const CVariable &var) const = 0;
+	virtual void Draw(int x, int y, const CUnitType &type, const CVariable &var) const = 0;
 
-	unsigned int Index;         /// Index of the variable. @see DefineVariables
+	unsigned int Index;     /// Index of the variable. @see DefineVariables
 
-	int OffsetX;                /// Offset in X coord.
-	int OffsetY;                /// Offset in Y coord.
+	int OffsetX;            /// Offset in X coord.
+	int OffsetY;            /// Offset in Y coord.
 
-	int OffsetXPercent;         /// Percent offset (TileWidth) in X coord.
-	int OffsetYPercent;         /// Percent offset (TileHeight) in Y coord.
+	int OffsetXPercent;     /// Percent offset (TileWidth) in X coord.
+	int OffsetYPercent;     /// Percent offset (TileHeight) in Y coord.
 
-	bool IsCenteredInX;         /// if true, use center of deco instead of left border
-	bool IsCenteredInY;         /// if true, use center of deco instead of upper border
+	bool IsCenteredInX;     /// if true, use center of deco instead of left border
+	bool IsCenteredInY;     /// if true, use center of deco instead of upper border
 
-	bool ShowIfNotEnable;       /// if false, Show only if var is enable
-	bool ShowWhenNull;          /// if false, don't show if var is null (F.E poison)
-	bool HideHalf;              /// if true, don't show when 0 < var < max.
-	bool ShowWhenMax;           /// if false, don't show if var is to max. (Like mana)
-	bool ShowOnlySelected;      /// if true, show only for selected units.
+	bool ShowIfNotEnable;   /// if false, Show only if var is enable
+	bool ShowWhenNull;      /// if false, don't show if var is null (F.E poison)
+	bool HideHalf;          /// if true, don't show when 0 < var < max.
+	bool ShowWhenMax;       /// if false, don't show if var is to max. (Like mana)
+	bool ShowOnlySelected;  /// if true, show only for selected units.
 
-	bool HideNeutral;           /// if true, don't show for neutral unit.
-	bool HideAllied;            /// if true, don't show for allied unit. (but show own units)
-	bool ShowOpponent;          /// if true, show for opponent unit.
+	bool HideNeutral;       /// if true, don't show for neutral unit.
+	bool HideAllied;        /// if true, don't show for allied unit. (but show own units)
+	bool ShowOpponent;      /// if true, show for opponent unit.
 };
 
 class CDecoVarBar : public CDecoVar
 {
 public:
 	/// function to draw the decorations.
-	virtual void Draw(int x, int y, const CUnitType *type, const CVariable &var) const;
+	virtual void Draw(int x, int y, const CUnitType &type, const CVariable &var) const;
 
 	bool IsVertical;            /// if true, vertical bar, else horizontal.
 	bool SEToNW;                /// (SouthEastToNorthWest), if false value 0 is on the left or up of the bar.
@@ -749,9 +285,9 @@ class CDecoVarText : public CDecoVar
 public:
 	CDecoVarText() : Font(NULL) {};
 	/// function to draw the decorations.
-	virtual void Draw(int x, int y, const CUnitType *type, const CVariable &var) const;
+	virtual void Draw(int x, int y, const CUnitType &type, const CVariable &var) const;
 
-	CFont *Font;                   /// Font to use to display value.
+	CFont *Font;  /// Font to use to display value.
 	// FIXME : Add Color, format
 };
 
@@ -762,7 +298,7 @@ public:
 	CDecoVarSpriteBar() : NSprite(-1) {};
 	/// function to draw the decorations.
 	virtual void Draw(int x, int y,
-					  const CUnitType *Type, const CVariable &Variable) const;
+					  const CUnitType &type, const CVariable &var) const;
 
 	char NSprite; /// Index of number. (@see DefineSprites and @see GetSpriteIndex)
 	// FIXME Sprite info. better way ?
@@ -772,19 +308,20 @@ public:
 class CDecoVarStaticSprite : public CDecoVar
 {
 public:
-	CDecoVarStaticSprite() : NSprite(-1), n(0) {}
+	CDecoVarStaticSprite() : NSprite(-1), n(0), FadeValue(0) {}
 	/// function to draw the decorations.
-	virtual void Draw(int x, int y, const CUnitType *type, const CVariable &var) const;
+	virtual void Draw(int x, int y, const CUnitType &type, const CVariable &var) const;
 
 	// FIXME Sprite info. and Replace n with more appropriate var.
-	char NSprite;               /// Index of sprite. (@see DefineSprites and @see GetSpriteIndex)
-	int n;                      /// identifiant in SpellSprite
+	char NSprite;  /// Index of sprite. (@see DefineSprites and @see GetSpriteIndex)
+	int n;         /// identifiant in SpellSprite
+	int FadeValue; /// if variable's value is below than FadeValue, it drawn transparent.
 };
 
 enum UnitTypeType {
-	UnitTypeLand,               /// Unit lives on land
-	UnitTypeFly,                /// Unit lives in air
-	UnitTypeNaval               /// Unit lives on water
+	UnitTypeLand,  /// Unit lives on land
+	UnitTypeFly,   /// Unit lives in air
+	UnitTypeNaval  /// Unit lives on water
 };
 
 enum DistanceTypeType {
@@ -796,7 +333,6 @@ enum DistanceTypeType {
 	GreaterThanEqual
 };
 
-
 class CBuildRestriction
 {
 public:
@@ -805,19 +341,19 @@ public:
 	virtual bool Check(const CUnit *builder, const CUnitType &type, const Vec2i &pos, CUnit *&ontoptarget) const = 0;
 };
 
-
 class CBuildRestrictionAnd : public CBuildRestriction
 {
 public:
-
-	virtual ~CBuildRestrictionAnd() {
+	virtual ~CBuildRestrictionAnd()
+	{
 		for (std::vector<CBuildRestriction *>::const_iterator i = _or_list.begin();
 			 i != _or_list.end(); ++i) {
 			delete *i;
 		}
 		_or_list.clear();
 	}
-	virtual void Init() {
+	virtual void Init()
+	{
 		for (std::vector<CBuildRestriction *>::const_iterator i = _or_list.begin();
 			 i != _or_list.end(); ++i) {
 			(*i)->Init();
@@ -829,8 +365,6 @@ public:
 public:
 	std::vector<CBuildRestriction *> _or_list;
 };
-
-
 
 class CBuildRestrictionAddOn : public CBuildRestriction
 {
@@ -849,9 +383,9 @@ public:
 	virtual void Init() {this->Parent = UnitTypeByIdent(this->ParentName);}
 	virtual bool Check(const CUnit *builder, const CUnitType &type, const Vec2i &pos, CUnit *&ontoptarget) const;
 
-	Vec2i Offset;         /// offset from the main building to place this
+	Vec2i Offset;           /// offset from the main building to place this
 	std::string ParentName; /// building that is unit is an addon too.
-	CUnitType *Parent;   /// building that is unit is an addon too.
+	CUnitType *Parent;      /// building that is unit is an addon too.
 };
 
 class CBuildRestrictionOnTop : public CBuildRestriction
@@ -863,7 +397,7 @@ class CBuildRestrictionOnTop : public CBuildRestriction
 		inline bool operator()(CUnit *const unit);
 		CUnit *ontop;   /// building that is unit is an addon too.
 	private:
-		const CUnitType *const Parent;   /// building that is unit is an addon too.
+		const CUnitType *const Parent;  /// building that is unit is an addon too.
 		const Vec2i pos;  //functor work position
 	};
 public:
@@ -873,15 +407,15 @@ public:
 	virtual bool Check(const CUnit *builder, const CUnitType &type, const Vec2i &pos, CUnit *&ontoptarget) const;
 
 	std::string ParentName;  /// building that is unit is an addon too.
-	CUnitType *Parent;   /// building that is unit is an addon too.
-	int ReplaceOnDie: 1;   /// recreate the parent on destruction
-	int ReplaceOnBuild: 1; /// remove the parent, or just build over it.
+	CUnitType *Parent;       /// building that is unit is an addon too.
+	int ReplaceOnDie: 1;     /// recreate the parent on destruction
+	int ReplaceOnBuild: 1;   /// remove the parent, or just build over it.
 };
 
 class CBuildRestrictionDistance : public CBuildRestriction
 {
 public:
-	CBuildRestrictionDistance() : Distance(0), RestrictType(NULL) {};
+	CBuildRestrictionDistance() : Distance(0), CheckBuilder(false), RestrictType(NULL), Diagonal(true) {};
 	virtual ~CBuildRestrictionDistance() {};
 	virtual void Init() {this->RestrictType = UnitTypeByIdent(this->RestrictTypeName);};
 	virtual bool Check(const CUnit *builder, const CUnitType &type, const Vec2i &pos, CUnit *&ontoptarget) const;
@@ -889,7 +423,43 @@ public:
 	int Distance;        /// distance to build (circle)
 	DistanceTypeType DistanceType;
 	std::string RestrictTypeName;
+	std::string RestrictTypeOwner;
 	CUnitType *RestrictType;
+	bool CheckBuilder;
+	bool Diagonal;
+};
+
+class CBuildRestrictionHasUnit : public CBuildRestriction
+{
+public:
+	CBuildRestrictionHasUnit() : Count(0), RestrictType(NULL) {};
+	virtual ~CBuildRestrictionHasUnit() {};
+	virtual void Init() { this->RestrictType = UnitTypeByIdent(this->RestrictTypeName); };
+	virtual bool Check(const CUnit *builder, const CUnitType &type, const Vec2i &pos, CUnit *&ontoptarget) const;
+
+	int Count;
+	DistanceTypeType CountType;
+	std::string RestrictTypeName;
+	CUnitType *RestrictType;
+	std::string RestrictTypeOwner;
+};
+
+class CBuildRestrictionSurroundedBy : public CBuildRestriction
+{
+public:
+	CBuildRestrictionSurroundedBy() : Count(0), Distance(0), DistanceType(Equal), CountType(Equal), RestrictType(NULL), CheckBuilder(false) {};
+	virtual ~CBuildRestrictionSurroundedBy() {};
+	virtual void Init() { this->RestrictType = UnitTypeByIdent(this->RestrictTypeName); };
+	virtual bool Check(const CUnit *builder, const CUnitType &type, const Vec2i &pos, CUnit *&ontoptarget) const;
+
+	int Distance;
+	DistanceTypeType DistanceType;
+	int Count;
+	DistanceTypeType CountType;
+	std::string RestrictTypeName;
+	std::string RestrictTypeOwner;
+	CUnitType *RestrictType;
+	bool CheckBuilder;
 };
 
 /// Base structure of unit-type
@@ -900,14 +470,16 @@ public:
 	CUnitType();
 	~CUnitType();
 
-	Vec2i GetHalfTileSize() const {
-		Vec2i res(TileWidth / 2, TileHeight / 2);
-
-		return res;
-	}
-
+	Vec2i GetHalfTileSize() const { return Vec2i(TileWidth / 2, TileHeight / 2); }
 	PixelSize GetPixelSize() const;
 
+	bool CheckUserBoolFlags(const char *BoolFlags) const;
+	bool CanTransport() const { return MaxOnBoard > 0 && !GivesResource; }
+	bool CanMove() const;
+
+	bool CanSelect(GroupSelectionMode mode = SELECTABLE_BY_RECTANGLE_ONLY) const;
+
+public:
 	std::string Ident;              /// Identifier
 	std::string Name;               /// Pretty name shown from the engine
 	int Slot;                       /// Type as number
@@ -946,8 +518,13 @@ public:
 	LuaCallback *OnHit;             /// lua function called when unit is hit
 	LuaCallback *OnEachCycle;       /// lua function called every cycle
 	LuaCallback *OnEachSecond;      /// lua function called every second
+	LuaCallback *OnInit;            /// lua function called on unit init
 
-	mutable std::string DamageType;         /// DamageType (used for extra death animations and impacts)
+	int TeleportCost;               /// mana used for teleportation
+	LuaCallback *TeleportEffectIn;   /// lua function to create effects before teleportation
+	LuaCallback *TeleportEffectOut;  /// lua function to create effects after teleportation
+
+	mutable std::string DamageType; /// DamageType (used for extra death animations and impacts)
 
 	std::string CorpseName;         /// Corpse type name
 	CUnitType *CorpseType;          /// Corpse unit-type
@@ -967,22 +544,26 @@ public:
 	int MinAttackRange;             /// Minimal attack range
 	int ReactRangeComputer;         /// Reacts on enemy for computer
 	int ReactRangePerson;           /// Reacts on enemy for person player
-	int Priority;                   /// Priority value / AI Treatment
 	int BurnPercent;                /// Burning percent.
 	int BurnDamageRate;             /// HP burn rate per sec
 	int RepairRange;                /// Units repair range.
+#define InfiniteRepairRange INT_MAX
 	char *CanCastSpell;             /// Unit is able to use spells.
 	char *AutoCastActive;           /// Default value for autocast.
 	int AutoBuildRate;              /// The rate at which the building builds itself
 	int RandomMovementProbability;  /// Probability to move randomly.
+	int RandomMovementDistance;     /// Quantity of tiles to move randomly.
 	int ClicksToExplode;            /// Number of consecutive clicks until unit suicides.
 	int MaxOnBoard;                 /// Number of Transporter slots.
+	int BoardSize;                  /// How much "cells" unit occupies inside transporter
+	int ButtonLevelForTransporter;  /// On which button level game will show units inside transporter
 	int StartingResources;          /// Amount of Resources on build
 	/// originally only visual effect, we do more with this!
 	UnitTypeType UnitType;          /// Land / fly / naval
 	int DecayRate;                  /// Decay rate in 1/6 seconds
 	// TODO: not used
 	int AnnoyComputerFactor;        /// How much this annoys the computer
+	int AiAdjacentRange;            /// Min radius for AI build surroundings checking
 	int MouseAction;                /// Right click action
 #define MouseActionNone      0      /// Nothing
 #define MouseActionAttack    1      /// Attack
@@ -996,39 +577,18 @@ public:
 #define CanTargetAir  4             /// Can attack air units
 
 	unsigned Flip : 1;              /// Flip image when facing left
-	unsigned Revealer : 1;          /// reveal the fog of war
 	unsigned LandUnit : 1;          /// Land animated
 	unsigned AirUnit : 1;           /// Air animated
 	unsigned SeaUnit : 1;           /// Sea animated
 	unsigned ExplodeWhenKilled : 1; /// Death explosion animated
 	unsigned Building : 1;          /// Building
-	unsigned VisibleUnderFog : 1;   /// Unit is visible under fog of war.
-	unsigned PermanentCloak : 1;    /// Is only visible by CloakDetectors.
-	unsigned DetectCloak : 1;       /// Can see Cloaked units.
-	unsigned Coward : 1;            /// Unit will only attack if instructed.
-	unsigned AttackFromTransporter : 1;  /// Can attack from transporter
-	unsigned Vanishes : 1;          /// Corpes & destroyed places.
-	unsigned GroundAttack : 1;      /// Can do command ground attack.
-	unsigned ShoreBuilding : 1;     /// Building must be build on coast.
 	unsigned CanAttack : 1;         /// Unit can attack.
-	unsigned BuilderOutside : 1;    /// The builder stays outside during the build.
-	unsigned BuilderLost : 1;       /// The builder is lost after the build.
-	unsigned CanHarvest : 1;        /// Resource can be harvested.
-	unsigned Harvester : 1;         /// unit is a resource harvester.
 	unsigned Neutral : 1;           /// Unit is neutral, used by the editor
 
-	unsigned SelectableByRectangle : 1; /// Selectable with mouse rectangle.
-	unsigned IsNotSelectable : 1;       /// Unit should not be selected during game.
-	unsigned Decoration : 1;            /// Unit is a decoration (act as tile).
-	unsigned Indestructible : 1;        /// Unit is indestructible (take no damage).
-	unsigned Teleporter : 1;            /// Can teleport other units.
-	unsigned ShieldPiercing : 1;        /// Can directly damage shield-protected units, without shield damaging.
-	unsigned SaveCargo : 1;             /// Unit unloads his passengers after death.
-	unsigned NonSolid : 1;              /// Unit can be entered by other units.
-	unsigned Wall : 1;                  /// Use special logic for Direction field.
-	unsigned NoRandomPlacing : 1;       /// Don't use random frame rotation
+	unsigned SideAttack : 1;            /// Unit turns for attack (used for ships)
 
 	CUnitStats DefaultStat;
+	CUnitStats MapDefaultStat;
 	struct BoolFlags {
 		bool value;             /// User defined flag. Used for (dis)allow target.
 		char CanTransport;      /// Can transport units with this flag.
@@ -1045,13 +605,11 @@ public:
 	CColor NeutralMinimapColorRGB;   /// Minimap Color for Neutral Units.
 
 	CUnitSound Sound;               /// Sounds for events
+	CUnitSound MapSound;			/// Sounds for events, map-specific
 
-	int Supply;                     /// Food supply
-	int Demand;                     /// Food demand
+	int PoisonDrain;                /// How much health is drained every second when poisoned
 
 	// --- FILLED UP ---
-
-	int ImproveIncomes[MaxCosts];   /// Gives player an improved income
 
 	unsigned FieldFlags;            /// Unit map field flags
 	unsigned MovementMask;          /// Unit check this map flags for move
@@ -1061,26 +619,6 @@ public:
 
 	CPlayerColorGraphic *Sprite;     /// Sprite images
 	CGraphic *ShadowSprite;          /// Shadow sprite image
-
-	/* API */
-
-	bool CheckUserBoolFlags(const char *BoolFlags) const;
-	bool CanTransport() const { return MaxOnBoard > 0 && !GivesResource; }
-	bool CanMove() const;
-
-	bool CanSelect(GroupSelectionMode mode = SELECTABLE_BY_RECTANGLE_ONLY) const {
-		if (!IsNotSelectable) {
-			switch (mode) {
-				case SELECTABLE_BY_RECTANGLE_ONLY:
-					return SelectableByRectangle;
-				case NON_SELECTABLE_BY_RECTANGLE_ONLY:
-					return !SelectableByRectangle;
-				default:
-					return true;
-			}
-		}
-		return false;
-	}
 };
 
 /*----------------------------------------------------------------------------
@@ -1090,8 +628,8 @@ public:
 extern std::vector<CUnitType *> UnitTypes;   /// All unit-types
 
 /// @todo this hardcoded unit-types must be removed!!
-extern CUnitType *UnitTypeHumanWall;          /// Human wall
-extern CUnitType *UnitTypeOrcWall;            /// Orc wall
+extern CUnitType *UnitTypeHumanWall;  /// Human wall
+extern CUnitType *UnitTypeOrcWall;    /// Orc wall
 
 /**
 **  Variable info for unit and unittype.
@@ -1105,7 +643,8 @@ public:
 
 		struct DataKey {
 			static bool key_pred(const DataKey &lhs,
-								 const DataKey &rhs) {
+								 const DataKey &rhs)
+			{
 				return ((lhs.keylen == rhs.keylen) ?
 						(strcmp(lhs.key, rhs.key) < 0) : (lhs.keylen < rhs.keylen));
 			}
@@ -1120,11 +659,13 @@ public:
 		std::map<std::string, int> user;
 		unsigned int TotalKeys;
 
-		void Init() {
+		void Init()
+		{
 			std::sort(buildin, buildin + SIZE, DataKey::key_pred);
 		}
 
-		const char *operator[](int index) {
+		const char *operator[](int index)
+		{
 			for (unsigned int i = 0; i < SIZE; ++i) {
 				if (buildin[i].offset == index) {
 					return buildin[i].key;
@@ -1145,9 +686,10 @@ public:
 		**
 		**  @param varname  Name of the variable.
 		**
-		**  @return         Index of the variable, -1 if not found.
+		**  @return Index of the variable, -1 if not found.
 		*/
-		int operator[](const char *const key) {
+		int operator[](const char *const key)
+		{
 			DataKey k;
 			k.key = key;
 			k.keylen = strlen(key);
@@ -1166,7 +708,8 @@ public:
 			return -1;
 		}
 
-		int AddKey(const char *const key) {
+		int AddKey(const char *const key)
+		{
 			int index = this->operator[](key);
 			if (index != -1) {
 				DebugPrint("Warning, Key '%s' already defined\n" _C_ key);
@@ -1191,18 +734,20 @@ public:
 	void Init();
 	void Clear();
 
-	CBoolKeys BoolFlagNameLookup;		/// Container of name of user defined bool flag.
-	CVariableKeys VariableNameLookup;	/// Container of names of user defined variables.
+	CBoolKeys BoolFlagNameLookup;      /// Container of name of user defined bool flag.
+	CVariableKeys VariableNameLookup;  /// Container of names of user defined variables.
 
-	//	EventType *Event;                   /// Array of functions sets to call when en event occurs.
-	std::vector<CVariable> Variable;	/// Array of user defined variables (default value for unittype).
-	std::vector<CDecoVar *> DecoVar;    /// Array to describe how showing variable.
+	//EventType *Event;                  /// Array of functions sets to call when en event occurs.
+	std::vector<CVariable> Variable;   /// Array of user defined variables (default value for unittype).
+	std::vector<CDecoVar *> DecoVar;   /// Array to describe how showing variable.
 
-	unsigned int GetNumberBoolFlag() const {
+	unsigned int GetNumberBoolFlag() const
+	{
 		return BoolFlagNameLookup.TotalKeys;
 	}
 
-	unsigned int GetNumberVariable() const {
+	unsigned int GetNumberVariable() const
+	{
 		return VariableNameLookup.TotalKeys;
 	}
 };
@@ -1212,9 +757,10 @@ extern CUnitTypeVar UnitTypeVar;
 /*----------------------------------------------------------------------------
 --  Functions
 ----------------------------------------------------------------------------*/
-extern CUnitType *CclGetUnitType(lua_State *l);      /// Access unit-type object
+extern CUnitType *CclGetUnitType(lua_State *l);  /// Access unit-type object
 extern void UnitTypeCclRegister();               /// Register ccl features
 
+extern void UpdateUnitStats(CUnitType &type, int reset_to_default);       /// Update unit stats
 extern void UpdateStats(int reset_to_default);       /// Update unit stats
 extern CUnitType *UnitTypeByIdent(const std::string &ident);/// Get unit-type by ident
 
@@ -1237,6 +783,8 @@ extern void DefineVariableField(lua_State *l, CVariable *var, int lua_index);
 /// Update custom Variables with other variable (like Hp, ...)
 extern void UpdateUnitVariables(CUnit &unit);
 
+extern void SetMapStat(std::string ident, std::string variable_key, int value, std::string variable_type);
+extern void SetMapSound(std::string ident, std::string sound, std::string sound_type, std::string sound_subtype = "");
 //@}
 
 #endif // !__UNITTYPE_H__

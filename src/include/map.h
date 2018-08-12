@@ -84,10 +84,6 @@
 
 #include <string>
 
-#ifndef __TILESET_H__
-#include "tileset.h"
-#endif
-
 #ifndef __MAP_TILE_H__
 #include "tile.h"
 #endif
@@ -102,6 +98,7 @@
 class CGraphic;
 class CPlayer;
 class CFile;
+class CTileset;
 class CUnit;
 class CUnitType;
 
@@ -122,11 +119,13 @@ class CUnitType;
 class CMapInfo
 {
 public:
-	bool IsPointOnMap(int x, int y) const {
+	bool IsPointOnMap(int x, int y) const
+	{
 		return (x >= 0 && y >= 0 && x < MapWidth && y < MapHeight);
 	}
 
-	bool IsPointOnMap(const Vec2i &pos) const {
+	bool IsPointOnMap(const Vec2i &pos) const
+	{
 		return IsPointOnMap(pos.x, pos.y);
 	}
 
@@ -150,21 +149,29 @@ public:
 class CMap
 {
 public:
-	unsigned int getIndex(int x, int y) const {
+	CMap();
+	~CMap();
+
+	unsigned int getIndex(int x, int y) const
+	{
 		return x + y * this->Info.MapWidth;
 	}
-	unsigned int getIndex(const Vec2i &pos) const {
+	unsigned int getIndex(const Vec2i &pos) const
+	{
 		return getIndex(pos.x, pos.y);
 	}
 
-	CMapField *Field(unsigned int index) const {
+	CMapField *Field(unsigned int index) const
+	{
 		return &this->Fields[index];
 	}
 	/// Get the MapField at location x,y
-	CMapField *Field(int x, int y) const {
+	CMapField *Field(int x, int y) const
+	{
 		return &this->Fields[x + y * this->Info.MapWidth];
 	}
-	CMapField *Field(const Vec2i &pos) const {
+	CMapField *Field(const Vec2i &pos) const
+	{
 		return Field(pos.x, pos.y);
 	}
 
@@ -176,8 +183,11 @@ public:
 	void Clean();
 	/// Cleanup memory for fog of war tables
 	void CleanFogOfWar();
-	/// Remove wood/rock from the map.
-	void ClearTile(unsigned short type, const Vec2i &pos);
+
+	/// Remove wood from the map.
+	void ClearWoodTile(const Vec2i &pos);
+	/// Remove rock from the map.
+	void ClearRockTile(const Vec2i &pos);
 
 	/// convert map pixelpos coordonates into tilepos
 	Vec2i MapPixelPosToTilePos(const PixelPos &mapPos) const;
@@ -204,7 +214,7 @@ public:
 	/// Set wall on field.
 	void RemoveWall(const Vec2i &pos);
 	/// Set wall on field.
-	void SetWall(const Vec2i &pos, int humanwall);
+	void SetWall(const Vec2i &pos, bool humanwall);
 
 	/// Returns true, if wall on the map tile field
 	bool WallOnMap(const Vec2i &pos) const;
@@ -224,7 +234,8 @@ public:
 	void Clamp(Vec2i &pos) const;
 
 	//Warning: we expect typical usage as xmin = x - range
-	void FixSelectionArea(Vec2i &minpos, Vec2i &maxpos) {
+	void FixSelectionArea(Vec2i &minpos, Vec2i &maxpos)
+	{
 		minpos.x = std::max<short>(0, minpos.x);
 		minpos.y = std::max<short>(0, minpos.y);
 
@@ -248,7 +259,7 @@ public:
 	CMapField *Fields;              /// fields on map
 	bool NoFogOfWar;           /// fog of war disabled
 
-	CTileset Tileset;          /// tileset data
+	CTileset *Tileset;          /// tileset data
 	std::string TileModelsFileName; /// lua filename that loads all tilemodels
 	CGraphic *TileGraphic;     /// graphic for all the tiles
 	static CGraphic *FogGraphic;      /// graphic for fog of war
@@ -335,12 +346,11 @@ extern void MapFixSeenWallNeighbors(const Vec2i &pos);
 extern void MapFixWallTile(const Vec2i &pos);
 
 //
-// in script_map.c
+// in script_map.cpp
 //
 /// Set a tile
-extern void SetTile(int tile, const Vec2i &pos, int value = 0);
-
-inline void SetTile(int tile, int x, int y, int value = 0)
+extern void SetTile(unsigned int tile, const Vec2i &pos, int value = 0);
+inline void SetTile(unsigned int tile, int x, int y, int value = 0)
 {
 	const Vec2i pos(x, y);
 	SetTile(tile, pos, value);

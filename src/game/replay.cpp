@@ -45,6 +45,7 @@
 #include "map.h"
 #include "netconnect.h"
 #include "network.h"
+#include "parameters.h"
 #include "player.h"
 #include "script.h"
 #include "settings.h"
@@ -72,7 +73,8 @@ class LogEntry
 {
 public:
 	LogEntry() : GameCycle(0), Flush(0), PosX(0), PosY(0), DestUnitNumber(0),
-		Num(0), SyncRandSeed(0), Next(NULL) {
+		Num(0), SyncRandSeed(0), Next(NULL)
+	{
 		UnitNumber = 0;
 	}
 
@@ -96,9 +98,11 @@ public:
 class MPPlayer
 {
 public:
-	MPPlayer() : Race(0), Team(0), Type(0) {}
+	MPPlayer() : PlayerColor(0), Race(0), Team(0), Type(0) {}
 
 	std::string Name;
+	std::string AIScript;
+	int PlayerColor;
 	int Race;
 	int Team;
 	int Type;
@@ -112,8 +116,9 @@ class FullReplay
 public:
 	FullReplay() :
 		MapId(0), Type(0), Race(0), LocalPlayer(0),
-		Resource(0), NumUnits(0), Difficulty(0), NoFow(false), RevealMap(0),
-		MapRichness(0), GameType(0), Opponents(0), Commands(NULL) {
+		Resource(0), NumUnits(0), Difficulty(0), NoFow(false), Inside(false), RevealMap(0),
+		MapRichness(0), GameType(0), Opponents(0), Commands(NULL)
+	{
 		memset(Engine, 0, sizeof(Engine));
 		memset(Network, 0, sizeof(Network));
 	}
@@ -134,6 +139,7 @@ public:
 	int NumUnits;
 	int Difficulty;
 	bool NoFow;
+	bool Inside;
 	int RevealMap;
 	int MapRichness;
 	int GameType;
@@ -192,6 +198,8 @@ static FullReplay *StartReplay()
 
 	for (int i = 0; i < PlayerMax; ++i) {
 		replay->Players[i].Name = Players[i].Name;
+		replay->Players[i].PlayerColor = GameSettings.Presets[i].PlayerColor;
+		replay->Players[i].AIScript = GameSettings.Presets[i].AIScript;
 		replay->Players[i].Race = GameSettings.Presets[i].Race;
 		replay->Players[i].Team = GameSettings.Presets[i].Team;
 		replay->Players[i].Type = GameSettings.Presets[i].Type;
@@ -207,6 +215,7 @@ static FullReplay *StartReplay()
 	replay->NumUnits = GameSettings.NumUnits;
 	replay->Difficulty = GameSettings.Difficulty;
 	replay->NoFow = GameSettings.NoFogOfWar;
+	replay->Inside = GameSettings.Inside;
 	replay->GameType = GameSettings.GameType;
 	replay->RevealMap = GameSettings.RevealMap;
 	replay->MapRichness = GameSettings.MapRichness;
@@ -240,6 +249,8 @@ static void ApplyReplaySettings()
 	}
 
 	for (int i = 0; i < PlayerMax; ++i) {
+		GameSettings.Presets[i].PlayerColor = CurrentReplay->Players[i].PlayerColor;
+		GameSettings.Presets[i].AIScript = CurrentReplay->Players[i].AIScript;
 		GameSettings.Presets[i].Race = CurrentReplay->Players[i].Race;
 		GameSettings.Presets[i].Team = CurrentReplay->Players[i].Team;
 		GameSettings.Presets[i].Type = CurrentReplay->Players[i].Type;
@@ -254,6 +265,7 @@ static void ApplyReplaySettings()
 	GameSettings.NumUnits = CurrentReplay->NumUnits;
 	GameSettings.Difficulty = CurrentReplay->Difficulty;
 	Map.NoFogOfWar = GameSettings.NoFogOfWar = CurrentReplay->NoFow;
+	GameSettings.Inside = CurrentReplay->Inside;
 	GameSettings.GameType = CurrentReplay->GameType;
 	FlagRevealMap = GameSettings.RevealMap = CurrentReplay->RevealMap;
 	GameSettings.MapRichness = CurrentReplay->MapRichness;
@@ -336,6 +348,8 @@ static void SaveFullLog(CFile &file)
 		} else {
 			file.printf("\t{");
 		}
+		file.printf(" AIScript = \"%s\",", CurrentReplay->Players[i].AIScript.c_str());
+		file.printf(" PlayerColor = %d,", CurrentReplay->Players[i].PlayerColor);
 		file.printf(" Race = %d,", CurrentReplay->Players[i].Race);
 		file.printf(" Team = %d,", CurrentReplay->Players[i].Team);
 		file.printf(" Type = %d }%s", CurrentReplay->Players[i].Type,
@@ -346,6 +360,7 @@ static void SaveFullLog(CFile &file)
 	file.printf("  NumUnits = %d,\n", CurrentReplay->NumUnits);
 	file.printf("  Difficulty = %d,\n", CurrentReplay->Difficulty);
 	file.printf("  NoFow = %s,\n", CurrentReplay->NoFow ? "true" : "false");
+	file.printf("  Inside = %s,\n", CurrentReplay->Inside ? "true" : "false");
 	file.printf("  RevealMap = %d,\n", CurrentReplay->RevealMap);
 	file.printf("  GameType = %d,\n", CurrentReplay->GameType);
 	file.printf("  Opponents = %d,\n", CurrentReplay->Opponents);
@@ -540,7 +555,7 @@ static int CclLog(lua_State *l)
 		} else if (!strcmp(value, "Num")) {
 			log->Num = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "SyncRandSeed")) {
-			log->SyncRandSeed = (unsigned)LuaToNumber(l, -1);
+			log->SyncRandSeed = LuaToUnsignedNumber(l, -1);
 		} else {
 			LuaError(l, "Unsupported key: %s" _C_ value);
 		}
@@ -616,6 +631,10 @@ static int CclReplayLog(lua_State *l)
 					value = LuaToString(l, -2);
 					if (!strcmp(value, "Name")) {
 						replay->Players[j].Name = LuaToString(l, -1);
+					} else if (!strcmp(value, "AIScript")) {
+						replay->Players[j].AIScript = LuaToString(l, -1);
+					} else if (!strcmp(value, "PlayerColor")) {
+						replay->Players[j].PlayerColor = LuaToNumber(l, -1);
 					} else if (!strcmp(value, "Race")) {
 						replay->Players[j].Race = LuaToNumber(l, -1);
 					} else if (!strcmp(value, "Team")) {
@@ -637,6 +656,8 @@ static int CclReplayLog(lua_State *l)
 			replay->Difficulty = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "NoFow")) {
 			replay->NoFow = LuaToBoolean(l, -1);
+		} else if (!strcmp(value, "Inside")) {
+			replay->Inside = LuaToBoolean(l, -1);
 		} else if (!strcmp(value, "RevealMap")) {
 			replay->RevealMap = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "GameType")) {
@@ -649,28 +670,16 @@ static int CclReplayLog(lua_State *l)
 			if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 3) {
 				LuaError(l, "incorrect argument");
 			}
-			lua_rawgeti(l, -1, 1);
-			replay->Engine[0] = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, -1, 2);
-			replay->Engine[1] = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, -1, 3);
-			replay->Engine[2] = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			replay->Engine[0] = LuaToNumber(l, -1, 1);
+			replay->Engine[1] = LuaToNumber(l, -1, 2);
+			replay->Engine[2] = LuaToNumber(l, -1, 3);
 		} else if (!strcmp(value, "Network")) {
 			if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 3) {
 				LuaError(l, "incorrect argument");
 			}
-			lua_rawgeti(l, -1, 1);
-			replay->Network[0] = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, -1, 2);
-			replay->Network[1] = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, -1, 3);
-			replay->Network[2] = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			replay->Network[0] = LuaToNumber(l, -1, 1);
+			replay->Network[1] = LuaToNumber(l, -1, 2);
+			replay->Network[2] = LuaToNumber(l, -1, 3);
 		} else {
 			LuaError(l, "Unsupported key: %s" _C_ value);
 		}
@@ -819,6 +828,8 @@ static void DoNextReplay()
 		SendCommandStopUnit(*unit);
 	} else if (!strcmp(action, "stand-ground")) {
 		SendCommandStandGround(*unit, flags);
+	} else if (!strcmp(action, "defend")) {
+		SendCommandDefend(*unit, *dunit, flags);
 	} else if (!strcmp(action, "follow")) {
 		SendCommandFollow(*unit, *dunit, flags);
 	} else if (!strcmp(action, "move")) {
@@ -1005,7 +1016,7 @@ int SaveReplay(const std::string &filename)
 
 	fd = fopen(destination.c_str(), "wb");
 	if (!fd) {
-		fprintf(stderr, "Can't save to `%s'\n", destination.c_str());
+		fprintf(stderr, "Can't save to '%s'\n", destination.c_str());
 		delete[] buf;
 		return -1;
 	}

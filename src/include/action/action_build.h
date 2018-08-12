@@ -38,7 +38,8 @@ class COrder_Build : public COrder
 {
 	friend COrder *COrder::NewActionBuild(const CUnit &builder, const Vec2i &pos, CUnitType &building);
 public:
-	COrder_Build() : COrder(UnitActionBuild), Type(NULL), State(0), Range(0) {
+	COrder_Build() : COrder(UnitActionBuild), Type(NULL), State(0), Range(0)
+	{
 		goalPos.x = -1;
 		goalPos.y = -1;
 	}
@@ -57,6 +58,7 @@ public:
 	virtual void AiUnitKilled(CUnit &unit);
 
 	const CUnitType &GetUnitType() const { return *Type; }
+	virtual const Vec2i GetGoalPos() const { return goalPos; }
 
 private:
 	bool MoveToLocation(CUnit &unit);

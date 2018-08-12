@@ -99,7 +99,6 @@ void CleanModules()
 	CleanDependencies();
 	CleanButtons();
 	CleanMissileTypes();
-	CleanTilesets();
 	Map.Clean();
 	Map.CleanFogOfWar();
 	CParticleManager::exit();
@@ -134,8 +133,6 @@ void InitModules()
 	InitUnitTypes(0);
 
 	InitUnits();
-	InitSelections();
-	InitGroups();
 	InitSpells();
 	InitUpgrades();
 	InitDependencies();
@@ -205,10 +202,10 @@ void LoadGame(const std::string &filename)
 	SetDefaultTextColors(FontYellow, FontWhite);
 	LoadFonts();
 
-	CclGarbageCollect(0);
+	LuaGarbageCollect();
 	InitUnitTypes(1);
 	LuaLoadFile(filename);
-	CclGarbageCollect(0);
+	LuaGarbageCollect();
 
 	PlaceUnits();
 

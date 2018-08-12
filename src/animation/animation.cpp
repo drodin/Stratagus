@@ -10,7 +10,8 @@
 //
 /**@name actions.cpp - The actions. */
 //
-//      (c) Copyright 1998-2005 by Lutz Sammer, Russell Smith, and Jimmy Salmon
+//      (c) Copyright 1998-2015 by Lutz Sammer, Russell Smith, Jimmy Salmon
+//		and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -46,6 +47,7 @@
 #include "animation/animation_goto.h"
 #include "animation/animation_ifvar.h"
 #include "animation/animation_label.h"
+#include "animation/animation_luacallback.h"
 #include "animation/animation_move.h"
 #include "animation/animation_randomgoto.h"
 #include "animation/animation_randomrotate.h"
@@ -68,7 +70,7 @@
 #include "unit.h"
 #include "unittype.h"
 
-#define ANIMATIONS_MAXANIM 1024
+#define ANIMATIONS_MAXANIM 4096
 
 struct LabelsStruct {
 	CAnimation *Anim;
@@ -115,12 +117,12 @@ int UnitShowAnimation(CUnit &unit, const CAnimation *anim)
 **  @return  The parsed value.
 */
 
-static int ParseAnimPlayer(const CUnit &unit, const char *parseint)
+static int ParseAnimPlayer(const CUnit &unit, char *parseint)
 {
 	if (!strcmp(parseint, "this")) {
 		return unit.Player->Index;
 	}
-	return atoi(parseint);
+	return ParseAnimInt(unit, parseint);
 }
 
 
@@ -133,17 +135,21 @@ static int ParseAnimPlayer(const CUnit &unit, const char *parseint)
 **  @return  The parsed value.
 */
 
-int ParseAnimInt(const CUnit *unit, const char *parseint)
+int ParseAnimInt(const CUnit &unit, const char *parseint)
 {
 	char s[100];
-	const CUnit *goal = unit;
+	const CUnit *goal = &unit;
+
+	if (!strlen(parseint)) {
+		return 0;
+	}
 
 	strcpy(s, parseint);
 	char *cur = &s[2];
-	if ((s[0] == 'v' || s[0] == 't') && unit != NULL) { //unit variable detected
+	if (s[0] == 'v' || s[0] == 't') { //unit variable detected
 		if (s[0] == 't') {
-			if (unit->CurrentOrder()->HasGoal()) {
-				goal = unit->CurrentOrder()->GetGoal();
+			if (unit.CurrentOrder()->HasGoal()) {
+				goal = unit.CurrentOrder()->GetGoal();
 			} else {
 				return 0;
 			}
@@ -151,7 +157,7 @@ int ParseAnimInt(const CUnit *unit, const char *parseint)
 		char *next = strchr(cur, '.');
 		if (next == NULL) {
 			fprintf(stderr, "Need also specify the variable '%s' tag \n", cur);
-			Exit(1);
+			ExitFatal(1);
 		} else {
 			*next = '\0';
 		}
@@ -161,9 +167,11 @@ int ParseAnimInt(const CUnit *unit, const char *parseint)
 				return goal->ResourcesHeld;
 			} else if (!strcmp(cur, "ResourceActive")) {
 				return goal->Resource.Active;
+			} else if (!strcmp(cur, "_Distance")) {
+				return unit.MapDistanceTo(*goal);
 			}
 			fprintf(stderr, "Bad variable name '%s'\n", cur);
-			Exit(1);
+			ExitFatal(1);
 		}
 		if (!strcmp(next + 1, "Value")) {
 			return goal->Variable[index].Value;
@@ -177,10 +185,10 @@ int ParseAnimInt(const CUnit *unit, const char *parseint)
 			return goal->Variable[index].Value * 100 / goal->Variable[index].Max;
 		}
 		return 0;
-	} else if ((s[0] == 'b' || s[0] == 'g') && unit != NULL) { //unit bool flag detected
+	} else if (s[0] == 'b' || s[0] == 'g') { //unit bool flag detected
 		if (s[0] == 'g') {
-			if (unit->CurrentOrder()->HasGoal()) {
-				goal = unit->CurrentOrder()->GetGoal();
+			if (unit.CurrentOrder()->HasGoal()) {
+				goal = unit.CurrentOrder()->GetGoal();
 			} else {
 				return 0;
 			}
@@ -188,11 +196,10 @@ int ParseAnimInt(const CUnit *unit, const char *parseint)
 		const int index = UnitTypeVar.BoolFlagNameLookup[cur];// User bool flags
 		if (index == -1) {
 			fprintf(stderr, "Bad bool-flag name '%s'\n", cur);
-			Exit(1);
-			return 0;
+			ExitFatal(1);
 		}
 		return goal->Type->BoolFlag[index].value;
-	} else if ((s[0] == 's') && unit != NULL) { //spell type detected
+	} else if (s[0] == 's') { //spell type detected
 		Assert(goal->CurrentAction() == UnitActionSpellCast);
 		const COrder_SpellCast &order = *static_cast<COrder_SpellCast *>(goal->CurrentOrder());
 		const SpellType &spell = order.GetSpell();
@@ -200,11 +207,33 @@ int ParseAnimInt(const CUnit *unit, const char *parseint)
 			return 1;
 		}
 		return 0;
-	} else if (s[0] == 'p' && unit != NULL) { //player variable detected
-		char *next = strchr(cur, '.');
+	} else if (s[0] == 'S') { // check if autocast for this spell available
+		const SpellType *spell = SpellTypeByIdent(cur);
+		if (!spell) {
+			fprintf(stderr, "Invalid spell: '%s'\n", cur);
+			ExitFatal(1);
+		}
+		if (unit.AutoCastSpell[spell->Slot]) {
+			return 1;
+		}
+		return 0;
+	} else if (s[0] == 'p') { //player variable detected
+		char *next;
+		if (*cur == '(') {
+			++cur;
+			char *end = strchr(cur, ')');
+			if (end == NULL) {
+				fprintf(stderr, "ParseAnimInt: expected ')'\n");
+				ExitFatal(1);
+			}
+			*end = '\0';
+			next = end + 1;
+		} else {
+			next = strchr(cur, '.');
+		}
 		if (next == NULL) {
 			fprintf(stderr, "Need also specify the %s player's property\n", cur);
-			Exit(1);
+			ExitFatal(1);
 		} else {
 			*next = '\0';
 		}
@@ -212,7 +241,7 @@ int ParseAnimInt(const CUnit *unit, const char *parseint)
 		if (arg != NULL) {
 			*arg = '\0';
 		}
-		return GetPlayerData(ParseAnimPlayer(*unit, cur), next + 1, arg + 1);
+		return GetPlayerData(ParseAnimPlayer(unit, cur), next + 1, arg + 1);
 	} else if (s[0] == 'r') { //random value
 		char *next = strchr(cur, '.');
 		if (next == NULL) {
@@ -223,10 +252,72 @@ int ParseAnimInt(const CUnit *unit, const char *parseint)
 			return min + SyncRand(atoi(next + 1) - min + 1);
 		}
 	} else if (s[0] == 'l') { //player number
-		return ParseAnimPlayer(*unit, cur);
+		return ParseAnimPlayer(unit, cur);
 
 	}
+	// Check if we trying to parse a number
+	Assert(isdigit(s[0]) || s[0] == '-');
 	return atoi(parseint);
+}
+
+/**
+**  Parse flags list in animation frame.
+**
+**  @param unit       Unit of the animation.
+**  @param parseflag  Flag list to parse.
+**
+**  @return The parsed value.
+*/
+int ParseAnimFlags(const CUnit &unit, const char *parseflag)
+{
+	char s[100];
+	int flags = 0;
+
+	strcpy(s, parseflag);
+	char *cur = s;
+	char *next = s;
+	while (next && *next) {
+		next = strchr(cur, '.');
+		if (next) {
+			*next = '\0';
+			++next;
+		}
+		if (unit.Anim.Anim->Type == AnimationSpawnMissile) {
+			if (!strcmp(cur, "none")) {
+				flags = SM_None;
+				return flags;
+			} else if (!strcmp(cur, "damage")) {
+				flags |= SM_Damage;
+			} else if (!strcmp(cur, "totarget")) {
+				flags |= SM_ToTarget;
+			} else if (!strcmp(cur, "pixel")) {
+				flags |= SM_Pixel;
+			} else if (!strcmp(cur, "reltarget")) {
+				flags |= SM_RelTarget;
+			} else if (!strcmp(cur, "ranged")) {
+				flags |= SM_Ranged;
+			}  else if (!strcmp(cur, "setdirection")) {
+				flags |= SM_SetDirection;
+			} else {
+				fprintf(stderr, "Unknown animation flag: %s\n", cur);
+				ExitFatal(1);
+			}
+		} else if (unit.Anim.Anim->Type == AnimationSpawnUnit) {
+			if (!strcmp(cur, "none")) {
+				flags = SU_None;
+				return flags;
+			} else if (!strcmp(cur, "summoned")) {
+				flags |= SU_Summoned;
+			} else if (!strcmp(cur, "jointoai")) {
+				flags |= SU_JoinToAIForce;
+			} else {
+				fprintf(stderr, "Unknown animation flag: %s\n", cur);
+				ExitFatal(1);
+			}
+		}
+		cur = next;
+	}
+	return flags;
 }
 
 
@@ -244,7 +335,7 @@ int UnitShowAnimationScaled(CUnit &unit, const CAnimation *anim, int scale)
 	// Changing animations
 	if (anim && unit.Anim.CurrAnim != anim) {
 		// Assert fails when transforming unit (upgrade-to).
-		Assert(!unit.Anim.Unbreakable);
+		Assert(!unit.Anim.Unbreakable || unit.Waiting);
 		unit.Anim.Anim = unit.Anim.CurrAnim = anim;
 		unit.Anim.Wait = 0;
 	}
@@ -333,13 +424,27 @@ static int GetAdvanceIndex(const CAnimation *base, const CAnimation *anim)
 	if (unit.Anim.Unbreakable) {
 		file.printf(" \"unbreakable\",");
 	}
+	file.printf("}, ");
+	// Wait backup info
+	file.printf("\"wait-anim-data\", {");
+	file.printf("\"anim-wait\", %d,", unit.WaitBackup.Wait);
+	for (int i = 0; i < NumAnimations; ++i) {
+		if (AnimationsArray[i] == unit.WaitBackup.CurrAnim) {
+			file.printf("\"curr-anim\", %d,", i);
+			file.printf("\"anim\", %d,", GetAdvanceIndex(unit.WaitBackup.CurrAnim, unit.WaitBackup.Anim));
+			break;
+		}
+	}
+	if (unit.WaitBackup.Unbreakable) {
+		file.printf(" \"unbreakable\",");
+	}
 	file.printf("}");
 }
 
 
 static const CAnimation *Advance(const CAnimation *anim, int n)
 {
-	for (int i = 0; i != n; ++i) {
+	for (int i = 0; i < n; ++i) {
 		anim = anim->Next;
 	}
 	return anim;
@@ -354,27 +459,47 @@ static const CAnimation *Advance(const CAnimation *anim, int n)
 	const int nargs = lua_rawlen(l, luaIndex);
 
 	for (int j = 0; j != nargs; ++j) {
-		lua_rawgeti(l, luaIndex, j + 1);
-		const char *value = LuaToString(l, -1);
-		lua_pop(l, 1);
+		const char *value = LuaToString(l, luaIndex, j + 1);
 		++j;
 
 		if (!strcmp(value, "anim-wait")) {
-			lua_rawgeti(l, luaIndex, j + 1);
-			unit.Anim.Wait = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			unit.Anim.Wait = LuaToNumber(l, luaIndex, j + 1);
 		} else if (!strcmp(value, "curr-anim")) {
-			lua_rawgeti(l, luaIndex, j + 1);
-			const int animIndex = LuaToNumber(l, -1);
+			const int animIndex = LuaToNumber(l, luaIndex, j + 1);
 			unit.Anim.CurrAnim = AnimationsArray[animIndex];
-			lua_pop(l, 1);
 		} else if (!strcmp(value, "anim")) {
-			lua_rawgeti(l, luaIndex, j + 1);
-			const int animIndex = LuaToNumber(l, -1);
+			const int animIndex = LuaToNumber(l, luaIndex, j + 1);
 			unit.Anim.Anim = Advance(unit.Anim.CurrAnim, animIndex);
-			lua_pop(l, 1);
 		} else if (!strcmp(value, "unbreakable")) {
 			unit.Anim.Unbreakable = 1;
+			--j;
+		} else {
+			LuaError(l, "Unit anim-data: Unsupported tag: %s" _C_ value);
+		}
+	}
+}
+
+/* static */ void CAnimations::LoadWaitUnitAnim(lua_State *l, CUnit &unit, int luaIndex)
+{
+	if (!lua_istable(l, luaIndex)) {
+		LuaError(l, "incorrect argument");
+	}
+	const int nargs = lua_rawlen(l, luaIndex);
+
+	for (int j = 0; j != nargs; ++j) {
+		const char *value = LuaToString(l, luaIndex, j + 1);
+		++j;
+
+		if (!strcmp(value, "anim-wait")) {
+			unit.WaitBackup.Wait = LuaToNumber(l, luaIndex, j + 1);
+		} else if (!strcmp(value, "curr-anim")) {
+			const int animIndex = LuaToNumber(l, luaIndex, j + 1);
+			unit.WaitBackup.CurrAnim = AnimationsArray[animIndex];
+		} else if (!strcmp(value, "anim")) {
+			const int animIndex = LuaToNumber(l, luaIndex, j + 1);
+			unit.WaitBackup.Anim = Advance(unit.WaitBackup.CurrAnim, animIndex);
+		} else if (!strcmp(value, "unbreakable")) {
+			unit.WaitBackup.Unbreakable = 1;
 			--j;
 		} else {
 			LuaError(l, "Unit anim-data: Unsupported tag: %s" _C_ value);
@@ -385,7 +510,7 @@ static const CAnimation *Advance(const CAnimation *anim, int n)
 /**
 **  Add a label
 */
-static void AddLabel(lua_State *, CAnimation *anim, const std::string &name)
+static void AddLabel(CAnimation *anim, const std::string &name)
 {
 	LabelsStruct label;
 
@@ -482,15 +607,17 @@ static CAnimation *ParseAnimationFrame(lua_State *l, const char *str)
 		anim = new CAnimation_Unbreakable;
 	} else if (op1 == "label") {
 		anim = new CAnimation_Label;
-		AddLabel(l, anim, extraArg);
+		AddLabel(anim, extraArg);
 	} else if (op1 == "goto") {
 		anim = new CAnimation_Goto;
 	} else if (op1 == "random-goto") {
 		anim = new CAnimation_RandomGoto;
+	} else if (op1 == "lua-callback") {
+		anim = new CAnimation_LuaCallback;
 	} else {
 		LuaError(l, "Unknown animation: %s" _C_ op1.c_str());
 	}
-	anim->Init(extraArg.c_str());
+	anim->Init(extraArg.c_str(), l);
 	return anim;
 }
 
@@ -510,16 +637,12 @@ static CAnimation *ParseAnimation(lua_State *l, int idx)
 	Labels.clear();
 	LabelsLater.clear();
 
-	lua_rawgeti(l, idx, 1);
-	const char *str = LuaToString(l, -1);
-	lua_pop(l, 1);
+	const char *str = LuaToString(l, idx, 1);
 
 	CAnimation *firstAnim = ParseAnimationFrame(l, str);
 	CAnimation *prev = firstAnim;
 	for (int j = 1; j < args; ++j) {
-		lua_rawgeti(l, idx, j + 1);
-		const char *str = LuaToString(l, -1);
-		lua_pop(l, 1);
+		const char *str = LuaToString(l, idx, j + 1);
 		CAnimation *anim = ParseAnimationFrame(l, str);
 		prev->Next = anim;
 		prev = anim;
@@ -581,6 +704,8 @@ static int CclDefineAnimations(lua_State *l)
 			}
 		} else if (!strcmp(value, "Attack")) {
 			anims->Attack = ParseAnimation(l, -1);
+		} else if (!strcmp(value, "RangedAttack")) {
+			anims->RangedAttack = ParseAnimation(l, -1);
 		} else if (!strcmp(value, "SpellCast")) {
 			anims->SpellCast = ParseAnimation(l, -1);
 		} else if (!strcmp(value, "Move")) {
@@ -610,6 +735,7 @@ static int CclDefineAnimations(lua_State *l)
 		AddAnimationToArray(anims->Death[i]);
 	}
 	AddAnimationToArray(anims->Attack);
+	AddAnimationToArray(anims->RangedAttack);
 	AddAnimationToArray(anims->SpellCast);
 	AddAnimationToArray(anims->Move);
 	AddAnimationToArray(anims->Repair);

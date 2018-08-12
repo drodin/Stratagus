@@ -10,8 +10,8 @@
 //
 /**@name upgrade_structs.h - The upgrade/allow headerfile. */
 //
-//      (c) Copyright 1999-2007 by Vladi Belperchinov-Shabanski and
-//                                 Jimmy Salmon
+//      (c) Copyright 1999-2015 by Vladi Belperchinov-Shabanski,
+//		Jimmy Salmon and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -73,6 +73,7 @@ enum CostType {
 #define FoodCost MaxCosts
 #define ScoreCost (MaxCosts + 1)
 #define ManaResCost (MaxCosts + 2)
+#define FreeWorkersCount (MaxCosts + 3)
 
 /**
 **  Default resources for a new player.
@@ -128,9 +129,11 @@ extern int GetResourceIdByName(lua_State *l, const char *resourceName);
 class CUnitStats
 {
 public:
-	CUnitStats() : Variables(NULL) {
+	CUnitStats() : Variables(NULL)
+	{
 		memset(Costs, 0, sizeof(Costs));
 		memset(Storing, 0, sizeof(Storing));
+		memset(ImproveIncomes, 0, sizeof(ImproveIncomes));
 	}
 	~CUnitStats();
 
@@ -142,6 +145,7 @@ public:
 	CVariable *Variables;           /// user defined variable.
 	int Costs[MaxCosts];            /// current costs of the unit
 	int Storing[MaxCosts];          /// storage increasing
+	int ImproveIncomes[MaxCosts];   /// Gives player an improved income
 };
 
 /**
@@ -159,6 +163,7 @@ public:
 	void SetIcon(CIcon *icon);
 
 	std::string Ident;                /// identifier
+	std::string Name;                 /// upgrade label
 	int   ID;                         /// numerical id
 	int   Costs[MaxCosts];            /// costs for the upgrade
 	// TODO: not used by buttons
@@ -177,19 +182,23 @@ public:
 class CUpgradeModifier
 {
 public:
-	CUpgradeModifier() : UpgradeId(0), ModifyPercent(NULL), ConvertTo(NULL) {
+	CUpgradeModifier() : UpgradeId(0), ModifyPercent(NULL), SpeedResearch(0), ConvertTo(NULL)
+	{
 		memset(ChangeUnits, 0, sizeof(ChangeUnits));
 		memset(ChangeUpgrades, 0, sizeof(ChangeUpgrades));
 		memset(ApplyTo, 0, sizeof(ApplyTo));
 	}
-	~CUpgradeModifier() {
+	~CUpgradeModifier()
+	{
 		delete [] this->ModifyPercent;
 	}
 
 	int UpgradeId;                      /// used to filter required modifier
 
 	CUnitStats Modifier;                /// modifier of unit stats.
-	int *ModifyPercent;                /// use for percent modifiers
+	int *ModifyPercent;                 /// use for percent modifiers
+	int SpeedResearch;                  /// speed factor for researching
+	int ImproveIncomes[MaxCosts];		/// improve incomes
 
 	// allow/forbid bitmaps -- used as chars for example:
 	// `?' -- leave as is, `F' -- forbid, `A' -- allow
@@ -220,7 +229,8 @@ class CAllow
 public:
 	CAllow() { this->Clear(); }
 
-	void Clear() {
+	void Clear()
+	{
 		memset(Units, 0, sizeof(Units));
 		memset(Upgrades, 0, sizeof(Upgrades));
 	}
@@ -238,7 +248,8 @@ class CUpgradeTimers
 public:
 	CUpgradeTimers() { this->Clear(); }
 
-	void Clear() {
+	void Clear()
+	{
 		memset(Upgrades, 0, sizeof(Upgrades));
 	}
 

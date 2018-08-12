@@ -84,6 +84,11 @@ CFont &GetSmallFont()
 	return *SmallFont;
 }
 
+bool IsGameFontReady()
+{
+	return GameFont != NULL || CFont::Get("game") != NULL;
+}
+
 CFont &GetGameFont()
 {
 	if (!GameFont) {
@@ -98,7 +103,7 @@ CFont &GetGameFont()
 --  Guichan Functions
 ----------------------------------------------------------------------------*/
 
-/* virtual */ void CFont::drawString(gcn::Graphics *graphics, const std::string &txt, int x, int y)
+/* virtual */ void CFont::drawString(gcn::Graphics *graphics, const std::string &txt, int x, int y, bool is_normal)
 {
 	DynamicLoad();
 	const gcn::ClipRectangle &r = graphics->getCurrentClipArea();
@@ -111,7 +116,7 @@ CFont &GetGameFont()
 
 	PushClipping();
 	SetClipping(r.x, r.y, right, bottom);
-	CLabel(*this).DrawClip(x + r.xOffset, y + r.yOffset, txt);
+	CLabel(*this).DrawClip(x + r.xOffset, y + r.yOffset, txt, is_normal);
 	PopClipping();
 }
 
@@ -133,14 +138,17 @@ CFont &GetGameFont()
 static void VideoDrawChar(const CGraphic &g,
 						  int gx, int gy, int w, int h, int x, int y, const CFontColor &fc)
 {
-	if (!UseOpenGL) {
-		SDL_Rect srect = {gx, gy, w, h};
-		SDL_Rect drect = {x, y, 0, 0};
+#if defined(USE_OPENGL) || defined(USE_GLES)
+	if (UseOpenGL) {
+		g.DrawSub(gx, gy, w, h, x, y);
+	} else
+#endif
+	{
+		SDL_Rect srect = {Sint16(gx), Sint16(gy), Uint16(w), Uint16(h)};
+		SDL_Rect drect = {Sint16(x), Sint16(y), 0, 0};
 		std::vector<SDL_Color> sdlColors(fc.Colors, fc.Colors + MaxFontColors);
 		SDL_SetColors(g.Surface, &sdlColors[0], 0, MaxFontColors);
 		SDL_BlitSurface(g.Surface, &srect, TheScreen, &drect);
-	} else {
-		g.DrawSub(gx, gy, w, h, x, y);
 	}
 }
 
@@ -351,6 +359,10 @@ int CFont::Width(const std::string &text) const
 	DynamicLoad();
 	while (GetUTF8(text, pos, utf8)) {
 		if (utf8 == '~') {
+			if (text[pos] == '|') {
+				++pos;
+				continue;
+			}
 			if (pos >= text.size()) {  // bad formatted string
 				break;
 			}
@@ -383,38 +395,14 @@ extern int convertKey(const char *key);
 int GetHotKey(const std::string &text)
 {
 	int hotkey = 0;
-	int utf8;
 	size_t pos = 0;
 
-	while (GetUTF8(text, pos, utf8)) {
-		if (utf8 == '~') {
-			if (pos >= text.size()) {
-				break;
-			}
-			if (text[pos] == '<') {
-				++pos;
-				size_t endpos = pos;
-				while (endpos < text.size()) {
-					if (text[endpos] == '~') {
-						break;
-					}
-					++endpos;
-				}
-				std::string key = text.substr(pos, endpos - pos);
-				hotkey = convertKey(key.c_str());
-				break;
-			}
-			if (text[pos] == '!') {
-				++pos;
-				if (pos >= text.size()) {
-					break;
-				}
-				GetUTF8(text, pos, utf8);
-				hotkey = utf8;
-				break;
-			}
-		}
+	if (text.length() > 1) {
+		hotkey = convertKey(text.c_str());
+	} else if (text.length() == 1) {
+		GetUTF8(text, pos, hotkey);
 	}
+
 	return hotkey;
 }
 
@@ -473,10 +461,20 @@ unsigned int CFont::DrawChar(CGraphic &g, int utf8, int x, int y, const CFontCol
 
 CGraphic *CFont::GetFontColorGraphic(const CFontColor &fontColor) const
 {
-	if (!UseOpenGL) {
+#if defined(USE_OPENGL) || defined(USE_GLES)
+	if (UseOpenGL) {
+		CGraphic* fontColorG = FontColorGraphics[this][&fontColor];
+		if (!fontColorG) {
+#ifdef DEBUG
+			fprintf(stderr, "Could not load font color %s for font %s\n", fontColor.Ident.c_str(), this->Ident.c_str());
+#endif
+			return this->G;
+		}
+		return fontColorG;
+	} else
+#endif
+	{
 		return this->G;
-	} else {
-		return FontColorGraphics[this][&fontColor];
 	}
 }
 
@@ -502,16 +500,20 @@ int CLabel::DoDrawText(int x, int y,
 					   const char *const text, const size_t len, const CFontColor *fc) const
 {
 	int widths = 0;
-	std::string color;
 	int utf8;
+	bool tab;
+	const int tabSize = 4; // FIXME: will be removed when text system will be rewritten
 	size_t pos = 0;
 	const CFontColor *backup = fc;
-	bool isReverse = false;
+	bool isColor = false;
 	font->DynamicLoad();
 	CGraphic *g = font->GetFontColorGraphic(*FontColor);
 
 	while (GetUTF8(text, len, pos, utf8)) {
-		if (utf8 == '~') {
+		tab = false;
+		if (utf8 == '\t') {
+			tab = true;
+		} else if (utf8 == '~') {
 			switch (text[pos]) {
 				case '\0':  // wrong formatted string.
 					DebugPrint("oops, format your ~\n");
@@ -519,6 +521,9 @@ int CLabel::DoDrawText(int x, int y,
 				case '~':
 					++pos;
 					break;
+				case '|':
+					++pos;
+					continue;
 				case '!':
 					if (fc != reverse) {
 						fc = reverse;
@@ -529,7 +534,7 @@ int CLabel::DoDrawText(int x, int y,
 				case '<':
 					LastTextColor = fc;
 					if (fc != reverse) {
-						isReverse = true;
+						isColor = true;
 						fc = reverse;
 						g = font->GetFontColorGraphic(*fc);
 					}
@@ -538,7 +543,7 @@ int CLabel::DoDrawText(int x, int y,
 				case '>':
 					if (fc != LastTextColor) {
 						std::swap(fc, LastTextColor);
-						isReverse = false;
+						isColor = false;
 						g = font->GetFontColorGraphic(*fc);
 					}
 					++pos;
@@ -553,12 +558,14 @@ int CLabel::DoDrawText(int x, int y,
 						DebugPrint("oops, format your ~\n");
 						return widths;
 					}
+					std::string color;
+
 					color.insert(0, text + pos, p - (text + pos));
-					color[p - (text + pos)] = '\0';
 					pos = p - text + 1;
 					LastTextColor = fc;
 					const CFontColor *fc_tmp = CFontColor::Get(color);
 					if (fc_tmp) {
+						isColor = true;
 						fc = fc_tmp;
 						g = font->GetFontColorGraphic(*fc);
 					}
@@ -566,9 +573,15 @@ int CLabel::DoDrawText(int x, int y,
 				}
 			}
 		}
-		widths += font->DrawChar<CLIP>(*g, utf8, x + widths, y, *fc);
+		if (tab) {
+			for (int tabs = 0; tabs < tabSize; ++tabs) {
+				widths += font->DrawChar<CLIP>(*g, ' ', x + widths, y, *fc);
+			}
+		} else {
+			widths += font->DrawChar<CLIP>(*g, utf8, x + widths, y, *fc);
+		}
 
-		if (isReverse == false && fc != backup) {
+		if (isColor == false && fc != backup) {
 			fc = backup;
 			g = font->GetFontColorGraphic(*fc);
 		}
@@ -608,9 +621,16 @@ int CLabel::DrawClip(int x, int y, const char *const text) const
 	return DoDrawText<true>(x, y, text, strlen(text), normal);
 }
 
-int CLabel::DrawClip(int x, int y, const std::string &text) const
+int CLabel::DrawClip(int x, int y, const std::string &text, bool is_normal) const
 {
-	return DoDrawText<true>(x, y, text.c_str(), text.size(), normal);
+	// return DoDrawText<true>(x, y, text.c_str(), text.size(), normal);
+	if (is_normal) {
+	    return DoDrawText<true>(x, y, text.c_str(), text.size(), normal);
+	}
+	else
+	{
+	    return DoDrawText<true>(x, y, text.c_str(), text.size(), reverse);
+	}
 }
 
 int CLabel::DrawClip(int x, int y, int number) const
@@ -664,6 +684,13 @@ int CLabel::DrawCentered(int x, int y, const std::string &text) const
 	return dx / 2;
 }
 
+int CLabel::DrawReverseCentered(int x, int y, const std::string &text) const
+{
+	int dx = font->Width(text);
+	DoDrawText<false>(x - dx / 2, y, text.c_str(), text.size(), reverse);
+	return dx / 2;
+}
+
 
 /**
 **  Format a number using commas
@@ -692,7 +719,7 @@ static int FormatNumber(int number, char *buf)
 }
 
 /**
-**  Return the index of first occurance of c in [s- s + maxlen]
+**  Return the index of first occurrence of c in [s- s + maxlen]
 **
 **  @param s       original string.
 **  @param c       character to find.
@@ -701,13 +728,13 @@ static int FormatNumber(int number, char *buf)
 **
 **  @return computed value.
 */
-static int strchrlen(const std::string &s, char c, unsigned int maxlen, CFont *font)
+static int strchrlen(const std::string &s, char c, unsigned int maxlen, const CFont *font)
 {
 	if (s.empty()) {
 		return 0;
 	}
 	int res = s.find(c);
-	res = (res == -1) ? s.size() : res - 1;
+	res = (res == -1) ? s.size() : res;
 
 	if (!maxlen || (!font && (unsigned int) res < maxlen) || (font && (unsigned int) font->Width(s.substr(0, res)) < maxlen)) {
 		return res;
@@ -745,7 +772,7 @@ static int strchrlen(const std::string &s, char c, unsigned int maxlen, CFont *f
 **
 **  @return computed value.
 */
-std::string GetLineFont(unsigned int line, const std::string &s, unsigned int maxlen, CFont *font)
+std::string GetLineFont(unsigned int line, const std::string &s, unsigned int maxlen, const CFont *font)
 {
 	unsigned int res;
 	std::string s1 = s;
@@ -794,9 +821,7 @@ void CFont::MeasureWidths()
 
 			for (; sp < lp; --lp) {
 				if (*lp != ckey && *lp != 7) {
-					if (lp - sp > CharWidth[y]) {  // max width
-						CharWidth[y] = lp - sp;
-					}
+					CharWidth[y] = std::max<char>(CharWidth[y], lp - sp);
 				}
 			}
 			sp += G->Surface->pitch;
@@ -805,6 +830,7 @@ void CFont::MeasureWidths()
 	SDL_UnlockSurface(G->Surface);
 }
 
+#if defined(USE_OPENGL) || defined(USE_GLES)
 /**
 **  Make font bitmap.
 */
@@ -836,6 +862,7 @@ void CFont::MakeFontColorTextures() const
 		MakeTexture(newg);
 	}
 }
+#endif
 
 void CFont::Load()
 {
@@ -848,9 +875,11 @@ void CFont::Load()
 		this->G->Load();
 		this->MeasureWidths();
 
+#if defined(USE_OPENGL) || defined(USE_GLES)
 		if (UseOpenGL) {
 			this->MakeFontColorTextures();
 		}
+#endif
 	}
 }
 
@@ -878,6 +907,7 @@ void LoadFonts()
 	GameFont = CFont::Get("game");
 }
 
+#if defined(USE_OPENGL) || defined(USE_GLES)
 void CFont::FreeOpenGL()
 {
 	if (this->G) {
@@ -900,7 +930,7 @@ void FreeOpenGLFonts()
 		font.FreeOpenGL();
 	}
 }
-
+#endif
 
 void CFont::Reload() const
 {
@@ -909,11 +939,17 @@ void CFont::Reload() const
 		for (FontColorGraphicMap::iterator it = fontColorGraphicMap.begin();
 			 it != fontColorGraphicMap.end(); ++it) {
 			CGraphic *g = it->second;
+#if defined(USE_OPENGL) || defined(USE_GLES)
 			delete[] g->Textures;
+#endif
 			delete g;
 		}
 		fontColorGraphicMap.clear();
-		this->MakeFontColorTextures();
+#if defined(USE_OPENGL) || defined(USE_GLES)
+		if (UseOpenGL) {
+			this->MakeFontColorTextures();
+		}
+#endif
 	}
 }
 
@@ -961,9 +997,15 @@ void ReloadFonts()
 */
 /* static */ CFont *CFont::Get(const std::string &ident)
 {
-	CFont *font = Fonts[ident];
-	if (!font) {
+	std::map<std::string, CFont *>::iterator it = Fonts.find(ident);
+	if (it == Fonts.end()) {
 		DebugPrint("font not found: %s\n" _C_ ident.c_str());
+		return NULL;
+	}
+	CFont *font = it->second;
+	if (font == NULL) {
+		DebugPrint("font not found: %s\n" _C_ ident.c_str());
+		return NULL;
 	}
 	return font;
 }
@@ -1012,6 +1054,7 @@ CFontColor::~CFontColor()
 
 void CFont::Clean()
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	CFont *font = this;
 
 	if (UseOpenGL) {
@@ -1027,6 +1070,7 @@ void CFont::Clean()
 			fontColorGraphicMap.clear();
 		}
 	}
+#endif
 }
 
 /**
@@ -1040,9 +1084,11 @@ void CleanFonts()
 		font->Clean();
 		delete font;
 	}
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		FontColorGraphics.clear();
 	}
+#endif
 	Fonts.clear();
 
 	for (FontColorMap::iterator it = FontColors.begin(); it != FontColors.end(); ++it) {

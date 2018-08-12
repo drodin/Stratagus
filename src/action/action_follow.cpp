@@ -10,7 +10,7 @@
 //
 /**@name action_follow.cpp - The follow action. */
 //
-//      (c) Copyright 2001-2005 by Lutz Sammer and Jimmy Salmon
+//      (c) Copyright 2001-2015 by Lutz Sammer, Jimmy Salmon and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -37,7 +37,10 @@
 
 #include "action/action_follow.h"
 
+#include "animation.h"
 #include "iolib.h"
+#include "luacallback.h"
+#include "missile.h"
 #include "pathfinder.h"
 #include "script.h"
 #include "ui.h"
@@ -97,14 +100,10 @@ enum {
 {
 	if (!strcmp(value, "state")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->State = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->State = LuaToNumber(l, -1, j + 1);
 	} else if (!strcmp(value, "range")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Range = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->Range = LuaToNumber(l, -1, j + 1);
 	} else if (!strcmp(value, "tile")) {
 		++j;
 		lua_rawgeti(l, -1, j + 1);
@@ -158,8 +157,17 @@ enum {
 /* virtual */ void COrder_Follow::Execute(CUnit &unit)
 {
 	if (unit.Wait) {
+		if (!unit.Waiting) {
+			unit.Waiting = 1;
+			unit.WaitBackup = unit.Anim;
+		}
+		UnitShowAnimation(unit, unit.Type->Animations->Still);
 		unit.Wait--;
-		return ;
+		return;
+	}
+	if (unit.Waiting) {
+		unit.Anim = unit.WaitBackup;
+		unit.Waiting = 0;
 	}
 	CUnit *goal = this->GetGoal();
 
@@ -172,6 +180,12 @@ enum {
 			return ;
 		}
 
+		// Don't follow after immobile units
+		if (goal && goal->CanMove() == false) {
+			this->Finished = true;
+			return;
+		}
+
 		if (goal->tilePos == this->goalPos) {
 			// Move to the next order
 			if (unit.Orders.size() > 1) {
@@ -179,10 +193,6 @@ enum {
 				return ;
 			}
 
-			// Reset frame to still frame while we wait
-			// FIXME: Unit doesn't animate.
-			unit.Frame = unit.Type->StillFrame;
-			UnitUpdateHeading(unit);
 			unit.Wait = 10;
 			if (this->Range > 1) {
 				this->Range = 1;
@@ -207,24 +217,45 @@ enum {
 			}
 			// Handle Teleporter Units
 			// FIXME: BAD HACK
-			if (goal->Type->Teleporter && goal->Goal && unit.MapDistanceTo(*goal) <= 1) {
-				// Teleport the unit
+			// goal shouldn't be busy and portal should be alive
+			if (goal->Type->BoolFlag[TELEPORTER_INDEX].value && goal->Goal && goal->Goal->IsAlive() && unit.MapDistanceTo(*goal) <= 1) {
+				if (!goal->IsIdle()) { // wait
+					unit.Wait = 10;
+					return;
+				}
+				// Check if we have enough mana
+				if (goal->Goal->Type->TeleportCost > goal->Variable[MANA_INDEX].Value) {
+					this->Finished = true;
+					return;
+				} else {
+					goal->Variable[MANA_INDEX].Value -= goal->Goal->Type->TeleportCost;
+				}
+				// Everything is OK, now teleport the unit
 				unit.Remove(NULL);
+				if (goal->Type->TeleportEffectIn) {
+					goal->Type->TeleportEffectIn->pushPreamble();
+					goal->Type->TeleportEffectIn->pushInteger(UnitNumber(unit));
+					goal->Type->TeleportEffectIn->pushInteger(UnitNumber(*goal));
+					goal->Type->TeleportEffectIn->pushInteger(unit.GetMapPixelPosCenter().x);
+					goal->Type->TeleportEffectIn->pushInteger(unit.GetMapPixelPosCenter().y);
+					goal->Type->TeleportEffectIn->run();
+				}
 				unit.tilePos = goal->Goal->tilePos;
 				DropOutOnSide(unit, unit.Direction, NULL);
-#if 0
-				// FIXME: SoundForName() should be called once
-				PlayGameSound(SoundForName("invisibility"), MaxSampleVolume);
-				// FIXME: MissileTypeByIdent() should be called once
-				MakeMissile(MissileTypeByIdent("missile-normal-spell"),
-							unit.GetMapPixelPosCenter(),
-							unit.GetMapPixelPosCenter());
-#endif
+
 				// FIXME: we must check if the units supports the new order.
 				CUnit &dest = *goal->Goal;
+				if (dest.Type->TeleportEffectOut) {
+					dest.Type->TeleportEffectOut->pushPreamble();
+					dest.Type->TeleportEffectOut->pushInteger(UnitNumber(unit));
+					dest.Type->TeleportEffectOut->pushInteger(UnitNumber(dest));
+					dest.Type->TeleportEffectOut->pushInteger(unit.GetMapPixelPosCenter().x);
+					dest.Type->TeleportEffectOut->pushInteger(unit.GetMapPixelPosCenter().y);
+					dest.Type->TeleportEffectOut->run();
+				}
 
 				if (dest.NewOrder == NULL
-					|| (dest.NewOrder->Action == UnitActionResource && !unit.Type->Harvester)
+					|| (dest.NewOrder->Action == UnitActionResource && !unit.Type->BoolFlag[HARVESTER_INDEX].value)
 					|| (dest.NewOrder->Action == UnitActionAttack && !unit.Type->CanAttack)
 					|| (dest.NewOrder->Action == UnitActionBoard && unit.Type->UnitType != UnitTypeLand)) {
 					this->Finished = true;
@@ -237,10 +268,10 @@ enum {
 							this->Finished = true;
 							return ;
 						}
+						unit.Orders.insert(unit.Orders.begin() + 1, dest.NewOrder->Clone());
+						this->Finished = true;
+						return ;
 					}
-					unit.Orders.insert(unit.Orders.begin() + 1, dest.NewOrder->Clone());
-					this->Finished = true;
-					return ;
 				}
 			}
 			this->goalPos = goal->tilePos;

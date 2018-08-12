@@ -42,7 +42,8 @@ class COrder_Resource : public COrder
 
 public:
 	COrder_Resource(CUnit &harvester) : COrder(UnitActionResource), worker(&harvester),
-		CurrentResource(0), State(0), TimeToHarvest(0), DoneHarvesting(false) {
+		CurrentResource(0), State(0), TimeToHarvest(0), DoneHarvesting(false), Range(0)
+	{
 		Resource.Pos.x = Resource.Pos.y = -1;
 		goalPos.x = goalPos.y = -1;
 	}
@@ -73,13 +74,14 @@ private:
 	int MoveToResource(CUnit &unit);
 	void UnitGotoGoal(CUnit &unit, CUnit *const goal, int state);
 	int StartGathering(CUnit &unit);
-	void LoseResource(CUnit &unit, const CUnit &source);
+	void LoseResource(CUnit &unit, CUnit &source);
 	int GatherResource(CUnit &unit);
 	int StopGathering(CUnit &unit);
 	int MoveToDepot(CUnit &unit);
 	bool WaitInDepot(CUnit &unit);
 	void DropResource(CUnit &unit);
 	void ResourceGiveUp(CUnit &unit);
+	bool FindAnotherResource(CUnit &unit);
 	bool ActionResourceInit(CUnit &unit);
 private:
 	CUnitPtr worker; /// unit that own this order.
@@ -92,6 +94,7 @@ private:
 	int State;
 	int TimeToHarvest;          /// how much time until we harvest some more.
 	bool DoneHarvesting;  /// Harvesting done, wait for action to break.
+	int Range;
 #if 1
 	// duplicate of Resource.Pos ?
 	Vec2i goalPos;

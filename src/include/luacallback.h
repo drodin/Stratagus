@@ -30,24 +30,29 @@
 #define LUA_CALLBACK_HEADER_FILE
 
 #include <string>
+#include <vector>
 
 typedef int lua_Object; // from tolua++.h
 struct lua_State;
 
 class LuaCallback
 {
+public:
+	LuaCallback(lua_State *lua, lua_Object luaref);
+	~LuaCallback();
+	void pushPreamble();
+	void pushInteger(int value);
+	void pushIntegers(const std::vector<int> &values);
+	void pushString(const std::string &eventId);
+	void run(int results = 0);
+	bool popBoolean();
+	int popInteger();
+private:
 	lua_State *luastate;
 	int luaref;
 	int arguments;
+	int rescount;
 	int base;
-public:
-	LuaCallback(lua_State *lua, lua_Object luaref);
-	virtual ~LuaCallback();
-	virtual void pushPreamble();
-	virtual void pushInteger(int value);
-	virtual void pushString(const std::string &eventId);
-	virtual void run();
 };
 
 #endif
-

@@ -10,7 +10,7 @@
 //
 /**@name command.cpp - Give units a command. */
 //
-//      (c) Copyright 1998-2005 by Lutz Sammer and Jimmy Salmon
+//      (c) Copyright 1998-2015 by Lutz Sammer, Jimmy Salmon and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -36,13 +36,15 @@
 #include "stratagus.h"
 
 #include "actions.h"
+#include "action/action_built.h"
+#include "action/action_research.h"
 #include "action/action_train.h"
+#include "action/action_upgradeto.h"
 #include "commands.h"
 #include "map.h"
 #include "pathfinder.h"
 #include "player.h"
 #include "spells.h"
-#include "tileset.h"
 #include "translate.h"
 #include "upgrade.h"
 #include "ui.h"
@@ -64,8 +66,19 @@ static void ReleaseOrders(CUnit &unit)
 	Assert(unit.Orders.empty() == false);
 
 	// Order 0 must be stopped in the action loop.
-	for (size_t i = 1; i != unit.Orders.size(); ++i) {
-		delete unit.Orders[i];
+	for (size_t i = 0; i != unit.Orders.size(); ++i) {
+		if (unit.Orders[i]->Action == UnitActionBuilt) {
+			(dynamic_cast<COrder_Built *>(unit.Orders[i]))->Cancel(unit);
+		} else if (unit.Orders[i]->Action == UnitActionResearch) {
+			(dynamic_cast<COrder_Research *>(unit.Orders[i]))->Cancel(unit);
+		} else if (unit.Orders[i]->Action == UnitActionTrain) {
+			(dynamic_cast<COrder_Train *>(unit.Orders[i]))->Cancel(unit);
+		} else if (unit.Orders[i]->Action == UnitActionUpgradeTo) {
+			(dynamic_cast<COrder_UpgradeTo *>(unit.Orders[i]))->Cancel(unit);
+		}
+		if (i > 0) {
+			delete unit.Orders[i];
+		}
 	}
 	unit.Orders.resize(1);
 	unit.Orders[0]->Finished = true;
@@ -179,6 +192,33 @@ void CommandStandGround(CUnit &unit, int flush)
 		}
 	}
 	*order = COrder::NewActionStandGround();
+	ClearSavedAction(unit);
+}
+
+/**
+**  Follow unit and defend it
+**
+**  @param unit   pointer to unit.
+**  @param dest   unit to follow
+**  @param flush  if true, flush command queue.
+*/
+void CommandDefend(CUnit &unit, CUnit &dest, int flush)
+{
+	if (IsUnitValidForNetwork(unit) == false) {
+		return ;
+	}
+	COrderPtr *order;
+
+	if (!unit.CanMove()) {
+		ClearNewAction(unit);
+		order = &unit.NewOrder;
+	} else {
+		order = GetNextOrder(unit, flush);
+		if (order == NULL) {
+			return;
+		}
+	}
+	*order = COrder::NewActionDefend(dest);
 	ClearSavedAction(unit);
 }
 
@@ -446,7 +486,7 @@ void CommandBuildBuilding(CUnit &unit, const Vec2i &pos, CUnitType &what, int fl
 	}
 	COrderPtr *order;
 
-	if (unit.Type->Building) {
+	if (unit.Type->Building && !what.BoolFlag[BUILDEROUTSIDE_INDEX].value && unit.MapDistanceTo(pos) > unit.Type->RepairRange) {
 		ClearNewAction(unit);
 		order = &unit.NewOrder;
 	} else {
@@ -471,7 +511,7 @@ void CommandDismiss(CUnit &unit)
 		unit.CurrentOrder()->Cancel(unit);
 	} else {
 		DebugPrint("Suicide unit ... \n");
-		LetUnitDie(unit);
+		LetUnitDie(unit, true);
 	}
 	ClearSavedAction(unit);
 }
@@ -488,7 +528,7 @@ void CommandResourceLoc(CUnit &unit, const Vec2i &pos, int flush)
 	if (IsUnitValidForNetwork(unit) == false) {
 		return ;
 	}
-	if (!unit.Type->Building && !unit.Type->Harvester) {
+	if (!unit.Type->Building && !unit.Type->BoolFlag[HARVESTER_INDEX].value) {
 		ClearSavedAction(unit);
 		return ;
 	}
@@ -522,7 +562,7 @@ void CommandResource(CUnit &unit, CUnit &dest, int flush)
 	if (dest.Destroyed) {
 		return ;
 	}
-	if (!unit.Type->Building && !unit.Type->Harvester) {
+	if (!unit.Type->Building && !unit.Type->BoolFlag[HARVESTER_INDEX].value) {
 		ClearSavedAction(unit);
 		return ;
 	}
@@ -553,8 +593,8 @@ void CommandReturnGoods(CUnit &unit, CUnit *depot, int flush)
 	if (IsUnitValidForNetwork(unit) == false) {
 		return ;
 	}
-	if ((unit.Type->Harvester && unit.ResourcesHeld == 0)
-		|| (!unit.Type->Building && !unit.Type->Harvester)) {
+	if ((unit.Type->BoolFlag[HARVESTER_INDEX].value && unit.ResourcesHeld == 0)
+		|| (!unit.Type->Building && !unit.Type->BoolFlag[HARVESTER_INDEX].value)) {
 		ClearSavedAction(unit);
 		return ;
 	}
@@ -689,6 +729,9 @@ void CommandUpgradeTo(CUnit &unit, CUnitType &type, int flush)
 */
 void CommandTransformIntoType(CUnit &unit, CUnitType &type)
 {
+	if (unit.CriticalOrder && unit.CriticalOrder->Action == UnitActionTransformInto) {
+		return;
+	}
 	Assert(unit.CriticalOrder == NULL);
 
 	unit.CriticalOrder = COrder::NewActionTransformInto(type);
@@ -705,7 +748,7 @@ void CommandCancelUpgradeTo(CUnit &unit)
 	if (unit.CurrentAction() == UnitActionUpgradeTo) {
 		unit.CurrentOrder()->Cancel(unit);
 		RemoveOrder(unit, 0);
-		if (Selected) {
+		if (!Selected.empty()) {
 			SelectedUnitChanged();
 		}
 	}
@@ -747,7 +790,7 @@ void CommandCancelResearch(CUnit &unit)
 	if (unit.CurrentAction() == UnitActionResearch) {
 		unit.CurrentOrder()->Cancel(unit);
 		RemoveOrder(unit, 0);
-		if (Selected) {
+		if (!Selected.empty()) {
 			SelectedUnitChanged();
 		}
 	}
@@ -763,7 +806,7 @@ void CommandCancelResearch(CUnit &unit)
 **  @param spell  Spell type pointer.
 **  @param flush  If true, flush command queue.
 */
-void CommandSpellCast(CUnit &unit, const Vec2i &pos, CUnit *dest, const SpellType &spell, int flush)
+void CommandSpellCast(CUnit &unit, const Vec2i &pos, CUnit *dest, const SpellType &spell, int flush, bool isAutocast)
 {
 	DebugPrint(": %d casts %s at %d %d on %d\n" _C_
 			   UnitNumber(unit) _C_ spell.Ident.c_str() _C_ pos.x _C_ pos.y _C_ dest ? UnitNumber(*dest) : 0);
@@ -779,7 +822,7 @@ void CommandSpellCast(CUnit &unit, const Vec2i &pos, CUnit *dest, const SpellTyp
 		return;
 	}
 
-	*order = COrder::NewActionSpellCast(spell, pos, dest);
+	*order = COrder::NewActionSpellCast(spell, pos, dest, true);
 	ClearSavedAction(unit);
 }
 
@@ -900,7 +943,7 @@ void CommandQuit(int player)
 			CommandSharedVision(player, 0, i);
 			// Remove Selection from Quit Player
 			std::vector<CUnit *> empty;
-			ChangeTeamSelectedUnits(Players[player], empty, 0);
+			ChangeTeamSelectedUnits(Players[player], empty);
 		}
 	}
 

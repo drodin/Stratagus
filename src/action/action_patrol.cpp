@@ -37,6 +37,7 @@
 
 #include "action/action_patrol.h"
 
+#include "animation.h"
 #include "iolib.h"
 #include "map.h"
 #include "pathfinder.h"
@@ -89,14 +90,10 @@
 		lua_pop(l, 1);
 	} else if (!strcmp(value, "waiting-cycle")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->WaitingCycle = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->WaitingCycle = LuaToNumber(l, -1, j + 1);
 	} else if (!strcmp(value, "range")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Range = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->Range = LuaToNumber(l, -1, j + 1);
 	} else if (!strcmp(value, "tile")) {
 		++j;
 		lua_rawgeti(l, -1, j + 1);
@@ -137,8 +134,17 @@
 /* virtual */ void COrder_Patrol::Execute(CUnit &unit)
 {
 	if (unit.Wait) {
+		if (!unit.Waiting) {
+			unit.Waiting = 1;
+			unit.WaitBackup = unit.Anim;
+		}
+		UnitShowAnimation(unit, unit.Type->Animations->Still);
 		unit.Wait--;
-		return ;
+		return;
+	}
+	if (unit.Waiting) {
+		unit.Anim = unit.WaitBackup;
+		unit.Waiting = 0;
 	}
 
 	switch (DoActionMove(unit)) {

@@ -110,24 +110,14 @@ struct Clip {
 	int Y2;                             /// pushed clipping bottom right
 };
 
-class ColorIndexRange
-{
-public:
-	ColorIndexRange(unsigned int begin, unsigned int end) :
-		begin(begin), end(end)
-	{}
-public:
-	unsigned int begin;
-	unsigned int end;
-};
-
 class CColorCycling
 {
 private:
 	CColorCycling() : ColorCycleAll(false), cycleCount(0)
 	{}
 
-	static void CreateInstanceIfNeeded() {
+	static void CreateInstanceIfNeeded()
+	{
 		if (s_instance == NULL) {
 			s_instance = new CColorCycling;
 		}
@@ -165,31 +155,38 @@ extern void SdlUnlockScreen();      /// Do SDL hardware unlock
 CVideo Video;
 /*static*/ CColorCycling *CColorCycling::s_instance = NULL;
 
+#if defined(USE_OPENGL) || defined(USE_GLES)
 char ForceUseOpenGL;
 bool UseOpenGL;                      /// Use OpenGL
+bool ZoomNoResize;
+bool GLShaderPipelineSupported = true;
+#endif
 
 char VideoForceFullScreen;           /// fullscreen set from commandline
 
-unsigned long NextFrameTicks;        /// Ticks of begin of the next frame
+double NextFrameTicks;               /// Ticks of begin of the next frame
 unsigned long FrameCounter;          /// Current frame number
-int SlowFrameCounter;                /// Profile, frames out of sync
+unsigned long SlowFrameCounter;      /// Profile, frames out of sync
 
-int ClipX1;                      /// current clipping top left
-int ClipY1;                      /// current clipping top left
-int ClipX2;                      /// current clipping bottom right
-int ClipY2;                      /// current clipping bottom right
+int ClipX1;                          /// current clipping top left
+int ClipY1;                          /// current clipping top left
+int ClipX2;                          /// current clipping bottom right
+int ClipY2;                          /// current clipping bottom right
 
 static std::vector<Clip> Clips;
 
 int VideoSyncSpeed = 100;            /// 0 disable interrupts
-int SkipFrames; /// Skip this frames
+int SkipFrames;                      /// Skip this frames
 
 Uint32 ColorBlack;
 Uint32 ColorDarkGreen;
+Uint32 ColorLightBlue;
 Uint32 ColorBlue;
 Uint32 ColorOrange;
 Uint32 ColorWhite;
+Uint32 ColorLightGray;
 Uint32 ColorGray;
+Uint32 ColorDarkGray;
 Uint32 ColorRed;
 Uint32 ColorGreen;
 Uint32 ColorYellow;
@@ -277,18 +274,32 @@ void CVideo::ClearScreen()
 bool CVideo::ResizeScreen(int w, int h)
 {
 	if (VideoValidResolution(w, h)) {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 		if (UseOpenGL) {
 			FreeOpenGLGraphics();
 			FreeOpenGLFonts();
 			UI.Minimap.FreeOpenGL();
 		}
+#endif
+		TheScreen = SDL_SetVideoMode(w, h, TheScreen->format->BitsPerPixel, TheScreen->flags);
+		ViewportWidth = w;
+		ViewportHeight = h;
+#if defined(USE_OPENGL) || defined(USE_GLES)
+		if (ZoomNoResize) {
+			ReloadOpenGL();
+		} else {
+			Width = w;
+			Height = h;
+			SetClipping(0, 0, Video.Width - 1, Video.Height - 1);
+			if (UseOpenGL) {
+				ReloadOpenGL();
+			}
+		}
+#else
 		Width = w;
 		Height = h;
-		TheScreen = SDL_SetVideoMode(w, h, TheScreen->format->BitsPerPixel, TheScreen->flags);
 		SetClipping(0, 0, Video.Width - 1, Video.Height - 1);
-		if (UseOpenGL) {
-			ReloadOpenGL();
-		}
+#endif
 		return true;
 	}
 	return false;
@@ -383,13 +394,17 @@ void AddColorCyclingRange(unsigned int begin, unsigned int end)
 
 void SetColorCycleAll(bool value)
 {
+	if (UseOpenGL) {
+		// FIXME: In OpenGL-mode, we can only cycle the tileset graphic
+		return;
+	}
 	CColorCycling::GetInstance().ColorCycleAll = value;
 }
 
 /**
 **  Color Cycle for particular surface
 */
-static void ColorCycleSurface(SDL_Surface &surface)
+void ColorCycleSurface(SDL_Surface &surface)
 {
 	SDL_Color *palcolors = surface.format->palette->colors;
 	SDL_Color colors[256];
@@ -443,12 +458,19 @@ void ColorCycle()
 		++colorCycling.cycleCount;
 		for (std::vector<SDL_Surface *>::iterator it = colorCycling.PaletteList.begin(); it != colorCycling.PaletteList.end(); ++it) {
 			SDL_Surface *surface = (*it);
-
 			ColorCycleSurface(*surface);
 		}
 	} else if (Map.TileGraphic->Surface->format->BytesPerPixel == 1) {
 		++colorCycling.cycleCount;
-		ColorCycleSurface(*Map.TileGraphic->Surface);
+#if defined(USE_OPENGL) || defined(USE_GLES)
+		if (UseOpenGL && colorCycling.ColorIndexRanges.size() > 0) {
+			LazilyMakeColorCyclingTextures(Map.TileGraphic, colorCycling.ColorIndexRanges);
+			Map.TileGraphic->Textures = Map.TileGraphic->ColorCyclingTextures[colorCycling.cycleCount % Map.TileGraphic->NumColorCycles];
+		} else
+#endif
+		{
+			ColorCycleSurface(*Map.TileGraphic->Surface);
+		}
 	}
 }
 
@@ -462,7 +484,16 @@ void RestoreColorCyclingSurface()
 			ColorCycleSurface_Reverse(*surface, colorCycling.cycleCount);
 		}
 	} else if (Map.TileGraphic->Surface->format->BytesPerPixel == 1) {
-		ColorCycleSurface_Reverse(*Map.TileGraphic->Surface, colorCycling.cycleCount);
+#if defined(USE_OPENGL) || defined(USE_GLES)
+		if (UseOpenGL) {
+			LazilyMakeColorCyclingTextures(Map.TileGraphic, colorCycling.ColorIndexRanges);
+			Map.TileGraphic->Textures = Map.TileGraphic->ColorCyclingTextures[0];
+		}
+		else
+#endif
+		{
+			ColorCycleSurface_Reverse(*Map.TileGraphic->Surface, colorCycling.cycleCount);
+		}
 	}
 	colorCycling.cycleCount = 0;
 }

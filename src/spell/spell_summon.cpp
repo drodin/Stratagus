@@ -32,9 +32,14 @@
 
 #include "stratagus.h"
 
+#include "action/action_defend.h"
+
 #include "spell/spell_summon.h"
 
+#include "../ai/ai_local.h"
+
 #include "actions.h"
+#include "commands.h"
 #include "script.h"
 #include "unit.h"
 #include "unit_find.h"
@@ -42,25 +47,22 @@
 /* virtual */ void Spell_Summon::Parse(lua_State *l, int startIndex, int endIndex)
 {
 	for (int j = startIndex; j < endIndex; ++j) {
-		lua_rawgeti(l, -1, j + 1);
-		const char *value = LuaToString(l, -1);
-		lua_pop(l, 1);
+		const char *value = LuaToString(l, -1, j + 1);
 		++j;
 		if (!strcmp(value, "unit-type")) {
-			lua_rawgeti(l, -1, j + 1);
-			value = LuaToString(l, -1);
-			lua_pop(l, 1);
+			value = LuaToString(l, -1, j + 1);
 			this->UnitType = UnitTypeByIdent(value);
 			if (!this->UnitType) {
 				this->UnitType = 0;
 				DebugPrint("unit type \"%s\" not found for summon spell.\n" _C_ value);
 			}
 		} else if (!strcmp(value, "time-to-live")) {
-			lua_rawgeti(l, -1, j + 1);
-			this->TTL = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			this->TTL = LuaToNumber(l, -1, j + 1);
 		} else if (!strcmp(value, "require-corpse")) {
-			this->RequireCorpse = 1;
+			this->RequireCorpse = true;
+			--j;
+		} else if (!strcmp(value, "join-to-ai-force")) {
+			this->JoinToAiForce = true;
 			--j;
 		} else {
 			LuaError(l, "Unsupported summon tag: %s" _C_ value);
@@ -75,7 +77,8 @@
 class IsDyingAndNotABuilding
 {
 public:
-	bool operator()(const CUnit *unit) const {
+	bool operator()(const CUnit *unit) const
+	{
 		return unit->CurrentAction() == UnitActionDie && !unit->Type->Building;
 	}
 };
@@ -127,14 +130,23 @@ public:
 		if (target != NULL) {
 			target->tilePos = pos;
 			DropOutOnSide(*target, LookingW, NULL);
+			// To avoid defending summoned unit for AI
+			target->Summoned = 1;
 			//
 			//  set life span. ttl=0 results in a permanent unit.
 			//
 			if (ttl) {
 				target->TTL = GameCycle + ttl;
 			}
-			if (caster.GroupId && caster.Player->AiEnabled) {
-				target->GroupId = caster.GroupId;
+
+			// Insert summoned unit to AI force so it will help them in battle
+			if (this->JoinToAiForce && caster.Player->AiEnabled) {
+				int force = caster.Player->Ai->Force.GetForce(caster);
+				if (force != -1) {
+					caster.Player->Ai->Force[force].Insert(*target);
+					target->GroupId = caster.GroupId;
+					CommandDefend(*target, caster, FlushCommands);
+				}
 			}
 
 			caster.Variable[MANA_INDEX].Value -= spell.ManaCost;

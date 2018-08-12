@@ -36,9 +36,10 @@
 
 class COrder_SpellCast : public COrder
 {
-	friend COrder *COrder::NewActionSpellCast(const SpellType &spell, const Vec2i &pos, CUnit *target);
+	friend COrder *COrder::NewActionSpellCast(const SpellType &spell, const Vec2i &pos, CUnit *target, bool isAutocast);
 public:
-	COrder_SpellCast() : COrder(UnitActionSpellCast), Spell(NULL), State(0), Range(0) {
+	COrder_SpellCast(bool autocast = false) : COrder(UnitActionSpellCast), Spell(NULL), State(0), Range(0), isAutocast(autocast)
+	{
 		goalPos.x = -1;
 		goalPos.y = -1;
 	}
@@ -56,7 +57,7 @@ public:
 
 	virtual void OnAnimationAttack(CUnit &unit);
 
-	const Vec2i &GetGoalPos() const { return goalPos; }
+	virtual const Vec2i GetGoalPos() const;
 	const SpellType &GetSpell() const { return *Spell; }
 	void SetSpell(const SpellType &spell) { Spell = &spell; }
 private:
@@ -67,6 +68,7 @@ private:
 	int State;
 	int Range;
 	Vec2i goalPos;
+	bool isAutocast;
 };
 
 //@}

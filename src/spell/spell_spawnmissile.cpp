@@ -38,6 +38,24 @@
 #include "missile.h"
 #include "script.h"
 #include "unit.h"
+#include "unit_find.h"
+
+
+
+struct CompareUnitDistance {
+	const CUnit *referenceunit;
+	CompareUnitDistance(const CUnit &unit): referenceunit(&unit) {}
+	bool operator()(const CUnit *c1, const CUnit *c2)
+	{
+		int d1 = c1->MapDistanceTo(*referenceunit);
+		int d2 = c2->MapDistanceTo(*referenceunit);
+		if (d1 == d2) {
+			return UnitNumber(*c1) < UnitNumber(*c2);
+		} else {
+			return d1 < d2;
+		}
+	}
+};
 
 /**
 **  Parse the missile location description for a spell action.
@@ -57,14 +75,10 @@ static void CclSpellMissileLocation(lua_State *l, SpellActionMissileLocation *lo
 	}
 	const int args = lua_rawlen(l, -1);
 	for (int j = 0; j < args; ++j) {
-		lua_rawgeti(l, -1, j + 1);
-		const char *value = LuaToString(l, -1);
-		lua_pop(l, 1);
+		const char *value = LuaToString(l, -1, j + 1);
 		++j;
 		if (!strcmp(value, "base")) {
-			lua_rawgeti(l, -1, j + 1);
-			value = LuaToString(l, -1);
-			lua_pop(l, 1);
+			value = LuaToString(l, -1, j + 1);
 			if (!strcmp(value, "caster")) {
 				location->Base = LocBaseCaster;
 			} else if (!strcmp(value, "target")) {
@@ -73,21 +87,13 @@ static void CclSpellMissileLocation(lua_State *l, SpellActionMissileLocation *lo
 				LuaError(l, "Unsupported missile location base flag: %s" _C_ value);
 			}
 		} else if (!strcmp(value, "add-x")) {
-			lua_rawgeti(l, -1, j + 1);
-			location->AddX = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			location->AddX = LuaToNumber(l, -1, j + 1);
 		} else if (!strcmp(value, "add-y")) {
-			lua_rawgeti(l, -1, j + 1);
-			location->AddY = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			location->AddY = LuaToNumber(l, -1, j + 1);
 		} else if (!strcmp(value, "add-rand-x")) {
-			lua_rawgeti(l, -1, j + 1);
-			location->AddRandX = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			location->AddRandX = LuaToNumber(l, -1, j + 1);
 		} else if (!strcmp(value, "add-rand-y")) {
-			lua_rawgeti(l, -1, j + 1);
-			location->AddRandY = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			location->AddRandY = LuaToNumber(l, -1, j + 1);
 		} else {
 			LuaError(l, "Unsupported missile location description flag: %s" _C_ value);
 		}
@@ -97,25 +103,17 @@ static void CclSpellMissileLocation(lua_State *l, SpellActionMissileLocation *lo
 /* virtual */ void Spell_SpawnMissile::Parse(lua_State *l, int startIndex, int endIndex)
 {
 	for (int j = startIndex; j < endIndex; ++j) {
-		lua_rawgeti(l, -1, j + 1);
-		const char *value = LuaToString(l, -1);
-		lua_pop(l, 1);
+		const char *value = LuaToString(l, -1, j + 1);
 		++j;
 		if (!strcmp(value, "damage")) {
-			lua_rawgeti(l, -1, j + 1);
-			this->Damage = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			this->Damage = LuaToNumber(l, -1, j + 1);
 		} else if (!strcmp(value, "use-unit-var")) {
 			this->UseUnitVar = true;
 			--j;
 		} else if (!strcmp(value, "delay")) {
-			lua_rawgeti(l, -1, j + 1);
-			this->Delay = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			this->Delay = LuaToNumber(l, -1, j + 1);
 		} else if (!strcmp(value, "ttl")) {
-			lua_rawgeti(l, -1, j + 1);
-			this->TTL = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			this->TTL = LuaToNumber(l, -1, j + 1);
 		} else if (!strcmp(value, "start-point")) {
 			lua_rawgeti(l, -1, j + 1);
 			CclSpellMissileLocation(l, &this->StartPoint);
@@ -125,13 +123,11 @@ static void CclSpellMissileLocation(lua_State *l, SpellActionMissileLocation *lo
 			CclSpellMissileLocation(l, &this->EndPoint);
 			lua_pop(l, 1);
 		} else if (!strcmp(value, "missile")) {
-			lua_rawgeti(l, -1, j + 1);
-			value = LuaToString(l, -1);
+			value = LuaToString(l, -1, j + 1);
 			this->Missile = MissileTypeByIdent(value);
 			if (this->Missile == NULL) {
 				DebugPrint("in spawn-missile : missile %s does not exist\n" _C_ value);
 			}
-			lua_pop(l, 1);
 		} else {
 			LuaError(l, "Unsupported spawn-missile tag: %s" _C_ value);
 		}
@@ -188,20 +184,64 @@ static void EvaluateMissileLocation(const SpellActionMissileLocation &location,
 	PixelPos startPos;
 	PixelPos endPos;
 
-	EvaluateMissileLocation(this->StartPoint, caster, target, goalPos, &startPos);
-	EvaluateMissileLocation(this->EndPoint, caster, target, goalPos, &endPos);
+	/*
+		hardcoded, will be done with Lua when it's possible
+	*/
+	if (this->Missile->Class == MissileClassDeathCoil) {
+		const Vec2i offset(2, 2);
+		std::vector<CUnit *> table;
+		Select(goalPos - offset, goalPos + offset, table);
+		int count = 0;
+		for (std::vector<CUnit *>::iterator it = table.begin(); it != table.end(); ++it) {
+			CUnit &unit = **it;
 
-	::Missile *missile = MakeMissile(*this->Missile, startPos, endPos);
-	missile->TTL = this->TTL;
-	missile->Delay = this->Delay;
-	missile->Damage = this->Damage;
-	if (this->UseUnitVar) {
-		missile->Damage = 0;
-		missile->SourceUnit = &caster;
-	} else if (missile->Damage != 0) {
-		missile->SourceUnit = &caster;
+			if (unit.Type->BoolFlag[ORGANIC_INDEX].value && unit.IsEnemy(caster)) {
+				table[count++] = &unit;
+			}
+		}
+		if (count > 0) {
+			std::sort(table.begin(), table.begin() + count, CompareUnitDistance(caster));
+			int damageLeft = this->Damage;
+			for (std::vector<CUnit *>::iterator it = table.begin(); it != table.begin() + count && damageLeft > 0; ++it) {
+				CUnit &unit = **it;
+				if (unit.IsAliveOnMap()) {
+					EvaluateMissileLocation(this->StartPoint, caster, &unit, unit.tilePos, &startPos);
+					EvaluateMissileLocation(this->EndPoint, caster, &unit, unit.tilePos, &endPos);
+					::Missile *missile = MakeMissile(*this->Missile, startPos, endPos);
+					missile->TTL = this->TTL;
+					missile->Delay = this->Delay;
+					if (it + 1 == table.begin() + count) {
+						missile->Damage = damageLeft;
+						damageLeft = 0;
+					} else {
+						missile->Damage = std::min(damageLeft, unit.Variable[HP_INDEX].Value);
+						damageLeft -= unit.Variable[HP_INDEX].Value;
+					}
+					missile->SourceUnit = &caster;
+					missile->TargetUnit = &unit;
+				}
+			}
+			return 1;
+		}
+		return 0;
+	} else {
+		EvaluateMissileLocation(this->StartPoint, caster, target, goalPos, &startPos);
+		EvaluateMissileLocation(this->EndPoint, caster, target, goalPos, &endPos);
+
+		::Missile *missile = MakeMissile(*this->Missile, startPos, endPos);
+		missile->TTL = this->TTL;
+		missile->Delay = this->Delay;
+		missile->Damage = this->Damage;
+		if (this->UseUnitVar) {
+			missile->Damage = 0;
+			missile->SourceUnit = &caster;
+		} else if (missile->Damage != 0) {
+			missile->SourceUnit = &caster;
+		}
+
+		missile->TargetUnit = target;
 	}
-	missile->TargetUnit = target;
+
 	return 1;
 }
 

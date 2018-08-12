@@ -43,8 +43,9 @@
 #include "iolib.h"
 #include "map.h"
 #include "menus.h"
-#include "tileset.h"
 #include "title.h"
+#include "ui/contenttype.h"
+#include "ui/popup.h"
 #include "unit.h"
 #include "video.h"
 
@@ -84,9 +85,9 @@ void ShowLoadProgress(const char *fmt, ...)
 	temp[sizeof(temp) - 1] = '\0';
 	va_end(va);
 
-	if (Video.Depth && GetGameFont().IsLoaded()) {
+	if (Video.Depth && IsGameFontReady() && GetGameFont().IsLoaded()) {
 		// Remove non printable chars
-		for (char *s = temp; *s; ++s) {
+		for (unsigned char *s = (unsigned char *)temp; *s; ++s) {
 			if (*s < 32) {
 				*s = ' ';
 			}
@@ -100,10 +101,20 @@ void ShowLoadProgress(const char *fmt, ...)
 	}
 }
 
+CUnitInfoPanel::~CUnitInfoPanel()
+{
+	for (std::vector<CContentType *>::iterator content = Contents.begin();
+		 content != Contents.end(); ++content) {
+		delete *content;
+	}
+	delete Condition;
+}
+
 
 CUserInterface::CUserInterface() :
-	MouseScroll(false), KeyScroll(false), MouseScrollSpeed(1),
-	MouseScrollSpeedDefault(0), MouseScrollSpeedControl(0),
+	MouseScroll(false), KeyScroll(false), KeyScrollSpeed(1),
+	MouseScrollSpeed(1), MouseScrollSpeedDefault(0), MouseScrollSpeedControl(0),
+	NormalFontColor("yellow"), ReverseFontColor("white"),
 	SingleSelectedButton(NULL),
 	MaxSelectedFont(NULL), MaxSelectedTextX(0), MaxSelectedTextY(0),
 	SingleTrainingButton(NULL),
@@ -116,7 +127,7 @@ CUserInterface::CUserInterface() :
 	ViewportCursorColor(0), Offset640X(0), Offset480Y(0),
 	VictoryBackgroundG(NULL), DefeatBackgroundG(NULL)
 {
-	MouseWarpPos.x = MouseWarpPos.y = 0;
+	MouseWarpPos.x = MouseWarpPos.y = -1;
 
 	Point.Name = "cursor-point";
 	Glass.Name = "cursor-glass";
@@ -168,8 +179,8 @@ void InitUserInterface()
 	// Calculations
 	//
 	if (Map.Info.MapWidth) {
-		UI.MapArea.EndX = std::min<int>(UI.MapArea.EndX, Map.Info.MapWidth * PixelTileSize.x - 1);
-		UI.MapArea.EndY = std::min<int>(UI.MapArea.EndY, Map.Info.MapHeight * PixelTileSize.y - 1);
+		UI.MapArea.EndX = std::min<int>(UI.MapArea.EndX, UI.MapArea.X + Map.Info.MapWidth * PixelTileSize.x - 1);
+		UI.MapArea.EndY = std::min<int>(UI.MapArea.EndY, UI.MapArea.Y + Map.Info.MapHeight * PixelTileSize.y - 1);
 	}
 
 	UI.SelectedViewport = UI.Viewports;
@@ -204,7 +215,7 @@ void CUserInterface::Load()
 		Fillers[i].Load();
 	}
 
-	for (int i = 0; i <= ManaResCost; ++i) {
+	for (int i = 0; i <= FreeWorkersCount; ++i) {
 		if (Resources[i].G) {
 			Resources[i].G->Load();
 			Resources[i].G->UseDisplayFormat();
@@ -222,6 +233,15 @@ void CUserInterface::Load()
 	if (PieMenu.G) {
 		PieMenu.G->Load();
 		PieMenu.G->UseDisplayFormat();
+	}
+
+	if (Preference.IconFrameG) {
+		Preference.IconFrameG->Load();
+		Preference.IconFrameG->UseDisplayFormat();
+	}
+	if (Preference.PressedIconFrameG) {
+		Preference.PressedIconFrameG->Load();
+		Preference.PressedIconFrameG->UseDisplayFormat();
 	}
 
 	//  Resolve cursors
@@ -297,7 +317,7 @@ void CleanUserInterface()
 	UI.Fillers.clear();
 
 	// Resource Icons
-	for (int i = 0; i <= ManaResCost; ++i) {
+	for (int i = 0; i <= FreeWorkersCount; ++i) {
 		CGraphic::Free(UI.Resources[i].G);
 	}
 
@@ -308,6 +328,13 @@ void CleanUserInterface()
 		delete *panel;
 	}
 	UI.InfoPanelContents.clear();
+
+	if (Preference.IconFrameG) {
+		CGraphic::Free(Preference.IconFrameG);
+	}
+	if (Preference.PressedIconFrameG) {
+		CGraphic::Free(Preference.PressedIconFrameG);
+	}
 
 	// Button Popups
 	for (std::vector<CPopup *>::iterator popup = UI.ButtonPopups.begin();
@@ -325,6 +352,7 @@ void CleanUserInterface()
 	delete UI.UpgradingButton;
 	delete UI.ResearchingButton;
 	UI.TransportingButtons.clear();
+	UI.UserButtons.clear();
 
 	// Button Panel
 	CGraphic::Free(UI.ButtonPanel.G);
@@ -346,7 +374,6 @@ void CleanUserInterface()
 	}
 }
 
-#ifdef DEBUG
 void FreeButtonStyles()
 {
 	std::map<std::string, ButtonStyle *>::iterator i;
@@ -355,7 +382,6 @@ void FreeButtonStyles()
 	}
 	ButtonStyleHash.clear();
 }
-#endif
 
 /**
 **  Takes coordinates of a pixel in stratagus's window and computes
@@ -421,9 +447,7 @@ static void FinishViewportModeConfiguration(CViewport new_vps[], int num_vps)
 	//  Update the viewport pointers
 	//
 	UI.MouseViewport = GetViewport(CursorScreenPos);
-	if (UI.SelectedViewport > UI.Viewports + UI.NumViewports - 1) {
-		UI.SelectedViewport = UI.Viewports + UI.NumViewports - 1;
-	}
+	UI.SelectedViewport = std::min(UI.Viewports + UI.NumViewports - 1, UI.SelectedViewport);
 }
 
 /**
@@ -636,6 +660,22 @@ void SetViewportMode(ViewportModeType new_mode)
 		default:
 			DebugPrint("trying to set an unknown mode!!\n");
 			break;
+	}
+}
+
+/**
+**  Sets up a new viewport mode.
+**
+**  @param new_mode  New mode's number.
+*/
+void SetNewViewportMode(ViewportModeType new_mode)
+{
+	NewViewportMode = new_mode;
+	if (NewViewportMode >= NUM_VIEWPORT_MODES) {
+		NewViewportMode = VIEWPORT_SINGLE;
+	}
+	if (NewViewportMode < 0) {
+		NewViewportMode = (ViewportModeType)(NUM_VIEWPORT_MODES - 1);
 	}
 }
 

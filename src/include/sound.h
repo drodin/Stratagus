@@ -68,7 +68,8 @@ enum UnitVoiceGroup {
 	VoiceDocking,           /// only for transport reaching coast
 	VoiceRepairing,         /// repairing
 	VoiceHarvesting,        /// harvesting
-	VoiceAttack             /// Attack command
+	VoiceAttack,            /// Attack command
+	VoiceBuild              /// worker goes to build a building
 };
 
 
@@ -97,7 +98,8 @@ public:
 class CSound
 {
 public:
-	CSound() : Mapref(0), Range(0), Number(0) {
+	CSound() : Mapref(0), Range(0), Number(0)
+	{
 		memset(&Sound, 0, sizeof(Sound));
 	}
 	~CSound();
@@ -161,6 +163,8 @@ extern int DistanceSilent;
 --  Functions
 ----------------------------------------------------------------------------*/
 
+/// Calculates volume level
+extern unsigned char CalculateVolume(bool isVolume, int power, unsigned char range);
 /// Play a unit sound
 extern void PlayUnitSound(const CUnit &unit, UnitVoiceGroup unit_voice_group);
 /// Play a unit sound
@@ -168,7 +172,7 @@ extern void PlayUnitSound(const CUnit &unit, CSound *sound);
 /// Play a missile sound
 extern void PlayMissileSound(const Missile &missile, CSound *sound);
 /// Play a game sound
-extern void PlayGameSound(CSound *sound, unsigned char volume);
+extern void PlayGameSound(CSound *sound, unsigned char volume, bool always = false);
 
 /// Play a sound file
 extern int PlayFile(const std::string &name, LuaActionListener *listener = NULL);
@@ -212,10 +216,8 @@ extern CSound *SoundForName(const std::string &sound_name);
 extern CSound *MakeSound(const std::string &sound_name, const std::vector<std::string> &files);
 /// Make a sound group bound to identifier
 extern CSound *MakeSoundGroup(const std::string &name, CSound *first, CSound *second);
-#ifdef DEBUG
-extern void FreeSounds();
-#endif
 
+extern void FreeSounds();
 
 // script_sound.cpp
 

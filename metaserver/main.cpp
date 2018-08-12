@@ -68,12 +68,14 @@ extern int getopt(int argc, char *const *argv, const char *opt);
 
 #if 1 // from stratagus.cpp, to avoid link issues.
 
+bool EnableDebugPrint;           /// if enabled, print the debug messages
+bool EnableAssert;               /// if enabled, halt on assertion failures
+bool EnableUnitDebug;            /// if enabled, a unit info dump will be created
+
 void PrintLocation(const char *file, int line, const char *funcName)
 {
 	fprintf(stdout, "%s:%d: %s: ", file, line, funcName);
 }
-
-#ifdef DEBUG
 
 void AbortAt(const char *file, int line, const char *funcName, const char *conditionStr)
 {
@@ -87,6 +89,67 @@ void PrintOnStdOut(const char *format, ...)
 	va_start(valist, format);
 	vprintf(format, valist);
 	va_end(valist);
+}
+
+// from util.cpp
+
+#ifndef HAVE_GETOPT
+
+int opterr = 1;
+int optind = 1;
+int optopt;
+char *optarg;
+
+static void getopt_err(const char *argv0, const char *str, char opt)
+{
+	if (opterr) {
+		const char *x;
+
+		while ((x = strchr(argv0, '/'))) {
+			argv0 = x + 1;
+		}
+
+		fprintf(stderr, "%s%s%c\n", argv0, str, opt);
+	}
+}
+
+int getopt(int argc, char *const *argv, const char *opts)
+{
+	static int sp = 1;
+	register int c;
+	register const char *cp;
+
+	optarg = NULL;
+
+	if (sp == 1) {
+		if (optind >= argc || argv[optind][0] != '-' || argv[optind][1] == '\0') {
+			return EOF;
+		} else if (!strcmp(argv[optind], "--")) {
+			optind++;
+			return EOF;
+		}
+	}
+	optopt = c = argv[optind][sp];
+	if (c == ':' || (cp = strchr(opts, c)) == NULL) {
+		getopt_err(argv[0], ": illegal option -", (char)c);
+		cp = "xx"; /* make the next if false */
+		c = '?';
+	}
+	if (*++cp == ':') {
+		if (argv[optind][++sp] != '\0') {
+			optarg = &argv[optind++][sp];
+		} else if (++optind < argc) {
+			optarg = argv[optind++];
+		} else {
+			getopt_err(argv[0], ": option requires an argument -", (char)c);
+			c = (*opts == ':') ? ':' : '?';
+		}
+		sp = 1;
+	} else if (argv[optind][++sp] == '\0') {
+		optind++;
+		sp = 1;
+	}
+	return c;
 }
 
 #endif
@@ -160,14 +223,20 @@ int main(int argc, char **argv)
 	//
 	// Parse the command line.
 	//
-	while ((i = getopt(argc, argv, ":p:m:i:d:")) != -1) {
+	while ((i = getopt(argc, argv, "aP:pm:i:d:h")) != -1) {
 		switch (i) {
-			case 'p':
+			case 'a':
+				EnableAssert = true;
+				continue;
+			case 'P':
 				Server.Port = atoi(optarg);
 				if (Server.Port <= 0) {
 					Server.Port = DEFAULT_PORT;
 				}
 				break;
+			case 'p':
+				EnableDebugPrint = true;
+				continue;
 			case 'm':
 				Server.MaxConnections = atoi(optarg);
 				break;
@@ -179,6 +248,16 @@ int main(int argc, char **argv)
 				break;
 			case ':':
 				printf("Missing argument for %c\n", optopt);
+				exit(0);
+				break;
+			case 'h':
+				printf("Arguments:\n"
+					   "-a\tEnable asserts\n"
+					   "-P\tSet port\n"
+					   "-p\tEnable debug print\n"
+					   "-m\tMax connections\n"
+					   "-i\tIdle timeout\n"
+					   "-d\tPolling delay\n");
 				exit(0);
 				break;
 			case '?':

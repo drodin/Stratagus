@@ -10,9 +10,8 @@
 //
 /**@name map_fog.cpp - The map fog of war handling. */
 //
-//      (c) Copyright 1999-2011 by Lutz Sammer, Vladi Shabanski,
-//                                 Russell Smith, Jimmy Salmon and
-//                                 Pali Rohár
+//      (c) Copyright 1999-2015 by Lutz Sammer, Vladi Shabanski,
+//		Russell Smith, Jimmy Salmon, Pali Rohár and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -42,16 +41,11 @@
 #include "actions.h"
 #include "minimap.h"
 #include "player.h"
-#include "tileset.h"
 #include "ui.h"
 #include "unit.h"
 #include "unit_manager.h"
 #include "video.h"
 #include "../video/intern_video.h"
-
-/*----------------------------------------------------------------------------
---  Declarations
-----------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------
 --  Variables
@@ -70,7 +64,7 @@ static const int FogTable[16] = {
 	0, 11, 10, 2,  13, 6, 14, 3,  12, 15, 4, 1,  8, 9, 7, 0,
 };
 
-static unsigned short *VisibleTable;
+static std::vector<unsigned short> VisibleTable;
 
 static SDL_Surface *OnlyFogSurface;
 static CGraphic *AlphaFogG;
@@ -79,15 +73,16 @@ static CGraphic *AlphaFogG;
 --  Functions
 ----------------------------------------------------------------------------*/
 
-
 class _filter_flags
 {
 public:
-	_filter_flags(const CPlayer &p, int *fogmask) : player(&p), fogmask(fogmask) {
+	_filter_flags(const CPlayer &p, int *fogmask) : player(&p), fogmask(fogmask)
+	{
 		Assert(fogmask != NULL);
 	}
 
-	void operator()(const CUnit *const unit) const {
+	void operator()(const CUnit *const unit) const
+	{
 		if (!unit->IsVisibleAsGoal(*player)) {
 			*fogmask &= ~unit->Type->FieldFlags;
 		}
@@ -101,8 +96,7 @@ private:
 **  Find out what the tile flags are a tile is covered by fog
 **
 **  @param player  player who is doing operation
-**  @param x       X map location
-**  @param y       Y map location
+**  @param index   map location
 **  @param mask    input mask to filter
 **
 **  @return        Filtered mask after taking fog into account
@@ -131,8 +125,9 @@ public:
 	_TileSeen(const CPlayer &p , int c) : player(&p), cloak(c)
 	{}
 
-	void operator()(CUnit *const unit) const {
-		if (cloak != (int)unit->Type->PermanentCloak) {
+	void operator()(CUnit *const unit) const
+	{
+		if (cloak != (int)unit->Type->BoolFlag[PERMANENTCLOAK_INDEX].value) {
 			return ;
 		}
 		const int p = player->Index;
@@ -155,7 +150,7 @@ public:
 			/*
 			 * HACK: UGLY !!!
 			 * There is bug in Seen code conneded with
-			 * UnitActionDie and Cloacked units.
+			 * UnitActionDie and Cloaked units.
 			 */
 			if (!unit->VisCount[p] && unit->CurrentAction() == UnitActionDie) {
 				return;
@@ -215,8 +210,7 @@ static void UnitsOnTileUnmarkSeen(const CPlayer &player, CMapField &mf, int cloa
 **  Mark a tile's sight. (Explore and make visible.)
 **
 **  @param player  Player to mark sight.
-**  @param x       X tile to mark.
-**  @param y       Y tile to mark.
+**  @param index   tile to mark.
 */
 void MapMarkTileSight(const CPlayer &player, const unsigned int index)
 {
@@ -243,13 +237,11 @@ void MapMarkTileSight(const CPlayer &player, const Vec2i &pos)
 	MapMarkTileSight(player, Map.getIndex(pos));
 }
 
-
 /**
 **  Unmark a tile's sight. (Explore and make visible.)
 **
 **  @param player  Player to mark sight.
-**  @param x       X tile to mark.
-**  @param y       Y tile to mark.
+**  @param indexx  tile to mark.
 */
 void MapUnmarkTileSight(const CPlayer &player, const unsigned int index)
 {
@@ -281,13 +273,11 @@ void MapUnmarkTileSight(const CPlayer &player, const Vec2i &pos)
 	MapUnmarkTileSight(player, Map.getIndex(pos));
 }
 
-
 /**
 **  Mark a tile for cloak detection.
 **
 **  @param player  Player to mark sight.
-**  @param x       X tile to mark.
-**  @param y       Y tile to mark.
+**  @param index   Tile to mark.
 */
 void MapMarkTileDetectCloak(const CPlayer &player, const unsigned int index)
 {
@@ -305,13 +295,11 @@ void MapMarkTileDetectCloak(const CPlayer &player, const Vec2i &pos)
 	MapMarkTileDetectCloak(player, Map.getIndex(pos));
 }
 
-
 /**
 **  Unmark a tile for cloak detection.
 **
 **  @param player  Player to mark sight.
-**  @param x       X tile to mark.
-**  @param y       Y tile to mark.
+**  @param index   tile to mark.
 */
 void MapUnmarkTileDetectCloak(const CPlayer &player, const unsigned int index)
 {
@@ -383,7 +371,7 @@ void MapSight(const CPlayer &player, const Vec2i &pos, int w, int h, int range, 
 	// bottom hemi-cycle
 	const int maxy = std::min(range, Map.Info.MapHeight - pos.y - h);
 	for (int offsety = 0; offsety < maxy; ++offsety) {
-		const int offsetx = isqrt(square(range + 1) - square(offsety) - 1);
+		const int offsetx = isqrt(square(range + 1) - square(offsety + 1) - 1);
 		const int minx = std::max(0, pos.x - offsetx);
 		const int maxx = std::min(Map.Info.MapWidth, pos.x + w + offsetx);
 		Vec2i mpos(minx, pos.y + h + offsety);
@@ -436,7 +424,13 @@ void UpdateFogOfWarChange()
 */
 void VideoDrawOnlyFog(int x, int y)
 {
-	if (!UseOpenGL) {
+#if defined(USE_OPENGL) || defined(USE_GLES)
+	if (UseOpenGL) {
+		Video.FillRectangleClip(Video.MapRGBA(0, 0, 0, 0, FogOfWarOpacity),
+								x, y, PixelTileSize.x, PixelTileSize.y);
+	} else
+#endif
+	{
 		int oldx;
 		int oldy;
 		SDL_Rect srect;
@@ -457,15 +451,131 @@ void VideoDrawOnlyFog(int x, int y)
 		drect.y = y;
 
 		SDL_BlitSurface(OnlyFogSurface, &srect, TheScreen, &drect);
-	} else {
-		Video.FillRectangleClip(Video.MapRGBA(0, 0, 0, 0, FogOfWarOpacity),
-								x, y, PixelTileSize.x, PixelTileSize.y);
 	}
 }
 
 /*----------------------------------------------------------------------------
 --  Old version correct working but not 100% original
 ----------------------------------------------------------------------------*/
+
+static void GetFogOfWarTile(int sx, int sy, int *fogTile, int *blackFogTile)
+{
+#define IsMapFieldExploredTable(index) (VisibleTable[(index)])
+#define IsMapFieldVisibleTable(index) (VisibleTable[(index)] > 1)
+
+	int w = Map.Info.MapWidth;
+	int fogTileIndex = 0;
+	int blackFogTileIndex = 0;
+	int x = sx - sy;
+
+	if (ReplayRevealMap) {
+		*fogTile = 0;
+		*blackFogTile = 0;
+		return;
+	}
+
+	//
+	//  Which Tile to draw for fog
+	//
+	// Investigate tiles around current tile
+	// 1 2 3
+	// 4 * 5
+	// 6 7 8
+
+	//    2  3 1
+	//   10 ** 5
+	//    8 12 4
+
+	if (sy) {
+		unsigned int index = sy - Map.Info.MapWidth;//(y-1) * Map.Info.MapWidth;
+		if (sx != sy) {
+			//if (!IsMapFieldExploredTable(x - 1, y - 1)) {
+			if (!IsMapFieldExploredTable(x - 1 + index)) {
+				blackFogTileIndex |= 2;
+				fogTileIndex |= 2;
+				//} else if (!IsMapFieldVisibleTable(x - 1, y - 1)) {
+			} else if (!IsMapFieldVisibleTable(x - 1 + index)) {
+				fogTileIndex |= 2;
+			}
+		}
+		//if (!IsMapFieldExploredTable(x, y - 1)) {
+		if (!IsMapFieldExploredTable(x + index)) {
+			blackFogTileIndex |= 3;
+			fogTileIndex |= 3;
+			//} else if (!IsMapFieldVisibleTable(x, y - 1)) {
+		} else if (!IsMapFieldVisibleTable(x + index)) {
+			fogTileIndex |= 3;
+		}
+		if (sx != sy + w - 1) {
+			//if (!IsMapFieldExploredTable(x + 1, y - 1)) {
+			if (!IsMapFieldExploredTable(x + 1 + index)) {
+				blackFogTileIndex |= 1;
+				fogTileIndex |= 1;
+				//} else if (!IsMapFieldVisibleTable(x + 1, y - 1)) {
+			} else if (!IsMapFieldVisibleTable(x + 1 + index)) {
+				fogTileIndex |= 1;
+			}
+		}
+	}
+
+	if (sx != sy) {
+		unsigned int index = sy;//(y) * Map.Info.MapWidth;
+		//if (!IsMapFieldExploredTable(x - 1, y)) {
+		if (!IsMapFieldExploredTable(x - 1 + index)) {
+			blackFogTileIndex |= 10;
+			fogTileIndex |= 10;
+			//} else if (!IsMapFieldVisibleTable(x - 1, y)) {
+		} else if (!IsMapFieldVisibleTable(x - 1 + index)) {
+			fogTileIndex |= 10;
+		}
+	}
+	if (sx != sy + w - 1) {
+		unsigned int index = sy;//(y) * Map.Info.MapWidth;
+		//if (!IsMapFieldExploredTable(x + 1, y)) {
+		if (!IsMapFieldExploredTable(x + 1 + index)) {
+			blackFogTileIndex |= 5;
+			fogTileIndex |= 5;
+			//} else if (!IsMapFieldVisibleTable(x + 1, y)) {
+		} else if (!IsMapFieldVisibleTable(x + 1 + index)) {
+			fogTileIndex |= 5;
+		}
+	}
+
+	if (sy + w < Map.Info.MapHeight * w) {
+		unsigned int index = sy + Map.Info.MapWidth;//(y+1) * Map.Info.MapWidth;
+		if (sx != sy) {
+			//if (!IsMapFieldExploredTable(x - 1, y + 1)) {
+			if (!IsMapFieldExploredTable(x - 1 + index)) {
+				blackFogTileIndex |= 8;
+				fogTileIndex |= 8;
+				//} else if (!IsMapFieldVisibleTable(x - 1, y + 1)) {
+			} else if (!IsMapFieldVisibleTable(x - 1 + index)) {
+				fogTileIndex |= 8;
+			}
+		}
+		//if (!IsMapFieldExploredTable(x, y + 1)) {
+		if (!IsMapFieldExploredTable(x + index)) {
+			blackFogTileIndex |= 12;
+			fogTileIndex |= 12;
+			//} else if (!IsMapFieldVisibleTable(x, y + 1)) {
+		} else if (!IsMapFieldVisibleTable(x + index)) {
+			fogTileIndex |= 12;
+		}
+		if (sx != sy + w - 1) {
+			//if (!IsMapFieldExploredTable(x + 1, y + 1)) {
+			if (!IsMapFieldExploredTable(x + 1 + index)) {
+				blackFogTileIndex |= 4;
+				fogTileIndex |= 4;
+				//} else if (!IsMapFieldVisibleTable(x + 1, y + 1)) {
+			} else if (!IsMapFieldVisibleTable(x + 1 + index)) {
+				fogTileIndex |= 4;
+			}
+		}
+	}
+
+	*fogTile = FogTable[fogTileIndex];
+	*blackFogTile = FogTable[blackFogTileIndex];
+}
 
 /**
 **  Draw fog of war tile.
@@ -477,135 +587,27 @@ void VideoDrawOnlyFog(int x, int y)
 */
 static void DrawFogOfWarTile(int sx, int sy, int dx, int dy)
 {
+	int fogTile = 0;
+	int blackFogTile = 0;
 
-#define IsMapFieldExploredTable(index) \
-	(VisibleTable[(index)])
-#define IsMapFieldVisibleTable(index) \
-	(VisibleTable[(index)] > 1)
+	GetFogOfWarTile(sx, sy, &fogTile, &blackFogTile);
 
-
-	int w = Map.Info.MapWidth;
-	int tile = 0, tile2 = 0;
-	int x = sx - sy;
-	//int y = sy / Map.Info.MapWidth;
-
-	//
-	//  Which Tile to draw for fog
-	//
-	// Investigate tiles around current tile
-	// 1 2 3
-	// 4 * 5
-	// 6 7 8
-
-	if (sy) {
-		unsigned int index = sy - Map.Info.MapWidth;//(y-1) * Map.Info.MapWidth;
-		if (sx != sy) {
-			//if (!IsMapFieldExploredTable(x - 1, y - 1)) {
-			if (!IsMapFieldExploredTable(x - 1 + index)) {
-				tile2 |= 2;
-				tile |= 2;
-				//} else if (!IsMapFieldVisibleTable(x - 1, y - 1)) {
-			} else if (!IsMapFieldVisibleTable(x - 1 + index)) {
-				tile |= 2;
-			}
-		}
-		//if (!IsMapFieldExploredTable(x, y - 1)) {
-		if (!IsMapFieldExploredTable(x + index)) {
-			tile2 |= 3;
-			tile |= 3;
-			//} else if (!IsMapFieldVisibleTable(x, y - 1)) {
-		} else if (!IsMapFieldVisibleTable(x + index)) {
-			tile |= 3;
-		}
-		if (sx != sy + w - 1) {
-			//if (!IsMapFieldExploredTable(x + 1, y - 1)) {
-			if (!IsMapFieldExploredTable(x + 1 + index)) {
-				tile2 |= 1;
-				tile |= 1;
-				//} else if (!IsMapFieldVisibleTable(x + 1, y - 1)) {
-			} else if (!IsMapFieldVisibleTable(x + 1 + index)) {
-				tile |= 1;
-			}
-		}
-	}
-
-	if (sx != sy) {
-		unsigned int index = sy;//(y) * Map.Info.MapWidth;
-		//if (!IsMapFieldExploredTable(x - 1, y)) {
-		if (!IsMapFieldExploredTable(x - 1 + index)) {
-			tile2 |= 10;
-			tile |= 10;
-			//} else if (!IsMapFieldVisibleTable(x - 1, y)) {
-		} else if (!IsMapFieldVisibleTable(x - 1 + index)) {
-			tile |= 10;
-		}
-	}
-	if (sx != sy + w - 1) {
-		unsigned int index = sy;//(y) * Map.Info.MapWidth;
-		//if (!IsMapFieldExploredTable(x + 1, y)) {
-		if (!IsMapFieldExploredTable(x + 1 + index)) {
-			tile2 |= 5;
-			tile |= 5;
-			//} else if (!IsMapFieldVisibleTable(x + 1, y)) {
-		} else if (!IsMapFieldVisibleTable(x + 1 + index)) {
-			tile |= 5;
-		}
-	}
-
-	if (sy + w < Map.Info.MapHeight * w) {
-		unsigned int index = sy + Map.Info.MapWidth;//(y+1) * Map.Info.MapWidth;
-		if (sx != sy) {
-			//if (!IsMapFieldExploredTable(x - 1, y + 1)) {
-			if (!IsMapFieldExploredTable(x - 1 + index)) {
-				tile2 |= 8;
-				tile |= 8;
-				//} else if (!IsMapFieldVisibleTable(x - 1, y + 1)) {
-			} else if (!IsMapFieldVisibleTable(x - 1 + index)) {
-				tile |= 8;
-			}
-		}
-		//if (!IsMapFieldExploredTable(x, y + 1)) {
-		if (!IsMapFieldExploredTable(x + index)) {
-			tile2 |= 12;
-			tile |= 12;
-			//} else if (!IsMapFieldVisibleTable(x, y + 1)) {
-		} else if (!IsMapFieldVisibleTable(x + index)) {
-			tile |= 12;
-		}
-		if (sx != sy + w - 1) {
-			//if (!IsMapFieldExploredTable(x + 1, y + 1)) {
-			if (!IsMapFieldExploredTable(x + 1 + index)) {
-				tile2 |= 4;
-				tile |= 4;
-				//} else if (!IsMapFieldVisibleTable(x + 1, y + 1)) {
-			} else if (!IsMapFieldVisibleTable(x + 1 + index)) {
-				tile |= 4;
-			}
-		}
-	}
-
-	tile = FogTable[tile];
-	tile2 = FogTable[tile2];
-
-	if (ReplayRevealMap) {
-		tile2 = 0;
-		tile = 0;
-	}
-
-	//if (IsMapFieldVisibleTable(x, y) || ReplayRevealMap) {
 	if (IsMapFieldVisibleTable(sx) || ReplayRevealMap) {
-		if (tile && tile != tile2) {
+		if (fogTile && fogTile != blackFogTile) {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 			if (UseOpenGL) {
-				Map.FogGraphic->DrawFrameClipTrans(tile, dx, dy, FogOfWarOpacity);
-			} else {
-				AlphaFogG->DrawFrameClip(tile, dx, dy);
+				Map.FogGraphic->DrawFrameClipTrans(fogTile, dx, dy, FogOfWarOpacity);
+			} else
+#endif
+			{
+				AlphaFogG->DrawFrameClip(fogTile, dx, dy);
 			}
 		}
 	} else {
 		VideoDrawOnlyFog(dx, dy);
 	}
-	if (tile2) {
-		Map.FogGraphic->DrawFrameClip(tile2, dx, dy);
+	if (blackFogTile) {
+		Map.FogGraphic->DrawFrameClip(blackFogTile, dx, dy);
 	}
 
 #undef IsMapFieldExploredTable
@@ -673,7 +675,10 @@ void CMap::InitFogOfWar()
 
 	FogGraphic->Load();
 
-	if (!UseOpenGL) {
+#if defined(USE_OPENGL) || defined(USE_GLES)
+	if (!UseOpenGL)
+#endif
+	{
 		//
 		// Generate Only Fog surface.
 		//
@@ -737,8 +742,8 @@ void CMap::InitFogOfWar()
 		AlphaFogG->UseDisplayFormat();
 	}
 
-	delete[] VisibleTable;
-	VisibleTable = new unsigned short[Info.MapWidth * Info.MapHeight];
+	VisibleTable.clear();
+	VisibleTable.resize(Info.MapWidth * Info.MapHeight);
 }
 
 /**
@@ -746,13 +751,15 @@ void CMap::InitFogOfWar()
 */
 void CMap::CleanFogOfWar()
 {
-	delete[] VisibleTable;
-	VisibleTable = NULL;
+	VisibleTable.clear();
 
 	CGraphic::Free(Map.FogGraphic);
 	FogGraphic = NULL;
 
-	if (!UseOpenGL) {
+#if defined(USE_OPENGL) || defined(USE_GLES)
+	if (!UseOpenGL)
+#endif
+	{
 		if (OnlyFogSurface) {
 			VideoPaletteListRemove(OnlyFogSurface);
 			SDL_FreeSurface(OnlyFogSurface);

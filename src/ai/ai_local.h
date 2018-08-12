@@ -107,6 +107,8 @@ enum AiForceAttackingState {
 	AiForceAttackingState_Attacking,
 };
 
+#define AI_WAIT_ON_RALLY_POINT 60          /// Max seconds AI units will wait on rally point
+
 /**
 **  Define an AI force.
 **
@@ -118,11 +120,14 @@ class AiForce
 public:
 	AiForce() :
 		Completed(false), Defending(false), Attacking(false),
-		Role(AiForceRoleDefault), State(AiForceAttackingState_Free) {
+		Role(AiForceRoleDefault), FormerForce(-1), State(AiForceAttackingState_Free),
+		WaitOnRallyPoint(AI_WAIT_ON_RALLY_POINT)
+	{
 		HomePos.x = HomePos.y = GoalPos.x = GoalPos.y = -1;
 	}
 
-	void Remove(CUnit &unit) {
+	void Remove(CUnit &unit)
+	{
 		if (Units.Remove(&unit)) {
 			InternalRemoveUnit(&unit);
 		}
@@ -131,10 +136,13 @@ public:
 	/**
 	**  Reset the force. But don't change its role and its demand.
 	*/
-	void Reset(bool types = false) {
+	void Reset(bool types = false)
+	{
+		FormerForce = -1;
 		Completed = false;
 		Defending = false;
 		Attacking = false;
+		WaitOnRallyPoint = AI_WAIT_ON_RALLY_POINT;
 		if (types) {
 			UnitTypes.clear();
 			State = AiForceAttackingState_Free;
@@ -155,11 +163,11 @@ public:
 
 	void ReturnToHome();
 	bool NewRallyPoint(const Vec2i &startPos, Vec2i *resultPos);
+	void Insert(CUnit &unit);
 
 private:
 	void CountTypes(unsigned int *counter, const size_t len);
-	bool IsBelongsTo(const CUnitType *type);
-	void Insert(CUnit &unit);
+	bool IsBelongsTo(const CUnitType &type);
 
 	void Update();
 
@@ -175,13 +183,16 @@ public:
 	CUnitCache Units;  /// Units in the force
 
 	// If attacking
+	int FormerForce;             /// Original force number
 	AiForceAttackingState State; /// Attack state
 	Vec2i GoalPos; /// Attack point tile map position
 	Vec2i HomePos; /// Return after attack tile map position
+	int WaitOnRallyPoint; /// Counter for waiting on rally point
 };
 
 // forces
-#define AI_MAX_FORCES 50                    /// How many forces are supported
+#define AI_MAX_FORCES 50                           /// How many forces are supported
+#define AI_MAX_FORCE_INTERNAL (AI_MAX_FORCES / 2)  /// The forces after AI_MAX_FORCE_INTERNAL are for internal use
 
 /**
 **  AI force manager.
@@ -198,7 +209,8 @@ public:
 	const AiForce &operator[](unsigned int index) const { return forces[index]; }
 	AiForce &operator[](unsigned int index) { return forces[index]; }
 
-	int getIndex(AiForce *force) const {
+	int getIndex(AiForce *force) const
+	{
 		for (unsigned int i = 0; i < forces.size(); ++i) {
 			if (force == &forces[i]) {
 				return i;
@@ -207,17 +219,19 @@ public:
 		return -1;
 	}
 
-	unsigned int getScriptForce(unsigned int index) {
+	unsigned int getScriptForce(unsigned int index)
+	{
 		if (script[index] == -1) {
 			script[index] = FindFreeForce();
 		}
 		return script[index];
 	}
 
+	int GetForce(const CUnit &unit);
 	void RemoveDeadUnit();
-	bool Assign(CUnit &unit);
+	bool Assign(CUnit &unit, int force = -1);
 	void Update();
-	unsigned int FindFreeForce(AiForceRole role = AiForceRoleDefault);
+	unsigned int FindFreeForce(AiForceRole role = AiForceRoleDefault, int begin = 0);
 	void CheckUnits(int *counter);
 private:
 	std::vector<AiForce> forces;
@@ -232,7 +246,8 @@ private:
 class AiBuildQueue
 {
 public:
-	AiBuildQueue() : Want(0), Made(0), Type(NULL), Wait(0) {
+	AiBuildQueue() : Want(0), Made(0), Type(NULL), Wait(0)
+	{
 		Pos.x = Pos.y = -1;
 	}
 
@@ -265,8 +280,9 @@ class PlayerAi
 public:
 	PlayerAi() : Player(NULL), AiType(NULL),
 		SleepCycles(0), NeededMask(0), NeedSupply(false),
-		ScriptDebug(false), LastExplorationGameCycle(0),
-		LastCanNotMoveGameCycle(0), LastRepairBuilding(0) {
+		ScriptDebug(false), BuildDepots(true), LastExplorationGameCycle(0),
+		LastCanNotMoveGameCycle(0), LastRepairBuilding(0)
+	{
 		memset(Reserve, 0, sizeof(Reserve));
 		memset(Used, 0, sizeof(Used));
 		memset(Needed, 0, sizeof(Needed));
@@ -290,6 +306,7 @@ public:
 	int NeededMask;        /// Mask for needed resources
 	bool NeedSupply;       /// Flag need food
 	bool ScriptDebug;      /// Flag script debuging on/off
+	bool BuildDepots;      /// Build new depots if nessesary
 
 	std::vector<AiExplorationRequest> FirstExplorationRequest;/// Requests for exploration
 	unsigned long LastExplorationGameCycle;       /// When did the last explore occur?
@@ -304,7 +321,7 @@ public:
 /**
 **  AI Helper.
 **
-**  Contains informations needed for the AI. If the AI needs an unit or
+**  Contains information needed for the AI. If the AI needs an unit or
 **  building or upgrade or spell, it could lookup in this tables to find
 **  where it could be trained, built or researched.
 */
@@ -388,16 +405,17 @@ extern void AiResourceManager();
 /// Ask the ai to explore around pos
 extern void AiExplore(const Vec2i &pos, int exploreMask);
 /// Make two unittypes be considered equals
-extern void AiNewUnitTypeEquiv(CUnitType *a, CUnitType *b);
+extern void AiNewUnitTypeEquiv(const CUnitType &a, const CUnitType &b);
 /// Remove any equivalence between unittypes
 extern void AiResetUnitTypeEquiv();
 /// Finds all equivalents units to a given one
 extern int AiFindUnitTypeEquiv(const CUnitType &type, int *result);
-/// Finds all available equivalents units to a given one, in the prefered order
+/// Finds all available equivalents units to a given one, in the preferred order
 extern int AiFindAvailableUnitTypeEquiv(const CUnitType &type, int *result);
 extern int AiGetBuildRequestsCount(const PlayerAi &pai, int (&counter)[UnitTypeMax]);
 
 extern void AiNewDepotRequest(CUnit &worker);
+extern CUnit *AiGetSuitableDepot(const CUnit &worker, const CUnit &oldDepot, CUnit **resUnit);
 
 //
 // Buildings
@@ -413,7 +431,7 @@ extern void AiRemoveDeadUnitInForces();
 /// Assign a new unit to a force
 extern bool AiAssignToForce(CUnit &unit);
 /// Assign a free units to a force
-extern void AiAssignFreeUnitsToForce();
+extern void AiAssignFreeUnitsToForce(int force = -1);
 /// Attack with force at position
 extern void AiAttackWithForceAt(unsigned int force, int x, int y);
 /// Attack with force

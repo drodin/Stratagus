@@ -56,10 +56,10 @@ class CUnitType;
 class CFile;
 class CFont;
 
-typedef struct _lua_user_data_ {
+struct LuaUserData {
 	int Type;
 	void *Data;
-} LuaUserData;
+};
 
 enum {
 	LuaUnitType = 100,
@@ -68,7 +68,7 @@ enum {
 
 extern lua_State *Lua;
 
-extern int LuaLoadFile(const std::string &file);
+extern int LuaLoadFile(const std::string &file, const std::string &strArg = "");
 extern int LuaCall(int narg, int clear, bool exitOnError = true);
 
 #define LuaError(l, args) \
@@ -95,7 +95,8 @@ inline size_t lua_rawlen(lua_State *l, int index)
 
 #endif
 
-typedef enum {
+/// All possible value for a number.
+enum ENumber {
 	ENumber_Lua,         /// a lua function.
 	ENumber_Dir,         /// directly a number.
 	ENumber_Add,         /// a + b.
@@ -117,16 +118,21 @@ typedef enum {
 	ENumber_StringFind,      /// strchr(string, char) - s.
 
 	ENumber_UnitStat,    /// Property of Unit.
-	ENumber_TypeStat     /// Property of UnitType.
-} ENumber; /// All possible value for a number.
+	ENumber_TypeStat,    /// Property of UnitType.
 
+	ENumber_NumIf,       /// If cond then Number1 else Number2.
 
-typedef enum {
+	ENumber_PlayerData   /// Numeric Player Data
+};
+
+/// All possible value for a unit.
+enum EUnit {
 	EUnit_Ref           /// Unit direct reference.
 	// FIXME: add others.
-} EUnit; /// All possible value for a unit.
+};
 
-typedef enum {
+/// All possible value for a string.
+enum EString {
 	EString_Lua,          /// a lua function.
 	EString_Dir,          /// directly a string.
 	EString_Concat,       /// a + b [+ c ...].
@@ -135,74 +141,74 @@ typedef enum {
 	EString_If,           /// If cond then String1 else String2.
 	EString_UnitName,     /// UnitType Name.
 	EString_SubString,    /// SubString.
-	EString_Line          /// line n of the string.
-	// FIXME: add others.
-} EString; /// All possible value for a string.
+	EString_Line,         /// line n of the string.
+	EString_PlayerName    /// player name.
+	// add more...
+};
 
-typedef enum {
+/// All possible value for a game info string.
+enum ES_GameInfo {
 	ES_GameInfo_Objectives       /// All Objectives of the game.
-} ES_GameInfo; /// All possible value for a game info string.
+};
 
 /**
 **  Enumeration to know which variable to be selected.
 */
-typedef enum {
+enum EnumVariable {
 	VariableValue = 0,  /// Value of the variable.
 	VariableMax,        /// Max of the variable.
 	VariableIncrease,   /// Increase value of the variable.
 	VariableDiff,       /// (Max - Value)
 	VariablePercent,    /// (100 * Value / Max)
 	VariableName        /// Name of the variable.
-} EnumVariable;
+};
 
 /**
 **  Enumeration of unit
 */
-
-typedef enum {
+enum EnumUnit {
 	UnitRefItSelf = 0,      /// unit.
 	UnitRefInside,          /// unit->Inside.
 	UnitRefContainer,       /// Unit->Container.
 	UnitRefWorker,          /// unit->Data.Built.Worker
 	UnitRefGoal             /// unit->Goal
-} EnumUnit;
-
+};
 
 /**
 **  Number description.
 **  Use to describe complex number in script to use when game running.
+** [Deprecated]: give access to lua.
 */
-typedef struct _NumberDesc_ NumberDesc;
+struct NumberDesc;
 
 /**
 ** Unit description
 **  Use to describe complex unit in script to use when game running.
 */
-typedef struct _UnitDesc_ UnitDesc;
-
+struct UnitDesc;
 
 /**
 ** String description
 **  Use to describe complex string in script to use when game running.
 */
-typedef struct _StringDesc_ StringDesc;
+struct StringDesc;
 
-
-typedef struct _binop_ {
+/// for Bin operand  a ?? b
+struct BinOp {
 	NumberDesc *Left;           /// Left operand.
 	NumberDesc *Right;          /// Right operand.
-} BinOp;  /// for Bin operand  a ?? b
+};
 
 /**
 **  Number description.
 */
-struct _NumberDesc_ {
+struct NumberDesc {
 	ENumber e;       /// which number.
 	union {
 		unsigned int Index; /// index of the lua function.
 		int Val;       /// Direct value.
 		NumberDesc *N; /// Other number.
-		struct _binop_ BinOp;   /// For binary operand.
+		BinOp binOp;   /// For binary operand.
 		struct {
 			UnitDesc *Unit;            /// Which unit.
 			int Index;                 /// Which index variable.
@@ -213,6 +219,7 @@ struct _NumberDesc_ {
 			CUnitType **Type;           /// Which unit type.
 			int Index;                 /// Which index variable.
 			EnumVariable Component;    /// Which component.
+			int Loc;                   /// Location of Variables[].
 		} TypeStat;
 		struct {
 			StringDesc *String; /// String.
@@ -222,24 +229,33 @@ struct _NumberDesc_ {
 			StringDesc *String; /// String.
 			char C;             /// Char.
 		} StringFind;
-
+		struct {
+			NumberDesc *Cond;   /// Branch condition.
+			NumberDesc *BTrue;  /// Number if Cond is true.
+			NumberDesc *BFalse; /// Number if Cond is false.
+		} NumIf; /// conditional string.
+		struct {
+			NumberDesc *Player;   /// Number of player
+			StringDesc *DataType; /// Player's data
+			StringDesc *ResType;  /// Resource type
+		} PlayerData; /// conditional string.
 	} D;
 };
 
 /**
 **  Unit description.
 */
-struct _UnitDesc_ {
+struct UnitDesc {
 	EUnit e;       /// which unit;
 	union {
-		CUnit **AUnit; /// Adress of the unit.
+		CUnit **AUnit; /// Address of the unit.
 	} D;
 };
 
 /**
 **  String description.
 */
-struct _StringDesc_ {
+struct StringDesc {
 	EString e;       /// which number.
 	union {
 		unsigned int Index; /// index of the lua function.
@@ -253,8 +269,8 @@ struct _StringDesc_ {
 		UnitDesc *Unit;      /// Unit desciption.
 		struct {
 			NumberDesc *Cond;  /// Branch condition.
-			StringDesc *True;  /// String if Cond is true.
-			StringDesc *False; /// String if Cond is false.
+			StringDesc *BTrue;  /// String if Cond is true.
+			StringDesc *BFalse; /// String if Cond is false.
 		} If; /// conditional string.
 		struct {
 			StringDesc *String;  /// Original string.
@@ -264,10 +280,11 @@ struct _StringDesc_ {
 		struct {
 			StringDesc *String;  /// Original string.
 			NumberDesc *Line;    /// Line number.
-			NumberDesc *MaxLen;  /// Max lenght of line.
+			NumberDesc *MaxLen;  /// Max length of line.
 			CFont *Font;         /// Font to consider (else (-1) consider just char).
 		} Line; /// For specific line.
 		ES_GameInfo GameInfoType;
+		NumberDesc *PlayerName;  /// Player name.
 	} D;
 };
 
@@ -283,11 +300,17 @@ extern int CclInConfigFile;        /// True while config file parsing
 
 extern const char *LuaToString(lua_State *l, int narg);
 extern int LuaToNumber(lua_State *l, int narg);
+extern unsigned int LuaToUnsignedNumber(lua_State *l, int narg);
 extern bool LuaToBoolean(lua_State *l, int narg);
 
-extern void CclGarbageCollect(int fast);  /// Perform garbage collection
+extern const char *LuaToString(lua_State *l, int index, int subIndex);
+extern int LuaToNumber(lua_State *l, int index, int subIndex);
+extern unsigned int LuaToUnsignedNumber(lua_State *l, int index, int subIndex);
+extern bool LuaToBoolean(lua_State *l, int index, int subIndex);
+
+extern void LuaGarbageCollect();  /// Perform garbage collection
 extern void InitLua();                /// Initialise Lua
-extern void LoadCcl(const std::string &filename);  /// Load ccl config file
+extern void LoadCcl(const std::string &filename, const std::string &luaArgStr = "");  /// Load ccl config file
 extern void SavePreferences();        /// Save user preferences
 extern int CclCommand(const std::string &command, bool exitOnError = true);
 
@@ -303,8 +326,6 @@ CUnit *CclGetUnitFromRef(lua_State *l);
 **  @param l  Lua state.
 **  @param x  pointer to output x position.
 **  @param y  pointer to output y position.
-**
-**  @return   The unit pointer
 */
 template <typename T>
 static void CclGetPos(lua_State *l, T *x , T *y, const int offset = -1)
@@ -312,12 +333,8 @@ static void CclGetPos(lua_State *l, T *x , T *y, const int offset = -1)
 	if (!lua_istable(l, offset) || lua_rawlen(l, offset) != 2) {
 		LuaError(l, "incorrect argument");
 	}
-	lua_rawgeti(l, offset, 1);
-	*x = LuaToNumber(l, -1);
-	lua_pop(l, 1);
-	lua_rawgeti(l, offset, 2);
-	*y = LuaToNumber(l, -1);
-	lua_pop(l, 1);
+	*x = LuaToNumber(l, offset, 1);
+	*y = LuaToNumber(l, offset, 2);
 }
 
 extern NumberDesc *Damage;  /// Damage calculation for missile.

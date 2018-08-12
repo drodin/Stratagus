@@ -40,22 +40,16 @@
 /* virtual */ void Spell_AdjustVital::Parse(lua_State *l, int startIndex, int endIndex)
 {
 	for (int j = startIndex; j < endIndex; ++j) {
-		lua_rawgeti(l, -1, j + 1);
-		const char *value = LuaToString(l, -1);
-		lua_pop(l, 1);
+		const char *value = LuaToString(l, -1, j + 1);
 		++j;
 		if (!strcmp(value, "hit-points")) {
-			lua_rawgeti(l, -1, j + 1);
-			this->HP = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			this->HP = LuaToNumber(l, -1, j + 1);
 		} else if (!strcmp(value, "mana-points")) {
-			lua_rawgeti(l, -1, j + 1);
-			this->Mana = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			this->Mana = LuaToNumber(l, -1, j + 1);
+		} else if (!strcmp(value, "shield-points")) {
+			this->Shield = LuaToNumber(l, -1, j + 1);
 		} else if (!strcmp(value, "max-multi-cast")) {
-			lua_rawgeti(l, -1, j + 1);
-			this->MaxMultiCast = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			this->MaxMultiCast = LuaToNumber(l, -1, j + 1);
 		} else {
 			LuaError(l, "Unsupported adjust-vitals tag: %s" _C_ value);
 		}
@@ -81,9 +75,11 @@
 
 	const int hp = this->HP;
 	const int mana = this->Mana;
+	const int shield = this->Shield;
 	const int manacost = spell.ManaCost;
 	int diffHP;
 	int diffMana;
+	int diffShield;
 
 	//  Healing and harming
 	if (hp > 0) {
@@ -97,8 +93,14 @@
 		diffMana = target->Variable[MANA_INDEX].Value;
 	}
 
+	if (shield > 0) {
+		diffShield = target->Stats->Variables[SHIELD_INDEX].Max - target->Variable[SHIELD_INDEX].Value;
+	} else {
+		diffShield = target->Variable[SHIELD_INDEX].Value;
+	}
+
 	//  When harming cast again to send the hp to negative values.
-	//  Carefull, a perfect 0 target hp kills too.
+	//  Careful, a perfect 0 target hp kills too.
 	//  Avoid div by 0 errors too!
 	int castcount = 1;
 	if (hp) {
@@ -108,6 +110,10 @@
 	if (mana) {
 		castcount = std::max<int>(castcount,
 								  diffMana / abs(mana) + (((mana < 0) && (diffMana % (-mana) > 0)) ? 1 : 0));
+	}
+	if (shield) {
+		castcount = std::max<int>(castcount,
+								  diffShield / abs(shield) + (((shield < 0) && (diffShield % (-shield) > 0)) ? 1 : 0));
 	}
 	if (manacost) {
 		castcount = std::min<int>(castcount, caster.Variable[MANA_INDEX].Value / manacost);
@@ -122,23 +128,17 @@
 			HitUnit(&caster, *target, -(castcount * hp));
 		} else {
 			target->Variable[HP_INDEX].Value += castcount * hp;
-			if (target->Variable[HP_INDEX].Value < 0) {
-				target->Variable[HP_INDEX].Value = 0;
-			}
+			target->Variable[HP_INDEX].Value = std::max(target->Variable[HP_INDEX].Value, 0);
 		}
 	} else {
 		target->Variable[HP_INDEX].Value += castcount * hp;
-		if (target->Variable[HP_INDEX].Value > target->Variable[HP_INDEX].Max) {
-			target->Variable[HP_INDEX].Value = target->Variable[HP_INDEX].Max;
-		}
+		target->Variable[HP_INDEX].Value = std::min(target->Variable[HP_INDEX].Max, target->Variable[HP_INDEX].Value);
 	}
 	target->Variable[MANA_INDEX].Value += castcount * mana;
-	if (target->Variable[MANA_INDEX].Value < 0) {
-		target->Variable[MANA_INDEX].Value = 0;
-	}
-	if (target->Variable[MANA_INDEX].Value > target->Variable[MANA_INDEX].Max) {
-		target->Variable[MANA_INDEX].Value = target->Variable[MANA_INDEX].Max;
-	}
+	clamp(&target->Variable[MANA_INDEX].Value, 0, target->Variable[MANA_INDEX].Max);
+	target->Variable[SHIELD_INDEX].Value += castcount * shield;
+	clamp(&target->Variable[SHIELD_INDEX].Value, 0, target->Variable[SHIELD_INDEX].Max);
+
 	if (spell.RepeatCast) {
 		return 1;
 	}

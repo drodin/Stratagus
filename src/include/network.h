@@ -35,16 +35,7 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdint.h>
-#include "net_lowlevel.h"
-
-/*----------------------------------------------------------------------------
---  Defines
-----------------------------------------------------------------------------*/
-
-#define MaxNetworkCommands 9  /// Max Commands In A Packet
-
-#define IsNetworkGame() (NetworkFildes != (Socket)-1)
+#include "network/netsockets.h"
 
 /*----------------------------------------------------------------------------
 --  Declarations
@@ -53,210 +44,45 @@
 class CUnit;
 class CUnitType;
 
-/**
-**  Network message types.
-**
-**  @todo cleanup the message types.
-*/
-enum _message_type_ {
-	MessageNone,                   /// When Nothing Is Happening
-	MessageInitHello,              /// Start connection
-	MessageInitReply,              /// Connection reply
-	MessageInitConfig,             /// Setup message configure clients
-
-	MessageSync,                   /// Heart beat
-	MessageSelection,              /// Update a Selection from Team Player
-	MessageQuit,                   /// Quit game
-	MessageQuitAck,                /// Quit reply - UNUSED YET - Protocol Version 2 - Reserved for menus
-	MessageResend,                 /// Resend message
-
-	MessageChat,                   /// Chat message
-	MessageChatTerm,               /// Chat message termination -  Protocol Version 2
-
-	MessageCommandStop,            /// Unit command stop
-	MessageCommandStand,           /// Unit command stand ground
-	MessageCommandFollow,          /// Unit command follow
-	MessageCommandMove,            /// Unit command move
-	MessageCommandRepair,          /// Unit command repair
-	MessageCommandAutoRepair,      /// Unit command autorepair
-	MessageCommandAttack,          /// Unit command attack
-	MessageCommandGround,          /// Unit command attack ground
-	MessageCommandPatrol,          /// Unit command patrol
-	MessageCommandBoard,           /// Unit command borad
-	MessageCommandUnload,          /// Unit command unload
-	MessageCommandBuild,           /// Unit command build building
-	MessageCommandDismiss,         /// Unit command dismiss unit
-	MessageCommandResourceLoc,     /// Unit command resource location
-	MessageCommandResource,        /// Unit command resource
-	MessageCommandReturn,          /// Unit command return goods
-	MessageCommandTrain,           /// Unit command train
-	MessageCommandCancelTrain,     /// Unit command cancel training
-	MessageCommandUpgrade,         /// Unit command upgrade
-	MessageCommandCancelUpgrade,   /// Unit command cancel upgrade
-	MessageCommandResearch,        /// Unit command research
-	MessageCommandCancelResearch,  /// Unit command cancel research
-
-	MessageExtendedCommand,        /// Command is the next byte
-
-	// ATTN: __MUST__ be last due to spellid encoding!!!
-	MessageCommandSpellCast        /// Unit command spell cast
-};
-
-/**
-**  Network extended message types.
-*/
-enum _extended_message_type_ {
-	ExtendedMessageDiplomacy,     /// Change diplomacy
-	ExtendedMessageSharedVision   /// Change shared vision
-};
-
-/**
-**  Network command message.
-*/
-class CNetworkCommand
+class CNetworkParameter
 {
 public:
-	CNetworkCommand() : Unit(0), X(0), Y(0), Dest(0) {}
-	void Clear() { this->Unit = this->X = this->Y = this->Dest = 0; }
-
-	void Serialize(unsigned char *p) const;
-	void Deserialize(const unsigned char *p);
-	static size_t Size() { return 2 + 2 + 2 + 2; }
-
-	uint16_t Unit;         /// Command for unit
-	uint16_t X;            /// Map position X
-	uint16_t Y;            /// Map position Y
-	uint16_t Dest;         /// Destination unit
-};
-
-/**
-**  Extended network command message.
-*/
-class CNetworkExtendedCommand
-{
+	CNetworkParameter();
+	void FixValues();
 public:
-	CNetworkExtendedCommand() : ExtendedType(0), Arg1(0), Arg2(0), Arg3(0), Arg4(0) {}
+	std::string localHost;  /// Local network address to use
+	unsigned int localPort; /// Local network port to use
+	unsigned int gameCyclesPerUpdate;  /// Network update each # game cycles
+	unsigned int NetworkLag;      /// Network lag (# update cycles)
+	unsigned int timeoutInS;      /// Number of seconds until player times out
 
-	void Serialize(unsigned char *p) const;
-	void Deserialize(const unsigned char *p);
-	static size_t Size() { return 1 + 1 + 2 + 2 + 2; }
-
-	uint8_t  ExtendedType;  /// Extended network command type
-	uint8_t  Arg1;          /// Argument 1
-	uint16_t Arg2;          /// Argument 2
-	uint16_t Arg3;          /// Argument 3
-	uint16_t Arg4;          /// Argument 4
-};
-
-/**
-**  Network chat message.
-*/
-class CNetworkChat
-{
 public:
-	CNetworkChat() {
-		Player = 0;
-		memset(Text, 0, sizeof(Text));
-	}
-
-	void Serialize(unsigned char *p) const ;
-	void Deserialize(const unsigned char *p);
-	static size_t Size() { return 1 + 7; }
-
-	uint8_t Player;   /// Sending player
-	char  Text[7];  /// Message bytes
-};
-
-/**
-**  Network Selection Info
-*/
-typedef struct _network_selection_header_ {
-	unsigned NumberSent : 6;   /// New Number Selected
-	unsigned Add : 1;          /// Adding to Selection
-	unsigned Remove : 1;       /// Removing from Selection
-	unsigned char Type[MaxNetworkCommands];  /// Command
-} NetworkSelectionHeader;
-
-/**
-**  Network Selection Update
-*/
-class CNetworkSelection
-{
+	static const int defaultPort = 6660; /// Default communication port
 public:
-	CNetworkSelection() {
-		memset(Unit, 0, sizeof(Unit));
-	}
-
-	void Serialize(unsigned char *p) const;
-	void Deserialize(const unsigned char *p);
-	static size_t Size() { return 2 * 4; }
-
-	uint16_t Unit[4];  /// Selection Units
-};
-
-/**
-**  Network packet header.
-**
-**  Header for the packet.
-*/
-class CNetworkPacketHeader
-{
-public:
-	CNetworkPacketHeader() {
-		Cycle = 0;
-		memset(Type, 0, sizeof(Type));
-	}
-
-	void Serialize(unsigned char *p) const;
-	void Deserialize(const unsigned char *p);
-	static size_t Size() { return 1 + 1 * MaxNetworkCommands; }
-
-	uint8_t Cycle;                     /// Destination game cycle
-	uint8_t Type[MaxNetworkCommands];  /// Commands in packet
-};
-
-/**
-**  Network packet.
-**
-**  This is sent over the network.
-*/
-class CNetworkPacket
-{
-public:
-	unsigned char *Serialize(int numcommands) const;
-	int Deserialize(const unsigned char *p, unsigned int len);
-	static size_t Size(int numcommands) {
-		return CNetworkPacketHeader::Size() + numcommands * CNetworkCommand::Size();
-	}
-
-	CNetworkPacketHeader Header;  /// Packet Header Info
-	CNetworkCommand Command[MaxNetworkCommands];
+	static CNetworkParameter Instance;
 };
 
 /*----------------------------------------------------------------------------
 --  Variables
 ----------------------------------------------------------------------------*/
 
-extern int NetworkNumInterfaces;  /// Network number of interfaces
-extern Socket NetworkFildes;      /// Network file descriptor
-extern int NetworkInSync;         /// Network is in sync
-extern int NetworkUpdates;        /// Network update each # game cycles
-extern int NetworkLag;            /// Network lag (# game cycles)
-extern unsigned long NetworkStatus[PlayerMax];  /// Network status
+extern CUDPSocket NetworkFildes;  /// Network file descriptor
+extern bool NetworkInSync;        /// Network is in sync
 
 /*----------------------------------------------------------------------------
 --  Functions
 ----------------------------------------------------------------------------*/
 
-extern void InitNetwork1();  /// Initialise network part 1 (ports)
-extern void InitNetwork2();  /// Initialise network part 2
-extern void ExitNetwork1();  /// Cleanup network part 1 (ports)
+extern inline bool IsNetworkGame() { return NetworkFildes.IsValid(); }
+extern void InitNetwork1();  /// Initialise network
+extern void ExitNetwork1();  /// Cleanup network (port)
+extern void NetworkOnStartGame();  /// Initialise network data for ingame communication
 extern void NetworkEvent();  /// Handle network events
 extern void NetworkSync();   /// Hold in sync
-extern void NetworkQuit();   /// Quit game
+extern void NetworkQuitGame();  /// Quit game: warn other users
 extern void NetworkRecover();   /// Recover network
 extern void NetworkCommands();  /// Get all network commands
-extern void NetworkChatMessage(const std::string &msg);  /// Send chat message
+extern void NetworkSendChatMessage(const std::string &msg);  /// Send chat message
 /// Send network command.
 extern void NetworkSendCommand(int command, const CUnit &unit, int x,
 							   int y, const CUnit *dest, const CUnitType *type, int status);

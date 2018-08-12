@@ -44,7 +44,7 @@
 **
 **  \#include "icons.h"
 **
-**  This structure contains all informations about an icon.
+**  This structure contains all information about an icon.
 **
 **  The icon structure members:
 **
@@ -70,7 +70,7 @@
 **
 **  \#include "icons.h"
 **
-**  This structure contains all configuration informations about an icon.
+**  This structure contains all configuration information about an icon.
 **
 **  IconConfig::Name
 **
@@ -99,6 +99,7 @@
 ----------------------------------------------------------------------------*/
 
 class CGraphic;
+class CPlayerColorGraphic;
 class CPlayer;
 class ButtonStyle;
 
@@ -115,15 +116,20 @@ public:
 	void Load();
 
 	/// Draw icon
-	void DrawIcon(const CPlayer &player, const PixelPos &pos) const;
+	void DrawIcon(const PixelPos &pos, const int player = -1) const;
+	/// Draw grayscale icon
+	void DrawGrayscaleIcon(const PixelPos &pos, const int player = -1) const;
+	/// Draw cooldown spell
+	void DrawCooldownSpellIcon(const PixelPos &pos, const int percent) const;
 	/// Draw icon of a unit
 	void DrawUnitIcon(const ButtonStyle &style,
-					  unsigned flags, const PixelPos &pos, const std::string &text) const;
+					  unsigned flags, const PixelPos &pos, const std::string &text, const int player = -1) const;
 
 	const std::string &GetIdent() const { return this->Ident; }
 
 public:
-	CGraphic *G;              /// Graphic data
+	CPlayerColorGraphic *G;              /// Graphic data
+	CPlayerColorGraphic *GScale;         /// Icon when drawn grayscaled
 	int Frame;                /// Frame number in graphic
 private:
 	std::string Ident;        /// Icon identifier
@@ -135,7 +141,8 @@ class IconConfig
 public:
 	IconConfig() : Icon(NULL) {}
 
-	void Load();
+	bool LoadNoLog();
+	bool Load();
 public:
 	std::string Name;    /// config icon name
 	CIcon *Icon;         /// icon pointer to use to run time

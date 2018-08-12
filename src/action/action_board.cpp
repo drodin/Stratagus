@@ -90,14 +90,10 @@ enum {
 {
 	if (!strcmp("state", value)) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->State = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->State = LuaToNumber(l, -1, j + 1);
 	} else if (!strcmp("range", value)) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Range = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->Range = LuaToNumber(l, -1, j + 1);
 	} else if (!strcmp(value, "tile")) {
 		++j;
 		lua_rawgeti(l, -1, j + 1);
@@ -237,7 +233,7 @@ static void EnterTransporter(CUnit &unit, COrder_Board &order)
 	if (transporter->BoardCount < transporter->Type->MaxOnBoard) {
 		// Place the unit inside the transporter.
 		unit.Remove(transporter);
-		transporter->BoardCount++;
+		transporter->BoardCount += unit.Type->BoardSize;
 		unit.Boarded = 1;
 		if (!unit.Player->AiEnabled) {
 			// Don't make anything funny after going out of the transporter.
@@ -255,7 +251,7 @@ static void EnterTransporter(CUnit &unit, COrder_Board &order)
 /* virtual */ void COrder_Board::Execute(CUnit &unit)
 {
 	switch (this->State) {
-			// Wait for transporter
+		// Wait for transporter
 		case State_WaitForTransporter:
 			if (this->WaitForTransporter(unit)) {
 				this->State = State_EnterTransporter;
@@ -275,7 +271,7 @@ static void EnterTransporter(CUnit &unit, COrder_Board &order)
 				return;
 			}
 			this->State = 1;
-			// FALL THROUGH
+		// FALL THROUGH
 		default: { // Move to transporter
 			if (this->State <= State_MoveToTransporterMax) {
 				const int pathRet = MoveToTransporter(unit);

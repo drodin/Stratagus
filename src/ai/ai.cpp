@@ -194,16 +194,7 @@ static void AiCheckUnits()
 	int counter[UnitTypeMax];
 	AiGetBuildRequestsCount(*AiPlayer, counter);
 
-	//  Remove non active units.
-	const int unitCount = AiPlayer->Player->GetUnitCount();
-	for (int i = 0; i < unitCount; ++i) {
-		const CUnit &unit = AiPlayer->Player->GetUnit(i);
-
-		if (!unit.Active) {
-			counter[unit.Type->Slot]--;
-		}
-	}
-	const int *unit_types_count = AiPlayer->Player->UnitTypesCount;
+	const int *unit_types_count = AiPlayer->Player->UnitTypesAiActiveCount;
 
 	//  Look if some unit-types are missing.
 	int n = AiPlayer->UnitTypeRequests.size();
@@ -462,7 +453,7 @@ void AiInit(CPlayer &player)
 		if (!ait->Race.empty() && ait->Race != PlayerRaces.Name[player.Race]) {
 			continue;
 		}
-		if (!player.AiName.empty() && ait->Class != player.AiName) {
+		if (!player.AiName.empty() && ait->Name != player.AiName) {
 			continue;
 		}
 		break;
@@ -504,10 +495,8 @@ void InitAiModule()
 void CleanAi()
 {
 	for (int p = 0; p < PlayerMax; ++p) {
-		if (Players[p].Ai) {
-			delete Players[p].Ai;
-			Players[p].Ai = NULL;
-		}
+		delete Players[p].Ai;
+		Players[p].Ai = NULL;
 	}
 }
 
@@ -593,7 +582,7 @@ static void AiRemoveFromBuilt(PlayerAi *pai, const CUnitType &type)
 		DebugPrint("My guess is that you built something under ai me. naughty boy!\n");
 		return;
 	}
-	Assert(0);
+	fprintf(stderr, "Can't reduce %s from build list.\n", type.Ident.c_str());
 }
 
 /**
@@ -640,6 +629,7 @@ void AiReduceMadeInBuilt(PlayerAi &pai, const CUnitType &type)
 		DebugPrint("My guess is that you built something under ai me. naughty boy!\n");
 		return;
 	}
+	fprintf(stderr, "Can't reduce %s from build list.\n", type.Ident.c_str());
 }
 
 /*----------------------------------------------------------------------------
@@ -654,7 +644,7 @@ void AiReduceMadeInBuilt(PlayerAi &pai, const CUnitType &type)
 */
 void AiHelpMe(const CUnit *attacker, CUnit &defender)
 {
-	/* Freandly Fire - typical splash */
+	/* Friendly Fire - typical splash */
 	if (!attacker || attacker->Player->Index == defender.Player->Index) {
 		//FIXME - try react somehow
 		return;
@@ -668,10 +658,13 @@ void AiHelpMe(const CUnit *attacker, CUnit &defender)
 	if (!defender.Type->CanAttack && defender.Type->UnitType == UnitTypeFly) {
 		return;
 	}
+	// Summoned unit, don't help
+	if (defender.Summoned) {
+		return;
+	}
 
 	PlayerAi &pai = *defender.Player->Ai;
 	AiPlayer = &pai;
-
 
 	//  If unit belongs to an attacking force, check if force members can help.
 	if (defender.GroupId) {
@@ -688,7 +681,7 @@ void AiHelpMe(const CUnit *attacker, CUnit &defender)
 			// if brother is idle or attack no-agressive target and
 			// can attack our attacker then ask for help
 			// FIXME ad support for help from Coward type units
-			if (aiunit.IsAgressive() && CanTarget(aiunit.Type, attacker->Type)
+			if (aiunit.IsAgressive() && CanTarget(*aiunit.Type, *attacker->Type)
 				&& aiunit.CurrentOrder()->GetGoal() != attacker) {
 				bool shouldAttack = aiunit.IsIdle() && aiunit.Threshold == 0;
 
@@ -831,8 +824,8 @@ static void AiMoveUnitInTheWay(CUnit &unit)
 
 	AiPlayer = unit.Player->Ai;
 
-	// No more than 1 move per cycle ( avoid stressing the pathfinder )
-	if (GameCycle == AiPlayer->LastCanNotMoveGameCycle) {
+	// No more than 1 move per 10 cycle ( avoid stressing the pathfinder )
+	if (GameCycle <= AiPlayer->LastCanNotMoveGameCycle + 10) {
 		return;
 	}
 
@@ -849,7 +842,7 @@ static void AiMoveUnitInTheWay(CUnit &unit)
 		if (blocker.IsUnusable()) {
 			continue;
 		}
-		if (!blocker.IsIdle()) {
+		if (!blocker.CanMove() || blocker.Moving) {
 			continue;
 		}
 		if (blocker.Player != unit.Player && blocker.Player->IsAllied(*unit.Player) == false) {
@@ -860,22 +853,15 @@ static void AiMoveUnitInTheWay(CUnit &unit)
 		if (blockertype.UnitType != unittype.UnitType) {
 			continue;
 		}
-		if (!blocker.CanMove()) {
-			continue;
-		}
 
 		const Vec2i b0 = blocker.tilePos;
 		const Vec2i b1(b0.x + blockertype.TileWidth - 1, b0.y + blockertype.TileHeight - 1);
 
-		// Check for collision
-		if (!((u0.x == b1.x + 1 || u1.x == b0.x - 1)
-			  && (std::max<int>(b0.y, u0.y) <= std::min<int>(b1.y, u1.y)))
-			&& !((u0.y == b1.y + 1 || u1.y == b0.y - 1)
-				 && (std::max<int>(b0.x, u0.x) <= std::min<int>(b1.x, u1.x)))) {
+		if (&unit == &blocker) {
 			continue;
 		}
-
-		if (&unit == &blocker) {
+		// Check for collision
+		if (unit.MapDistanceTo(blocker) >= unit.Type->TileWidth + 1) {
 			continue;
 		}
 
@@ -886,7 +872,7 @@ static void AiMoveUnitInTheWay(CUnit &unit)
 			r = (r + 1) & 7;
 			--trycount;
 
-			const Vec2i pos = blocker.tilePos + dirs[r];
+			const Vec2i pos = blocker.tilePos + blocker.Type->TileWidth * dirs[r];
 
 			// Out of the map => no !
 			if (!Map.Info.IsPointOnMap(pos)) {
@@ -894,6 +880,9 @@ static void AiMoveUnitInTheWay(CUnit &unit)
 			}
 			// move to blocker ? => no !
 			if (pos == u0) {
+				continue;
+			}
+			if (Map.Field(pos)->UnitCache.size() > 0) {
 				continue;
 			}
 
@@ -911,8 +900,16 @@ static void AiMoveUnitInTheWay(CUnit &unit)
 	// Don't move more than 1 unit.
 	if (movablenb) {
 		const int index = SyncRand() % movablenb;
-
+		COrder *savedOrder = NULL;
+		if (movableunits[index]->IsIdle() == false) {
+			if (unit.CanStoreOrder(unit.CurrentOrder())) {
+				savedOrder = unit.CurrentOrder()->Clone();
+			}
+		}
 		CommandMove(*movableunits[index], movablepos[index], FlushCommands);
+		if (savedOrder != NULL) {
+			unit.SavedOrder = savedOrder;
+		}
 		AiPlayer->LastCanNotMoveGameCycle = GameCycle;
 	}
 }
@@ -925,14 +922,11 @@ static void AiMoveUnitInTheWay(CUnit &unit)
 void AiCanNotMove(CUnit &unit)
 {
 	const Vec2i &goalPos = unit.pathFinderData->input.GetGoalPos();
-	const int minrange = unit.pathFinderData->input.GetMinRange();
-	const int maxrange = unit.pathFinderData->input.GetMaxRange();
 	const int gw = unit.pathFinderData->input.GetGoalSize().x;
 	const int gh = unit.pathFinderData->input.GetGoalSize().y;
 
 	AiPlayer = unit.Player->Ai;
-	if (unit.Type->UnitType == UnitTypeFly
-		|| PlaceReachable(unit, goalPos, gw, gh, minrange, maxrange)) {
+	if (PlaceReachable(unit, goalPos, gw, gh, 0, 255)) {
 		// Path probably closed by unit here
 		AiMoveUnitInTheWay(unit);
 	}

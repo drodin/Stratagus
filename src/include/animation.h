@@ -72,7 +72,22 @@ enum AnimationType {
 	AnimationIfVar,
 	AnimationSetVar,
 	AnimationSetPlayerVar,
-	AnimationDie
+	AnimationDie,
+	AnimationLuaCallback
+};
+
+//Modify types
+enum SetVar_ModifyTypes {
+	modSet = 0,      /// Set value to this
+	modAdd,          /// Addition
+	modSub,          /// Subtraction
+	modMul,          /// Multiplication
+	modDiv,          /// Division
+	modMod,          /// Modulo
+	modAnd,          /// Bitwise AND
+	modOr,           /// Bitwise OR
+	modXor,          /// Bitwise XOR
+	modNot,          /// Bitwise NOT
 };
 
 class CAnimation
@@ -83,7 +98,7 @@ public:
 	virtual ~CAnimation() {}
 
 	virtual void Action(CUnit &unit, int &move, int scale) const = 0;
-	virtual void Init(const char *s) {}
+	virtual void Init(const char *s, lua_State *l = NULL) {}
 
 	const AnimationType Type;
 	CAnimation *Next;
@@ -92,15 +107,18 @@ public:
 class CAnimations
 {
 public:
-	CAnimations() : Attack(NULL), Build(NULL), Move(NULL), Repair(NULL),
+	CAnimations() : Attack(NULL), RangedAttack(NULL), Build(NULL), Move(NULL), Repair(NULL),
 		Research(NULL), SpellCast(NULL), Start(NULL), Still(NULL),
-		Train(NULL), Upgrade(NULL) {
+		Train(NULL), Upgrade(NULL)
+	{
 		memset(Death, 0, sizeof(Death));
 		memset(Harvest, 0, sizeof(Harvest));
 	}
 
-	~CAnimations() {
+	~CAnimations()
+	{
 		delete Attack;
+		delete RangedAttack;
 		delete Build;
 		for (int i = 0; i < ANIMATIONS_DEATHTYPES + 1; ++i) {
 			delete Death[i];
@@ -120,9 +138,11 @@ public:
 
 	static void SaveUnitAnim(CFile &file, const CUnit &unit);
 	static void LoadUnitAnim(lua_State *l, CUnit &unit, int luaIndex);
+	static void LoadWaitUnitAnim(lua_State *l, CUnit &unit, int luaIndex);
 
 public:
 	CAnimation *Attack;
+	CAnimation *RangedAttack;
 	CAnimation *Build;
 	CAnimation *Death[ANIMATIONS_DEATHTYPES + 1];
 	CAnimation *Harvest[MaxCosts];
@@ -152,9 +172,13 @@ extern int UnitShowAnimationScaled(CUnit &unit, const CAnimation *anim, int scal
 extern int UnitShowAnimation(CUnit &unit, const CAnimation *anim);
 
 
-extern int ParseAnimInt(const CUnit *unit, const char *parseint);
+extern int ParseAnimInt(const CUnit &unit, const char *parseint);
+extern int ParseAnimFlags(const CUnit &unit, const char *parseflag);
 
 extern void FindLabelLater(CAnimation **anim, const std::string &name);
+
+extern void FreeAnimations();
+
 //@}
 
 #endif // !__ANIMATIONS_H__

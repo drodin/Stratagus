@@ -69,6 +69,7 @@ static const char *MissileClassNames[] = {
 	"missile-class-tracer",
 	"missile-class-clip-to-target",
 	"missile-class-continious",
+	"missile-class-straight-fly",
 	NULL
 };
 
@@ -91,15 +92,7 @@ void MissileType::Load(lua_State *l)
 		if (!strcmp(value, "File")) {
 			file = LuaToString(l, -1);
 		} else if (!strcmp(value, "Size")) {
-			if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 2) {
-				LuaError(l, "incorrect argument");
-			}
-			lua_rawgeti(l, -1, 1);
-			this->size.x = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, -1, 2);
-			this->size.y = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			CclGetPos(l, &this->size.x, &this->size.y);
 		} else if (!strcmp(value, "Frames")) {
 			this->SpriteFrames = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "Flip")) {
@@ -138,28 +131,52 @@ void MissileType::Load(lua_State *l)
 			}
 		} else if (!strcmp(value, "NumBounces")) {
 			this->NumBounces = LuaToNumber(l, -1);
+		} else if (!strcmp(value, "ParabolCoefficient")) {
+			this->ParabolCoefficient = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "Delay")) {
 			this->StartDelay = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "Sleep")) {
 			this->Sleep = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "Speed")) {
 			this->Speed = LuaToNumber(l, -1);
+		} else if (!strcmp(value, "BlizzardSpeed")) {
+			this->BlizzardSpeed = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "TTL")) {
 			this->TTL = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "Damage")) {
-			this->Damage = LuaToNumber(l, -1);
+			this->Damage = CclParseNumberDesc(l);
+			lua_pushnil(l);
+		} else if (!strcmp(value, "ReduceFactor")) {
+			this->ReduceFactor = LuaToNumber(l, -1);
+		} else if (!strcmp(value, "SmokePrecision")) {
+			this->SmokePrecision = LuaToNumber(l, -1);
+		} else if (!strcmp(value, "MissileStopFlags")) {
+			this->MissileStopFlags = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "DrawLevel")) {
 			this->DrawLevel = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "Range")) {
 			this->Range = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "ImpactMissile")) {
-			this->Impact.Name = LuaToString(l, -1);
+			if (!lua_istable(l, -1)) {
+				MissileConfig *mc = new MissileConfig();
+				mc->Name = LuaToString(l, -1);
+				this->Impact.push_back(mc);
+			} else {
+				const int impacts = lua_rawlen(l, -1);
+				for (int i = 0; i < impacts; ++i) {
+					MissileConfig *mc = new MissileConfig();
+					mc->Name = LuaToString(l, -1, i + 1);
+					this->Impact.push_back(mc);
+				}
+			}
 		} else if (!strcmp(value, "SmokeMissile")) {
 			this->Smoke.Name = LuaToString(l, -1);
 		} else if (!strcmp(value, "ImpactParticle")) {
 			this->ImpactParticle = new LuaCallback(l, -1);
 		} else if (!strcmp(value, "SmokeParticle")) {
 			this->SmokeParticle = new LuaCallback(l, -1);
+		} else if (!strcmp(value, "OnImpact")) {
+			this->OnImpact = new LuaCallback(l, -1);
 		} else if (!strcmp(value, "CanHitOwner")) {
 			this->CanHitOwner = LuaToBoolean(l, -1);
 		} else if (!strcmp(value, "AlwaysFire")) {
@@ -168,6 +185,10 @@ void MissileType::Load(lua_State *l)
 			this->Pierce = LuaToBoolean(l, -1);
 		} else if (!strcmp(value, "PierceOnce")) {
 			this->PierceOnce = LuaToBoolean(l, -1);
+		} else if (!strcmp(value, "IgnoreWalls")) {
+			this->IgnoreWalls = LuaToBoolean(l, -1);
+		} else if (!strcmp(value, "KillFirstUnit")) {
+			this->KillFirstUnit = LuaToBoolean(l, -1);
 		} else if (!strcmp(value, "FriendlyFire")) {
 			this->FriendlyFire = LuaToBoolean(l, -1);
 		} else if (!strcmp(value, "SplashFactor")) {
@@ -179,6 +200,9 @@ void MissileType::Load(lua_State *l)
 		}
 	}
 
+	if (!this->SmokePrecision) {
+		this->SmokePrecision = this->Speed;
+	}
 	if (!file.empty()) {
 		this->G = CGraphic::New(file, this->Width(), this->Height());
 	}
@@ -202,7 +226,7 @@ static int CclDefineMissileType(lua_State *l)
 	MissileType *mtype = MissileTypeByIdent(str);
 
 	if (mtype) {
-		DebugPrint("Redefining missile-type `%s'\n" _C_ str);
+		DebugPrint("Redefining missile-type '%s'\n" _C_ str);
 	} else {
 		mtype = NewMissileTypeSlot(str);
 	}
@@ -233,35 +257,11 @@ static int CclMissile(lua_State *l)
 		if (!strcmp(value, "type")) {
 			type = MissileTypeByIdent(LuaToString(l, j + 1));
 		} else if (!strcmp(value, "pos")) {
-			if (!lua_istable(l, j + 1) || lua_rawlen(l, j + 1) != 2) {
-				LuaError(l, "incorrect argument");
-			}
-			lua_rawgeti(l, j + 1, 1);
-			position.x = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, j + 1, 2);
-			position.y = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			CclGetPos(l, &position.x, &position.y, j + 1);
 		} else if (!strcmp(value, "origin-pos")) {
-			if (!lua_istable(l, j + 1) || lua_rawlen(l, j + 1) != 2) {
-				LuaError(l, "incorrect argument");
-			}
-			lua_rawgeti(l, j + 1, 1);
-			source.x = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, j + 1, 2);
-			source.y = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			CclGetPos(l, &source.x, &source.y, j + 1);
 		} else if (!strcmp(value, "goal")) {
-			if (!lua_istable(l, j + 1) || lua_rawlen(l, j + 1) != 2) {
-				LuaError(l, "incorrect argument");
-			}
-			lua_rawgeti(l, j + 1, 1);
-			destination.x = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, j + 1, 2);
-			destination.y = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			CclGetPos(l, &destination.x, &destination.y, j + 1);
 		} else if (!strcmp(value, "local")) {
 			Assert(type);
 			missile = MakeLocalMissile(*type, position, destination);
@@ -315,12 +315,8 @@ static int CclMissile(lua_State *l)
 			if (!lua_istable(l, j + 1) || lua_rawlen(l, j + 1) != 2) {
 				LuaError(l, "incorrect argument");
 			}
-			lua_rawgeti(l, j + 1, 1);
-			missile->CurrentStep = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, j + 1, 2);
-			missile->TotalStep = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			missile->CurrentStep = LuaToNumber(l, j + 1, 1);
+			missile->TotalStep = LuaToNumber(l, j + 1, 2);
 		} else {
 			LuaError(l, "Unsupported tag: %s" _C_ value);
 		}
@@ -358,19 +354,13 @@ static int CclDefineBurningBuilding(lua_State *l)
 		const int subargs = lua_rawlen(l, j + 1);
 
 		for (int k = 0; k < subargs; ++k) {
-			lua_rawgeti(l, j + 1, k + 1);
-			const char *value = LuaToString(l, -1);
-			lua_pop(l, 1);
+			const char *value = LuaToString(l, j + 1, k + 1);
 			++k;
 
 			if (!strcmp(value, "percent")) {
-				lua_rawgeti(l, j + 1, k + 1);
-				ptr->Percent = LuaToNumber(l, -1);
-				lua_pop(l, 1);
+				ptr->Percent = LuaToNumber(l, j + 1, k + 1);
 			} else if (!strcmp(value, "missile")) {
-				lua_rawgeti(l, j + 1, k + 1);
-				ptr->Missile = MissileTypeByIdent(LuaToString(l, -1));
-				lua_pop(l, 1);
+				ptr->Missile = MissileTypeByIdent(LuaToString(l, j + 1, k + 1));
 			}
 		}
 		BurningBuildingFrames.insert(BurningBuildingFrames.begin(), ptr);
@@ -386,7 +376,10 @@ static int CclDefineBurningBuilding(lua_State *l)
 */
 static int CclCreateMissile(lua_State *l)
 {
-	LuaCheckArgs(l, 6);
+	const int arg = lua_gettop(l);
+	if (arg < 6 || arg > 7) {
+		LuaError(l, "incorrect argument");
+	}
 
 	const std::string name = LuaToString(l, 1);
 	const MissileType *mtype = MissileTypeByIdent(name);
@@ -394,36 +387,23 @@ static int CclCreateMissile(lua_State *l)
 		LuaError(l, "Bad missile");
 	}
 	PixelPos startpos, endpos;
-	if (!lua_istable(l, 2) || lua_rawlen(l, 2) != 2) {
-		LuaError(l, "incorrect argument !!");
-	}
-	lua_rawgeti(l, 2, 1);
-	startpos.x = LuaToNumber(l, -1);
-	lua_pop(l, 1);
-	lua_rawgeti(l, 2, 2);
-	startpos.y = LuaToNumber(l, -1);
-	lua_pop(l, 1);
-	if (!lua_istable(l, 3) || lua_rawlen(l, 3) != 2) {
-		LuaError(l, "incorrect argument !!");
-	}
-	lua_rawgeti(l, 3, 1);
-	endpos.x = LuaToNumber(l, -1);
-	lua_pop(l, 1);
-	lua_rawgeti(l, 3, 2);
-	endpos.y = LuaToNumber(l, -1);
-	lua_pop(l, 1);
+	CclGetPos(l, &startpos.x, &startpos.y, 2);
+	CclGetPos(l, &endpos.x, &endpos.y, 3);
 
 	const int sourceUnitId = LuaToNumber(l, 4);
 	const int destUnitId = LuaToNumber(l, 5);
 	const bool dealDamage = LuaToBoolean(l, 6);
+	const bool mapRelative = arg == 7 ? LuaToBoolean(l, 7) : false;
 	CUnit *sourceUnit = sourceUnitId != -1 ? &UnitManager.GetSlotUnit(sourceUnitId) : NULL;
 	CUnit *destUnit = destUnitId != -1 ? &UnitManager.GetSlotUnit(destUnitId) : NULL;
 
-	if (sourceUnit != NULL) {
-		startpos += sourceUnit->GetMapPixelPosTopLeft();
-	}
-	if (destUnit != NULL) {
-		endpos += destUnit->GetMapPixelPosTopLeft();
+	if (mapRelative == false) {
+		if (sourceUnit != NULL) {
+			startpos += sourceUnit->GetMapPixelPosTopLeft();
+		}
+		if (destUnit != NULL) {
+			endpos += destUnit->GetMapPixelPosTopLeft();
+		}
 	}
 
 	Missile *missile = MakeMissile(*mtype, startpos, endpos);

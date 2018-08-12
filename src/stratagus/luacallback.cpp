@@ -42,7 +42,7 @@
 **  @param f  Listener function
 */
 LuaCallback::LuaCallback(lua_State *l, lua_Object f) :
-	luastate(l), arguments(0)
+	luastate(l), arguments(0), rescount(0)
 {
 	if (!lua_isfunction(l, f)) {
 		LuaError(l, "Argument isn't a function");
@@ -64,7 +64,6 @@ void LuaCallback::pushPreamble()
 	arguments = 0;
 }
 
-
 /**
 **  Push a string argument for the callback on the stack.
 **
@@ -76,6 +75,21 @@ void LuaCallback::pushInteger(int value)
 	arguments++;
 }
 
+/**
+**  Push a array of integers from callback to stack
+**
+**  @param value  the integer to push on the stack
+*/
+void LuaCallback::pushIntegers(const std::vector<int> &values)
+{
+	lua_newtable(luastate);
+	for (size_t i = 0; i < values.size(); ++i) {
+		lua_pushnumber(luastate, i + 1);
+		lua_pushnumber(luastate, values[i]);
+		lua_settable(luastate, -3);
+	}
+	arguments++;
+}
 
 /**
 **  Push a string argument for the callback on the stack.
@@ -88,16 +102,51 @@ void LuaCallback::pushString(const std::string &s)
 	arguments++;
 }
 
+/**
+**  Pops a boolean value for the callback on the stack.
+**
+*/
+bool LuaCallback::popBoolean()
+{
+	if (rescount) {
+		--rescount;
+		luaL_checktype(luastate, -1, LUA_TBOOLEAN);
+		bool result = lua_toboolean(luastate, -1) != 0;
+		lua_pop(luastate, 1);
+		return result;
+	}
+	LuaError(luastate, "No results left");
+	return false;
+}
 
 /**
-**  Called when an action is recieved from a Widget. It is used
-**  to be able to recieve a notification that an action has
-**  occured.
+**  Pops an integer value for the callback on the stack.
+**
 */
-void LuaCallback::run()
+int LuaCallback::popInteger()
+{
+	if (rescount) {
+		--rescount;
+		luaL_checktype(luastate, -1, LUA_TNUMBER);
+		int result = lua_tonumber(luastate, -1);
+		lua_pop(luastate, 1);
+		return result;
+	}
+	LuaError(luastate, "No results left");
+	return false;
+}
+
+/**
+**  Called when an action is received from a Widget. It is used
+**  to be able to receive a notification that an action has
+**  occurred.
+**
+**  @param results  the number of results to be expected in call
+*/
+void LuaCallback::run(int results)
 {
 	//FIXME call error reporting function
-	int status = lua_pcall(luastate, arguments, 0, base);
+	int status = lua_pcall(luastate, arguments, results, base);
 
 	if (status) {
 		const char *msg = lua_tostring(luastate, -1);
@@ -108,6 +157,7 @@ void LuaCallback::run()
 		fprintf(stderr, "%s\n", msg);
 		lua_pop(luastate, 1);
 	}
+	rescount = results;
 }
 
 /**
@@ -115,6 +165,9 @@ void LuaCallback::run()
 */
 LuaCallback::~LuaCallback()
 {
+	if (rescount) {
+		fprintf(stderr, "There are still some results that weren't popped from stack\n");
+	}
 	luaL_unref(luastate, LUA_REGISTRYINDEX, luaref);
 }
 

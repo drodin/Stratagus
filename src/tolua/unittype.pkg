@@ -8,11 +8,15 @@ class CUnitType
 	int ClicksToExplode;
 
 	int GivesResource;
-	int Supply;
-	int Demand;
+
+	int TileWidth;
+	int TileHeight;
 };
 
 CUnitType *UnitTypeByIdent(const std::string ident);
 
 extern CUnitType *UnitTypeHumanWall;
 extern CUnitType *UnitTypeOrcWall;
+
+void SetMapStat(std::string ident, std::string variable_key, int value, std::string variable_type);
+void SetMapSound(std::string ident, std::string sound, std::string sound_type, std::string sound_subtype = "");

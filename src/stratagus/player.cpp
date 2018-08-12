@@ -10,7 +10,8 @@
 //
 /**@name player.cpp - The players. */
 //
-//      (c) Copyright 1998-2007 by Lutz Sammer, Jimmy Salmon, Nehal Mistry
+//      (c) Copyright 1998-2015 by Lutz Sammer, Jimmy Salmon, Nehal Mistry
+//		and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -39,6 +40,8 @@
 
 #include "player.h"
 
+#include "action/action_upgradeto.h"
+#include "actions.h"
 #include "ai.h"
 #include "iolib.h"
 #include "map.h"
@@ -61,7 +64,7 @@
 **
 **  \#include "player.h"
 **
-**  This structure contains all informations about a player in game.
+**  This structure contains all information about a player in game.
 **
 **  The player structure members:
 **
@@ -192,7 +195,7 @@
 **  CPlayer::Ai
 **
 **    AI structure pointer. Please look at #PlayerAi for more
-**    informations.
+**    information.
 **
 **  CPlayer::Units
 **
@@ -383,7 +386,6 @@ void CleanPlayers()
 	NoRescueCheck = false;
 }
 
-#ifdef DEBUG
 void FreePlayerColors()
 {
 	for (int i = 0; i < PlayerMax; ++i) {
@@ -392,7 +394,6 @@ void FreePlayerColors()
 		PlayerColors[i].clear();
 	}
 }
-#endif
 
 /**
 **  Save state of players to file.
@@ -582,7 +583,8 @@ void CreatePlayer(int type)
 
 void CPlayer::Init(/* PlayerTypes */ int type)
 {
-	this->Units.resize(0);
+	std::vector<CUnit *>().swap(this->Units);
+	std::vector<CUnit *>().swap(this->FreeWorkers);
 
 	//  Take first slot for person on this computer,
 	//  fill other with computer players.
@@ -699,6 +701,7 @@ void CPlayer::Init(/* PlayerTypes */ int type)
 	}
 
 	memset(this->UnitTypesCount, 0, sizeof(this->UnitTypesCount));
+	memset(this->UnitTypesAiActiveCount, 0, sizeof(this->UnitTypesAiActiveCount));
 
 	this->Supply = 0;
 	this->Demand = 0;
@@ -751,9 +754,11 @@ void CPlayer::Clear()
 	memset(Incomes, 0, sizeof(Incomes));
 	memset(Revenue, 0, sizeof(Revenue));
 	memset(UnitTypesCount, 0, sizeof(UnitTypesCount));
+	memset(UnitTypesAiActiveCount, 0, sizeof(UnitTypesAiActiveCount));
 	AiEnabled = false;
 	Ai = 0;
 	this->Units.resize(0);
+	this->FreeWorkers.resize(0);
 	NumBuildings = 0;
 	Supply = 0;
 	Demand = 0;
@@ -805,6 +810,26 @@ void CPlayer::RemoveUnit(CUnit &unit)
 	Assert(last == &unit || this->Units[last->PlayerSlot] == last);
 }
 
+void CPlayer::UpdateFreeWorkers()
+{
+	FreeWorkers.clear();
+	if (FreeWorkers.capacity() != 0) {
+		// Just calling FreeWorkers.clear() is not always appropriate.
+		// Certain paths may leave FreeWorkers in an invalid state, so
+		// it's safer to re-initialize.
+		std::vector<CUnit*>().swap(FreeWorkers);
+	}
+	const int nunits = this->GetUnitCount();
+
+	for (int i = 0; i < nunits; ++i) {
+		CUnit &unit = this->GetUnit(i);
+		if (unit.IsAlive() && unit.Type->BoolFlag[HARVESTER_INDEX].value && unit.Type->ResInfo && !unit.Removed) {
+			if (unit.CurrentAction() == UnitActionStill) {
+				FreeWorkers.push_back(&unit);
+			}
+		}
+	}
+}
 
 
 std::vector<CUnit *>::const_iterator CPlayer::UnitBegin() const
@@ -879,9 +904,7 @@ void CPlayer::ChangeResource(const int resource, const int value, const bool sto
 		const int fromStore = std::min(this->StoredResources[resource], abs(value));
 		this->StoredResources[resource] -= fromStore;
 		this->Resources[resource] -= abs(value) - fromStore;
-		if (this->Resources[resource] < 0) {
-			this->Resources[resource] = 0;
-		}
+		this->Resources[resource] = std::max(this->Resources[resource], 0);
 	} else {
 		if (store && this->MaxResources[resource] != -1) {
 			this->StoredResources[resource] += std::min(value, this->MaxResources[resource] - this->StoredResources[resource]);
@@ -930,6 +953,23 @@ bool CPlayer::CheckResource(const int resource, const int value)
 	return result < value ? false : true;
 }
 
+
+int CPlayer::GetUnitTotalCount(const CUnitType &type) const
+{
+	int count = UnitTypesCount[type.Slot];
+	for (std::vector<CUnit *>::const_iterator it = this->UnitBegin(); it != this->UnitEnd(); ++it) {
+		CUnit &unit = **it;
+
+		if (unit.CurrentAction() == UnitActionUpgradeTo) {
+			COrder_UpgradeTo &order = dynamic_cast<COrder_UpgradeTo &>(*unit.CurrentOrder());
+			if (order.GetUnitType().Slot == type.Slot) {
+				++count;
+			}
+		}
+	}
+	return count;
+}
+
 /**
 **  Check if the unit-type didn't break any unit limits.
 **
@@ -950,7 +990,7 @@ int CPlayer::CheckLimits(const CUnitType &type) const
 		Notify("%s", _("Unit Limit Reached"));
 		return -2;
 	}
-	if (this->Demand + type.Demand > this->Supply && type.Demand) {
+	if (this->Demand + type.Stats[this->Index].Variables[DEMAND_INDEX].Value > this->Supply && type.Stats[this->Index].Variables[DEMAND_INDEX].Value) {
 		Notify("%s", _("Insufficient Supply, increase Supply."));
 		return -3;
 	}
@@ -958,7 +998,7 @@ int CPlayer::CheckLimits(const CUnitType &type) const
 		Notify("%s", _("Total Unit Limit Reached"));
 		return -4;
 	}
-	if (UnitTypesCount[type.Slot] >=  Allow.Units[type.Slot]) {
+	if (GetUnitTotalCount(type) >= Allow.Units[type.Slot]) {
 		Notify(_("Limit of %d reached for this unit type"), Allow.Units[type.Slot]);
 		return -6;
 	}
@@ -974,22 +1014,24 @@ int CPlayer::CheckLimits(const CUnitType &type) const
 **
 **  @note The return values of the PlayerCheck functions are inconsistent.
 */
-int CPlayer::CheckCosts(const int *costs) const
+int CPlayer::CheckCosts(const int *costs, bool notify) const
 {
 	int err = 0;
 	for (int i = 1; i < MaxCosts; ++i) {
 		if (this->Resources[i] + this->StoredResources[i] >= costs[i]) {
 			continue;
 		}
-		const char *name = DefaultResourceNames[i].c_str();
-		const char *actionName = DefaultActions[i].c_str();
+		if (notify) {
+			const char *name = DefaultResourceNames[i].c_str();
+			const char *actionName = DefaultActions[i].c_str();
 
-		Notify(_("Not enough %s...%s more %s."), name, actionName, name);
+			Notify(_("Not enough %s...%s more %s."), _(name), _(actionName), _(name));
 
-		err |= 1 << i;
-		if (this == ThisPlayer && GameSounds.NotEnoughRes[this->Race][i].Sound) {
-			PlayGameSound(GameSounds.NotEnoughRes[this->Race][i].Sound, MaxSampleVolume);
+			if (this == ThisPlayer && GameSounds.NotEnoughRes[this->Race][i].Sound) {
+				PlayGameSound(GameSounds.NotEnoughRes[this->Race][i].Sound, MaxSampleVolume);
+			}
 		}
+		err |= 1 << i;
 	}
 	return err;
 }
@@ -1054,7 +1096,7 @@ void CPlayer::SubCosts(const int *costs)
 }
 
 /**
-**  Substract the costs of new unit from resources
+**  Subtract the costs of new unit from resources
 **
 **  @param type    Type of unit.
 */
@@ -1064,7 +1106,7 @@ void CPlayer::SubUnitType(const CUnitType &type)
 }
 
 /**
-**  Substract a factor of costs from the resources
+**  Subtract a factor of costs from the resources
 **
 **  @param costs   How many costs.
 **  @param factor  Factor of the costs to apply.
@@ -1147,6 +1189,8 @@ void PlayersEachSecond(int playerIdx)
 	if (player.AiEnabled) {
 		AiEachSecond(player);
 	}
+
+	player.UpdateFreeWorkers();
 }
 
 /**
@@ -1183,7 +1227,7 @@ void SetPlayersPalette()
 }
 
 /**
-**  Output debug informations for players.
+**  Output debug information for players.
 */
 void DebugPlayers()
 {

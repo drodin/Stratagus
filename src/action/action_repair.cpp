@@ -104,9 +104,7 @@
 {
 	if (!strcmp("repaircycle", value)) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->RepairCycle = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->RepairCycle = LuaToNumber(l, -1, j + 1);
 	} else if (!strcmp("repair-target", value)) {
 		++j;
 		lua_rawgeti(l, -1, j + 1);
@@ -114,9 +112,7 @@
 		lua_pop(l, 1);
 	} else if (!strcmp("state", value)) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->State = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->State = LuaToNumber(l, -1, j + 1);
 	} else if (!strcmp(value, "tile")) {
 		++j;
 		lua_rawgeti(l, -1, j + 1);
@@ -246,7 +242,7 @@ static void AnimateActionRepair(CUnit &unit)
 	switch (this->State) {
 		case 0:
 			this->State = 1;
-			// FALL THROUGH
+		// FALL THROUGH
 		case 1: { // Move near to target.
 			// FIXME: RESET FIRST!! Why? We move first and than check if
 			// something is in sight.

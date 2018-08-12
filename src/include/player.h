@@ -109,6 +109,7 @@ public:
 
 	// FIXME: shouldn't use the constant
 	int UnitTypesCount[UnitTypeMax];  /// total units of unit-type
+	int UnitTypesAiActiveCount[UnitTypeMax];  /// total units of unit-type that have their AI set to active
 
 	bool AiEnabled;        /// handle AI on local computer
 	PlayerAi *Ai;          /// Ai structure pointer
@@ -132,6 +133,8 @@ public:
 
 	CUnitColors UnitColors; /// Unit colors for new units
 
+	std::vector<CUnit *> FreeWorkers;	/// Container for free workers
+
 	// Upgrades/Allows:
 	CAllow Allow;                 /// Allowed for player
 	CUpgradeTimers UpgradeTimers; /// Timer for the upgrades
@@ -152,6 +155,7 @@ public:
 
 	void AddUnit(CUnit &unit);
 	void RemoveUnit(CUnit &unit);
+	void UpdateFreeWorkers();
 
 	/// Get a resource of the player
 	int GetResource(const int resource, const int type);
@@ -162,11 +166,13 @@ public:
 	/// Check, if there enough resources for action.
 	bool CheckResource(const int resource, const int value);
 
+	/// Returns count of specified unittype
+	int GetUnitTotalCount(const CUnitType &type) const;
 	/// Check if the unit-type didn't break any unit limits and supply/demand
 	int CheckLimits(const CUnitType &type) const;
 
 	/// Check if enough resources are available for costs
-	int CheckCosts(const int *costs) const;
+	int CheckCosts(const int *costs, bool notify = true) const;
 	/// Check if enough resources are available for a new unit-type
 	int CheckUnitType(const CUnitType &type) const;
 
@@ -197,7 +203,8 @@ public:
 	/**
 	**  Check if the player index is an enemy
 	*/
-	bool IsEnemy(const int index) const {
+	bool IsEnemy(const int index) const
+	{
 		return (Index != index && (Enemy & (1 << index)) != 0);
 	}
 
@@ -239,7 +246,8 @@ private:
 class PlayerRace
 {
 public:
-	PlayerRace() : Count(0) {
+	PlayerRace() : Count(0)
+	{
 		memset(Visible, 0, sizeof(Visible));
 	}
 
@@ -268,7 +276,7 @@ enum PlayerRacesOld {
 **
 **  #PlayerNobody
 **
-**    This player is unused. Nobody controlls this player.
+**    This player is unused. Nobody controls this player.
 **
 **  #PlayerComputer
 **
@@ -362,12 +370,10 @@ extern void PlayersEachSecond(int player);
 /// Change current color set to new player of the sprite
 extern void GraphicPlayerPixels(CPlayer &player, const CGraphic &sprite);
 
-/// Output debug informations for players
+/// Output debug information for players
 extern void DebugPlayers();
 
-#ifdef DEBUG
 void FreePlayerColors();
-#endif
 
 /// register ccl features
 extern void PlayerCclRegister();

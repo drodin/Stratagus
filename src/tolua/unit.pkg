@@ -11,6 +11,7 @@ class CUnit
 
 	tolua_readonly CUnitType *Type;
 	tolua_readonly CPlayer *Player;
+	CUnit *Goal;
 	bool Active;
 	int ResourcesHeld;
 };
@@ -22,12 +23,34 @@ class CPreference
 	bool ShowAttackRange;
 	bool ShowMessages;
 	bool BigScreen;
+	bool PauseOnLeave;
+	bool AiExplores;
+	bool GrayscaleIcons;
+	bool IconsShift;
+	bool StereoSound;
+	bool MineNotifications;
+	bool DeselectInMine;
+	bool NoStatusLineTooltips;
 
 	unsigned int ShowOrders;
-	unsigned int  ShowNameDelay;
-	unsigned int  ShowNameTime;
+	unsigned int ShowNameDelay;
+	unsigned int ShowNameTime;
+	unsigned int AutosaveMinutes;
+
+	std::string SF2Soundfont;
+
+	CGraphic *IconFrameG;
+	CGraphic *PressedIconFrameG;
 };
+
+class CUnitManager
+{
+	CUnit &GetSlotUnit(int index) const;
+};
+
+CUnitManager UnitManager;   /// Unit manager
 
 CPreference Preference;
 
 CUnit *GetUnitUnderCursor();
+int UnitNumber(CUnit &unit);

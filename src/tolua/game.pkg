@@ -14,14 +14,14 @@ int SaveReplay(const std::string filename);
 
 $#include "results.h"
 
-typedef enum {
+enum GameResults {
     GameNoResult,
     GameVictory,
     GameDefeat,
     GameDraw,
     GameQuitToMenu,
     GameRestart,
-} GameResults;
+};
 
 GameResults GameResult;
 
@@ -36,13 +36,17 @@ extern void SetGameSpeed(int speed);
 extern int GetGameSpeed();
 extern tolua_property__s int GameSpeed;
 extern bool GameObserve;
+extern bool GameEstablishing;
 
 extern unsigned long GameCycle;
+extern unsigned long FastForwardCycle;
 
 
 $#include "settings.h"
 
 struct SettingsPresets {
+	int PlayerColor;
+	string AIScript;
 	int Race;
 	int Team;
 	int Type;
@@ -59,6 +63,7 @@ class Settings {
 	int Difficulty;
 	int GameType;
 	bool NoFogOfWar;
+	bool Inside;
 	int RevealMap;
 	int MapRichness;
 };

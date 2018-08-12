@@ -4,26 +4,30 @@ $extern void ShowFullImage(const std::string& name, unsigned int timeOutInSecond
 void InitVideo();
 extern int PlayMovie(const std::string name);
 extern void ShowFullImage(const std::string name, unsigned int timeOutInSecond);
-
-extern bool UseOpenGL;
+extern void SaveMapPNG(const char *name);
 
 class CVideo
 {
 public:
 	int Width;
 	int Height;
+	int ViewportWidth;
+	int ViewportHeight;
 	int Depth;
+	int ShaderIndex;
 	bool FullScreen;
 	bool ResizeScreen(int width, int height);
 };
 
 CVideo Video;
 void ToggleFullScreen(void);
+void SwitchToShader(void);
 
 class CGraphic
 {
 public:
 	static CGraphic *New(const std::string file, int w = 0, int h = 0);
+	static CGraphic *Get(const std::string file);
 	static void Free(CGraphic *);
 	void Load();
 	void Resize(int w, int h);
@@ -33,6 +37,7 @@ class CPlayerColorGraphic : public CGraphic
 {
 public:
 	static CPlayerColorGraphic *New(const std::string file, int w = 0, int h = 0);
+	static CPlayerColorGraphic *Get(const std::string file);
 };
 
 class CColor {

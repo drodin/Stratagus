@@ -71,13 +71,13 @@
 
 /* virtual */ void COrder_Research::Save(CFile &file, const CUnit &unit) const
 {
-	file.printf("{\"action-research\"");
+	file.printf("{\"action-research\",");
 
 	if (this->Finished) {
 		file.printf(" \"finished\", ");
 	}
 	if (this->Upgrade) {
-		file.printf(", \"upgrade\", \"%s\"", this->Upgrade->Ident.c_str());
+		file.printf(" \"upgrade\", \"%s\"", this->Upgrade->Ident.c_str());
 	}
 	file.printf("}");
 }
@@ -86,9 +86,7 @@
 {
 	if (!strcmp(value, "upgrade")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Upgrade = CUpgrade::Get(LuaToString(l, -1));
-		lua_pop(l, 1);
+		this->Upgrade = CUpgrade::Get(LuaToString(l, -1, j + 1));
 	} else {
 		return false;
 	}
@@ -100,7 +98,7 @@
 	return true;
 }
 
-/* virtual */ PixelPos COrder_Research::Show(const CViewport & , const PixelPos &lastScreenPos) const
+/* virtual */ PixelPos COrder_Research::Show(const CViewport &, const PixelPos &lastScreenPos) const
 {
 	return lastScreenPos;
 }
@@ -133,9 +131,13 @@
 	}
 #endif
 	CPlayer &player = *unit.Player;
-	player.UpgradeTimers.Upgrades[upgrade.ID] += player.SpeedResearch / SPEEDUP_FACTOR;
+	player.UpgradeTimers.Upgrades[upgrade.ID] += std::max(1, player.SpeedResearch / SPEEDUP_FACTOR);
 	if (player.UpgradeTimers.Upgrades[upgrade.ID] >= upgrade.Costs[TimeCost]) {
-		player.Notify(NotifyGreen, unit.tilePos, _("%s: research complete"), type.Name.c_str());
+		if (upgrade.Name.empty()) {
+			player.Notify(NotifyGreen, unit.tilePos, _("%s: research complete"), type.Name.c_str());
+		} else {
+			player.Notify(NotifyGreen, unit.tilePos, _("%s: research complete"), upgrade.Name.c_str());
+		}
 		if (&player == ThisPlayer) {
 			CSound *sound = GameSounds.ResearchComplete[player.Race].Sound;
 

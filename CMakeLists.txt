@@ -9,7 +9,7 @@
 #         Stratagus - A free fantasy real time strategy game engine
 #
 #    CMakeLists.txt
-#    Copyright (C) 2011-2012  Pali Rohár <pali.rohar@gmail.com>
+#    Copyright (C) 2011-2014  Pali Rohár <pali.rohar@gmail.com>, cybermind <cybermindid@gmail.com>
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -26,9 +26,28 @@
 #
 #
 
+#########################
+# Version configuration #
+#########################
+# Stratagus major version
+set(STRATAGUS_MAJOR_VERSION 2)
+# Stratagus minor version (maximum 99)
+set(STRATAGUS_MINOR_VERSION 4)
+# Stratagus patch level (maximum 99)
+set(STRATAGUS_PATCH_LEVEL 2)
+# Stratagus patch level 2
+set(STRATAGUS_PATCH_LEVEL2 0)
+#########################
+
 project(stratagus)
 cmake_minimum_required(VERSION 2.6)
-set(STRATAGUS_VERSION 2.2.7)
+
+set(STRATAGUS_VERSION "${STRATAGUS_MAJOR_VERSION}.${STRATAGUS_MINOR_VERSION}.${STRATAGUS_PATCH_LEVEL}")
+set(STRATAGUS_VERSION_FULL "${STRATAGUS_VERSION}.${STRATAGUS_PATCH_LEVEL2}")
+
+if(${STRATAGUS_PATCH_LEVEL2} GREATER 0)
+	set(STRATAGUS_VERSION "${STRATAGUS_VERSION_FULL}")
+endif()
 
 # Stratagus sources
 
@@ -36,6 +55,7 @@ include_directories(
 	src/include
 	src/guichan/include
 	src/guichan/include/guichan
+	${CMAKE_CURRENT_BINARY_DIR}
 )
 
 set(action_SRCS
@@ -43,6 +63,7 @@ set(action_SRCS
 	src/action/action_board.cpp
 	src/action/action_build.cpp
 	src/action/action_built.cpp
+	src/action/action_defend.cpp
 	src/action/action_die.cpp
 	src/action/action_follow.cpp
 	src/action/action_move.cpp
@@ -69,6 +90,7 @@ set(animation_SRCS
 	src/animation/animation_goto.cpp
 	src/animation/animation_ifvar.cpp
 	src/animation/animation_label.cpp
+	src/animation/animation_luacallback.cpp
 	src/animation/animation_move.cpp
 	src/animation/animation_randomgoto.cpp
 	src/animation/animation_randomrotate.cpp
@@ -158,18 +180,13 @@ set(guichan_SRCS
 )
 source_group(guichan FILES ${guichan_SRCS})
 
-set(maemo_SRCS
-	src/maemo/maemo.cpp
-)
-source_group(maemo FILES ${maemo_SRCS})
-
 set(map_SRCS
 	src/map/map.cpp
 	src/map/map_draw.cpp
 	src/map/map_fog.cpp
 	src/map/map_radar.cpp
-	src/map/map_save.cpp
 	src/map/map_wall.cpp
+	src/map/mapfield.cpp
 	src/map/minimap.cpp
 	src/map/script_map.cpp
 	src/map/script_tileset.cpp
@@ -194,6 +211,7 @@ set(missile_SRCS
 	src/missile/missile_pointtopointbounce.cpp
 	src/missile/missile_pointtopointcycleonce.cpp
 	src/missile/missile_stay.cpp
+	src/missile/missile_straightfly.cpp
 	src/missile/missile_tracer.cpp
 	src/missile/missile_whirlwind.cpp
 	src/missile/missileconfig.cpp
@@ -204,9 +222,11 @@ source_group(missile FILES ${missile_SRCS})
 set(network_SRCS
 	src/network/commands.cpp
 	src/network/net_lowlevel.cpp
+	src/network/net_message.cpp
 	src/network/master.cpp
 	src/network/netconnect.cpp
 	src/network/network.cpp
+	src/network/netsockets.cpp
 )
 source_group(network FILES ${network_SRCS})
 
@@ -228,6 +248,7 @@ set(pathfinder_SRCS
 source_group(pathfinder FILES ${pathfinder_SRCS})
 
 set(sound_SRCS
+	src/sound/fluidsynth.cpp
 	src/sound/mikmod.cpp
 	src/sound/music.cpp
 	src/sound/ogg.cpp
@@ -248,10 +269,12 @@ set(spell_SRCS
 	src/spell/spell_areabombardment.cpp
 	src/spell/spell_capture.cpp
 	src/spell/spell_demolish.cpp
+	src/spell/spell_luacallback.cpp
 	src/spell/spell_polymorph.cpp
 	src/spell/spell_spawnmissile.cpp
 	src/spell/spell_spawnportal.cpp
 	src/spell/spell_summon.cpp
+	src/spell/spell_teleport.cpp
 	src/spell/spells.cpp
 )
 source_group(spell FILES ${spell_SRCS})
@@ -261,7 +284,9 @@ set(stratagusmain_SRCS
 	src/stratagus/groups.cpp
 	src/stratagus/iolib.cpp
 	src/stratagus/luacallback.cpp
+	src/stratagus/main.cpp
 	src/stratagus/mainloop.cpp
+	src/stratagus/parameters.cpp
 	src/stratagus/player.cpp
 	src/stratagus/script.cpp
 	src/stratagus/script_player.cpp
@@ -276,13 +301,17 @@ source_group(stratagusmain FILES ${stratagus_SRCS})
 set(ui_SRCS
 	src/ui/botpanel.cpp
 	src/ui/button_checks.cpp
+	src/ui/contenttype.cpp
 	src/ui/icons.cpp
 	src/ui/interface.cpp
 	src/ui/mainscr.cpp
-	src/ui/menu_proc.cpp
+	src/ui/uibuttons_proc.cpp
 	src/ui/mouse.cpp
+	src/ui/popup.cpp
 	src/ui/script_ui.cpp
+	src/ui/statusline.cpp
 	src/ui/ui.cpp
+	src/ui/uitimer.cpp
 	src/ui/widgets.cpp
 )
 source_group(ui FILES ${ui_SRCS})
@@ -314,13 +343,14 @@ set(video_SRCS
 	src/video/movie.cpp
 	src/video/png.cpp
 	src/video/sdl.cpp
+	src/video/shaders.cpp
 	src/video/sprite.cpp
 	src/video/video.cpp
 )
 source_group(video FILES ${video_SRCS})
 
 set(win32_SRCS
-	src/win32/attachconsole.cpp
+	src/win32/SetupConsole_win32.cpp
 	src/win32/stratagus.rc
 )
 source_group(win32 FILES ${win32_SRCS})
@@ -331,6 +361,7 @@ set(tolua_FILES
 	src/tolua/font.pkg
 	src/tolua/game.pkg
 	src/tolua/map.pkg
+	src/tolua/master.pkg
 	src/tolua/minimap.pkg
 	src/tolua/network.pkg
 	src/tolua/particle.pkg
@@ -422,6 +453,7 @@ set(stratagus_action_HDRS
 	src/include/action/action_board.h
 	src/include/action/action_build.h
 	src/include/action/action_built.h
+	src/include/action/action_defend.h
 	src/include/action/action_die.h
 	src/include/action/action_follow.h
 	src/include/action/action_move.h
@@ -444,6 +476,7 @@ set(stratagus_animation_HDRS
 	src/include/animation/animation_goto.h
 	src/include/animation/animation_ifvar.h
 	src/include/animation/animation_label.h
+	src/include/animation/animation_luacallback.h
 	src/include/animation/animation_move.h
 	src/include/animation/animation_randomgoto.h
 	src/include/animation/animation_randomrotate.h
@@ -466,10 +499,12 @@ set(stratagus_spell_HDRS
 	src/include/spell/spell_areabombardment.h
 	src/include/spell/spell_capture.h
 	src/include/spell/spell_demolish.h
+	src/include/spell/spell_luacallback.h
 	src/include/spell/spell_polymorph.h
 	src/include/spell/spell_spawnmissile.h
 	src/include/spell/spell_spawnportal.h
 	src/include/spell/spell_summon.h
+	src/include/spell/spell_teleport.h
 )
 
 set(stratagus_generic_HDRS
@@ -492,7 +527,6 @@ set(stratagus_generic_HDRS
 	src/include/iocompat.h
 	src/include/iolib.h
 	src/include/luacallback.h
-	src/include/maemo.h
 	src/include/map.h
 	src/include/master.h
 	src/include/menus.h
@@ -501,9 +535,12 @@ set(stratagus_generic_HDRS
 	src/include/missileconfig.h
 	src/include/movie.h
 	src/include/myendian.h
-	src/include/netconnect.h
 	src/include/net_lowlevel.h
+	src/include/net_message.h
+	src/include/netconnect.h
 	src/include/network.h
+	src/include/network/netsockets.h
+	src/include/parameters.h
 	src/include/particle.h
 	src/include/pathfinder.h
 	src/include/player.h
@@ -512,6 +549,7 @@ set(stratagus_generic_HDRS
 	src/include/script.h
 	src/include/script_sound.h
 	src/include/settings.h
+	src/include/shaders.h
 	src/include/sound.h
 	src/include/sound_server.h
 	src/include/spells.h
@@ -521,6 +559,10 @@ set(stratagus_generic_HDRS
 	src/include/title.h
 	src/include/translate.h
 	src/include/trigger.h
+	src/include/ui/contenttype.h
+	src/include/ui/popup.h
+	src/include/ui/statusline.h
+	src/include/ui/uitimer.h
 	src/include/ui.h
 	src/include/unit.h
 	src/include/unit_cache.h
@@ -538,6 +580,7 @@ set(stratagus_generic_HDRS
 	src/include/viewport.h
 	src/include/wav.h
 	src/include/widgets.h
+	src/include/SetupConsole_win32.h
 )
 
 
@@ -548,7 +591,18 @@ source_group(include\\guichan FILES ${stratagus_guichan_HDRS})
 source_group(include\\spell FILES ${stratagus_spell_HDRS})
 
 
-set (stratagus_HDRS ${stratagus_generic_HDRS} ${stratagus_action_HDRS} ${stratagus_animation_HDRS} ${stratagus_guichan_HDRS} ${stratagus_spell_HDRS})
+set(stratagus_HDRS
+	${stratagus_generic_HDRS}
+	${stratagus_action_HDRS}
+	${stratagus_animation_HDRS}
+	${stratagus_guichan_HDRS}
+	${stratagus_spell_HDRS}
+	${CMAKE_CURRENT_BINARY_DIR}/version-generated.h
+	version-generated.h # This line is needed for CMake when generating Doxygen documentation
+)
+
+# Configuration types
+set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "" FORCE)
 
 # Additional platform checks
 
@@ -556,14 +610,13 @@ if(UNIX AND CMAKE_SYSTEM_NAME MATCHES BSD)
 	set(BSD true)
 endif()
 
-find_package(PkgConfig QUIET REQUIRED)
-
-# Check if platform is Maemo
 if(UNIX AND CMAKE_SYSTEM_NAME MATCHES Linux)
-	pkg_check_modules(MAEMO_VERSION maemo-version)
-	if(MAEMO_VERSION_FOUND)
-		set(MAEMO true)
-	endif()
+	set(LINUX true)
+endif()
+
+if(WIN32 AND MSVC AND NOT CMAKE_PREFIX_PATH)
+  # use a default
+  set(CMAKE_PREFIX_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../dependencies)
 endif()
 
 # Find all libraries
@@ -582,15 +635,13 @@ find_package(SDL REQUIRED)
 find_package(Tolua++ REQUIRED)
 find_package(ZLIB REQUIRED)
 
-if(MAEMO)
-	pkg_check_modules(LIBOSSO REQUIRED libosso)
-endif()
-
 if(WIN32)
 	find_package(MakeNSIS)
 endif()
 
 find_package(BZip2)
+find_package(FluidSynth)
+find_package(StackTrace)
 find_package(Mikmod)
 find_package(MNG)
 find_package(OggVorbis)
@@ -605,7 +656,9 @@ find_package(Sqlite)
 find_package(Doxygen)
 find_package(SelfPackers)
 
+include(CheckTypeSize)
 include(CheckFunctionExists)
+include(CheckSymbolExists)
 
 # Windows RC compiler definitions
 
@@ -629,10 +682,12 @@ endif()
 option(ENABLE_TOUCHSCREEN "Use touchscreen input" OFF)
 
 option(WITH_BZIP2 "Compile Stratagus with BZip2 compression support" ON)
+option(WITH_FLUIDSYNTH "Compile Stratagus with FluidSynth sound library" ON)
 option(WITH_MIKMOD "Compile Stratagus with Mikmod sound library" ON)
 option(WITH_MNG "Compile Stratagus with MNG image library" ON)
 option(WITH_OGGVORBIS "Compile Stratagus with OGG/Vorbis sound library" ON)
 option(WITH_THEORA "Compile Stratagus with Theroa video library" ON)
+option(WITH_STACKTRACE "Compile Stratagus with StackTrace library" ON)
 
 option(WITH_X11 "Compile Stratagus with X11 clipboard pasting support" ON)
 
@@ -640,6 +695,8 @@ option(ENABLE_DOC "Generate Stratagus source code documentation with Doxygen" OF
 option(ENABLE_DEV "Install Stratagus game development headers files" OFF)
 option(ENABLE_UPX "Compress Stratagus executable binary with UPX packer" OFF)
 option(ENABLE_STRIP "Strip all symbols from executables" OFF)
+option(ENABLE_USEGAMEDIR "Place all files created by Stratagus(logs, savegames) in game directory(old behavior), otherwise place everything in user directory(new behavior)" OFF)
+option(ENABLE_MULTIBUILD "Compile Stratagus on all CPU cores simltaneously in MSVC" ON)
 
 if(NOT WITH_RENDERER)
 	if(OPENGL_FOUND)
@@ -682,6 +739,16 @@ if(WITH_BZIP2 AND BZIP2_FOUND)
 	set(stratagus_LIBS ${stratagus_LIBS} ${BZIP2_LIBRARIES})
 endif()
 
+if(WITH_FLUIDSYNTH AND FLUIDSYNTH_FOUND)
+	add_definitions(-DUSE_FLUIDSYNTH ${FLUIDSYNTH_DEFINITIONS})
+	include_directories(${FLUIDSYNTH_INCLUDE_DIR})
+	set(stratagus_LIBS ${stratagus_LIBS} ${FLUIDSYNTH_LIBRARY})
+	find_file(FLUIDSYNTH_DLL libfluidsynth.dll HINTS ${CMAKE_PREFIX_PATH}/bin)
+	find_file(GLIB_DLL libglib-2.0-0.dll HINTS ${CMAKE_PREFIX_PATH} PATH_SUFFIXES bin lib)
+	find_file(GTHREAD_DLL libgthread-2.0-0.dll HINTS ${CMAKE_PREFIX_PATH} PATH_SUFFIXES bin lib)
+	set(MAKENSIS_FLAGS ${MAKENSIS_FLAGS} -DFLUID -DFLUIDDLL=libfluidsynth.dll -DGTHREADDLL=libglib-2.0-0.dll -DGLIBDLL=libgthread-2.0-0.dll)
+endif()
+
 if(WITH_MIKMOD AND MIKMOD_FOUND)
 	add_definitions(-DUSE_MIKMOD ${MIKMOD_DEFINITIONS})
 	include_directories(${MIKMOD_INCLUDE_DIR})
@@ -692,6 +759,10 @@ if(WITH_MNG AND MNG_FOUND)
 	add_definitions(-DUSE_MNG)
 	include_directories(${MNG_INCLUDE_DIR})
 	set(stratagus_LIBS ${stratagus_LIBS} ${MNG_LIBRARY})
+	if (MSVC)
+		include_directories(${JPEG_INCLUDE_DIR})
+		set(stratagus_LIBS ${stratagus_LIBS} ${JPEG_LIBRARY})
+	endif()
 endif()
 
 if(WITH_OGGVORBIS AND OGGVORBIS_FOUND)
@@ -706,8 +777,14 @@ if(WITH_THEORA AND THEORA_FOUND)
 	set(stratagus_LIBS ${stratagus_LIBS} ${THEORA_LIBRARY})
 endif()
 
+if(WITH_STACKTRACE AND STACKTRACE_FOUND)
+	add_definitions(-DUSE_STACKTRACE ${STACKTRACE_DEFINITIONS})
+	include_directories(${STACKTRACE_PROJECT_DIR})
+	set(stratagus_LIBS ${stratagus_LIBS} ${STACKTRACE_LIBRARY})
+endif()
+
 if(WITH_X11 AND X11_FOUND)
-	add_definitions(-DHAVE_X11)
+	add_definitions(-DUSE_X11)
 	include_directories(${X11_INCLUDE_DIR})
 	set(stratagus_LIBS ${stratagus_LIBS} ${X11_X11_LIB})
 endif()
@@ -716,14 +793,22 @@ if(WITH_RENDERER STREQUAL "OpenGL" AND OPENGL_FOUND)
 	add_definitions(-DUSE_OPENGL)
 	include_directories(${OPENGL_INCLUDE_DIR})
 	set(stratagus_LIBS ${stratagus_LIBS} ${OPENGL_LIBRARIES})
+	message(STATUS "Using OpenGL")
 elseif(WITH_RENDERER STREQUAL "OpenGLES" AND OPENGLES_FOUND AND SDLGLES_FOUND)
+	if(SDLGLES_TYPE STREQUAL "Native")
+		add_definitions(-DUSE_GLES_NATIVE)
+		message(STATUS "Using OpenGLES (SDL Native)")
+	elseif(SDLGLES_TYPE STREQUAL "EGL")
+		add_definitions(-DUSE_GLES_EGL)
+		message(STATUS "Using OpenGLES (SDL EGL)")
+	else()
+		message(FATAL_ERROR "Unknown SDL gles type")
+	endif()
 	add_definitions(-DUSE_GLES)
 	include_directories(${OPENGLES_INCLUDE_DIR} ${SDLGLES_INCLUDE_DIR})
 	set(stratagus_LIBS ${stratagus_LIBS} ${OPENGLES_LIBRARIES} ${SDLGLES_LIBRARY})
-elseif(WITH_RENDERER STREQUAL "NativeSDL")
-	message(FATAL_ERROR "Compile Stratagus without OpenGL or OpenGL ES 1.1 rendering is not supported yet")
-else()
-	message(FATAL_ERROR "Specified rendering support was not found in system. Choose: NativeSDL OpenGL OpenGLES")
+elseif(NOT WITH_RENDERER STREQUAL "NativeSDL")
+	message(FATAL_ERROR "Specified rendering support was not found in system.\nChoose: NativeSDL OpenGL OpenGLES")
 endif()
 
 # Platform definitions
@@ -731,11 +816,11 @@ endif()
 if(WIN32)
 	add_definitions(-DUSE_WIN32)
 	set(stratagus_SRCS ${stratagus_SRCS} ${win32_SRCS})
-	set(stratagus_LIBS ${stratagus_LIBS} dsound winmm ws2_32)
+	set(stratagus_LIBS ${stratagus_LIBS} dsound winmm ws2_32 dbghelp)
 endif()
 
 if (WIN32 AND MSVC)
-	add_definitions(-D_CRT_SECURE_NO_WARNINGS -D_CRT_SECURE_NO_DEPRECATE=1)
+	add_definitions(-D_CRT_SECURE_NO_WARNINGS -D_CRT_SECURE_NO_DEPRECATE=1 -DNOMINMAX)
 endif()
 
 if (WIN32 AND MINGW)
@@ -744,12 +829,15 @@ endif()
 
 if(APPLE)
 	add_definitions(-DUSE_MAC)
-	add_definitions(-D__unix)
+	set(SDL_LIBRARY ${SDL_LIBRARY} SDLmain)
 endif()
 
 if(BSD)
 	add_definitions(-DUSE_BSD)
-	add_definitions(-D__unix)
+endif()
+
+if(LINUX)
+	add_definitions(-DUSE_LINUX)
 endif()
 
 if(BEOS)
@@ -757,23 +845,42 @@ if(BEOS)
 	set(stratagus_SRCS ${stratagus_SRCS} ${beos_SRCS})
 endif()
 
-if(MAEMO)
-	add_definitions(-DUSE_MAEMO ${LIBOSSO_CFLAGS})
-	include_directories(${LIBOSSO_INCLUDE_DIRS})
-	set(stratagus_SRCS ${stratagus_SRCS} ${maemo_SRCS})
-	set(stratagus_LIBS ${stratagus_LIBS} ${LIBOSSO_LIBRARIES})
-	# Hack/Bug: On Maemo is not possible to disable touch screen input
-	set(ENABLE_TOUCHSCREEN ON)
-endif()
-
 # Stratagus needs to have char by default signed
 # No idea how to tell this to other compilers
 if(CMAKE_COMPILER_IS_GNUCXX)
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsigned-char")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsigned-char -std=gnu++0x -Werror")
 endif()
+if(CMAKE_COMPILER_IS_GNUC)
+	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsigned-char")
+endif()
+# TODO: Add support for other compilers
 
+check_type_size(errno_t ERRNOT)
+check_function_exists("strcpy_s" HAVE_STRCPYS)
+check_function_exists("strncpy_s" HAVE_STRNCPYS)
 check_function_exists("strcasestr" HAVE_STRCASESTR)
 check_function_exists("strnlen" HAVE_STRNLEN)
+check_function_exists("getopt" HAVE_GETOPT)
+
+# mingw-w64 does not have strcat_s in any include file, but function symbol in library exists
+# so rather check if we have strcat_s in string.h file
+check_symbol_exists("strcat_s" "string.h" HAVE_STRCATS)
+
+if(HAVE_ERRNOT)
+	add_definitions(-DHAVE_ERRNOT)
+endif()
+
+if(HAVE_STRCPYS)
+	add_definitions(-DHAVE_STRCPYS)
+endif()
+
+if(HAVE_STRNCPYS)
+	add_definitions(-DHAVE_STRNCPYS)
+endif()
+
+if(HAVE_STRCATS)
+	add_definitions(-DHAVE_STRCATS)
+endif()
 
 if(HAVE_STRCASESTR)
 	add_definitions(-DHAVE_STRCASESTR)
@@ -783,15 +890,34 @@ if(HAVE_STRNLEN)
 	add_definitions(-DHAVE_STRNLEN)
 endif()
 
-set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -DDEBUG")
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -DDEBUG")
+if(HAVE_GETOPT)
+	add_definitions(-DHAVE_GETOPT)
+endif()
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+	add_definitions(-DDEBUG)
+endif()
 
 if(ENABLE_STRIP)
-	set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s")
+	if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_COMPILER_IS_GNUC)
+		set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s")
+	endif()
+	# TODO: Add support for other compilers
+endif()
+
+if(ENABLE_USEGAMEDIR)
+	add_definitions(-DUSE_GAME_DIR)
 endif()
 
 if(ENABLE_TOUCHSCREEN)
 	add_definitions(-DUSE_TOUCHSCREEN)
+endif()
+
+if(ENABLE_MULTIBUILD)
+    if(WIN32 AND MSVC)
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP")
+      message(STATUS "Added parallel build arguments to CMAKE_CXX_FLAGS: ${CMAKE_CXX_FLAGS}")
+    endif()
 endif()
 
 # Print compile info
@@ -826,6 +952,18 @@ else()
 	message("Static linking: No (Enable by param -DENABLE_STATIC=ON)")
 endif()
 
+if(ENABLE_USEGAMEDIR)
+	message("Place game files in: game directory (Place in user directory with -DENABLE_USEGAMEDIR=OFF)")
+else()
+	message("Place game files in: user directory (Place in game directory with -DENABLE_USEGAMEDIR=ON)")
+endif()
+
+if(ENABLE_MULTIBUILD)
+	message("Parallel building in MSVC: Yes (Disable by param -DENABLE_MULTIBUILD=OFF)")
+else()
+	message("Parallel building in MSVC: No (Enable by param -DENABLE_MULTIBUILD=ON)")
+endif()
+
 if(WIN32 AND MSVC)
 	message("Platform: Windows (MSVC)")
 elseif(WIN32 AND MINGW)
@@ -838,8 +976,8 @@ elseif(BSD)
 	message("Platform: BSD")
 elseif(BEOS)
 	message("Platform: BEOS")
-elseif(MAEMO)
-	message("Platform: Maemo")
+elseif(LINUX)
+	message("Platform: Linux")
 else()
 	message("Platform: Other/No platform code")
 endif()
@@ -885,28 +1023,63 @@ else()
 endif()
 
 log_package("Bzip2" "BZIP2")
+log_package("FluidSynth" "FLUIDSYNTH")
 log_package("MikMod" "MIKMOD")
 log_package("Mng" "MNG")
 log_package("Ogg/Vorbis" "OGGVORBIS")
+log_package("StackTrace" "STACKTRACE")
 log_package("Theora" "THEORA")
 log_package("X11" "X11")
 
 if(WITH_RENDERER STREQUAL "OpenGL" AND OPENGL_FOUND)
-	message("Renderer: OpenGL")
+	message("Renderer: OpenGL (Disable by param -DWITH_RENDERER=NativeSDL)")
 elseif(WITH_RENDERER STREQUAL "OpenGLES" AND OPENGLES_FOUND AND SDLGLES_FOUND)
-	message("Renderer: OpenGL ES 1.1")
+	message("Renderer: OpenGLES (Disable by param -DWITH_RENDERER=NativeSDL)")
 else()
-	message("Renderer: Native SDL")
+	message("Renderer: NativeSDL (Enable OpenGL by param -DWITH_RENDERER=OpenGL)")
 endif()
 
 message("==================================")
 
 # Compile Stratagus
 
+if(NOT CMAKE_CROSSCOMPILING)
+	# Generate header file version-generated.h with git revision
+	# Run tool genversion at compile time which (re)generate file version-generated.h when needed
+	set(genversion_SRCS tools/genversion.cpp)
+	source_group(genversion FILES ${genversion_SRCS})
+	add_executable(genversion ${genversion_SRCS})
+	add_custom_target(version-generated.h ALL
+		genversion ${CMAKE_CURRENT_BINARY_DIR}/version-generated.h "${STRATAGUS_VERSION}"
+		DEPENDS genversion
+		WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+		VERBATIM
+	)
+	set_source_files_properties(version-generated.h PROPERTIES GENERATED true)
+	set_source_files_properties(src/include/version.h PROPERTIES OBJECT_DEPENDS version-generated.h) # This is needed for old CMake which does not generate correct dependences
+	list(APPEND CLEAN_FILES version-generated.h)
+else()
+	# Generate header file version-generated.h without git revision
+	# When cross compiling we cannot build host binary, so create file at cmake time
+	if(NOT "${STRATAGUS_VERSION}" STREQUAL "${STRATAGUS_VERSION_CACHED}" OR NOT EXISTS ${CMAKE_CURRENT_BINARY_DIR}/version-generated.h)
+		file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/version-generated.h
+			"/* ${STRATAGUS_MAJOR_VERSION} ${STRATAGUS_MINOR_VERSION} ${STRATAGUS_PATCH_LEVEL} ${STRATAGUS_PATCH_LEVEL2} -1 */\n"
+			"/* This file is autogenerated, do not modify it! */\n"
+			"#define StratagusMajorVersion ${STRATAGUS_MAJOR_VERSION}\n"
+			"#define StratagusMinorVersion ${STRATAGUS_MINOR_VERSION}\n"
+			"#define StratagusPatchLevel ${STRATAGUS_PATCH_LEVEL}\n"
+			"#define StratagusPatchLevel2 ${STRATAGUS_PATCH_LEVEL2}\n"
+		)
+		set(STRATAGUS_VERSION_CACHED ${STRATAGUS_VERSION} CACHE INTERNAL "" FORCE)
+	endif()
+	list(APPEND CLEAN_FILES version-generated.h)
+endif()
+
 add_custom_command(OUTPUT tolua.cpp
 	COMMAND ${TOLUA++_APP} ARGS -L stratagus.lua -o ${CMAKE_CURRENT_BINARY_DIR}/tolua.cpp stratagus.pkg
 	DEPENDS ${tolua_FILES}
 	WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/tolua
+	VERBATIM
 )
 
 add_executable(stratagus WIN32 ${stratagus_SRCS} ${stratagus_HDRS})
@@ -918,6 +1091,10 @@ endif()
 
 if(WIN32 AND MINGW AND ENABLE_STATIC)
 	set_target_properties(stratagus PROPERTIES LINK_FLAGS "${LINK_FLAGS} -static-libgcc -static-libstdc++ -Wl,--stack,10485760")
+endif()
+
+if(APPLE)
+	set_target_properties(stratagus PROPERTIES LINK_FLAGS "${LINK_FLAGS} -lSDLmain")
 endif()
 
 ########### next target ###############
@@ -944,6 +1121,14 @@ if(SQLITE_FOUND)
 	add_executable(metaserver ${metaserver_SRCS} ${metaserver_HDRS})
 	target_link_libraries(metaserver ${SDL_LIBRARY} ${SQLITE_LIBRARIES})
 
+	if(WIN32)
+		target_link_libraries(metaserver winmm ws2_32)
+	endif()
+
+	if(WIN32 AND MINGW)
+		target_link_libraries(metaserver dxguid)
+	endif()
+
 	if(WIN32 AND MINGW AND ENABLE_STATIC)
 		set_target_properties(metaserver PROPERTIES LINK_FLAGS "${LINK_FLAGS} -static-libgcc -static-libstdc++")
 	endif()
@@ -968,8 +1153,9 @@ endif()
 
 set(gameheaders_HDRS
 	gameheaders/stratagus-game-installer.nsi
+	gameheaders/stratagus-gameutils.h
 	gameheaders/stratagus-game-launcher.h
-	gameheaders/stratagus-maemo-extract.h
+	gameheaders/stratagus-tinyfiledialogs.h
 )
 source_group(gameheaders FILES ${gameheaders_HDRS})
 
@@ -993,10 +1179,11 @@ if(ENABLE_DOC AND DOXYGEN_FOUND)
 		COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
 		DEPENDS ${doxygen_FILES}
 		WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-		COMMENT "Generating Stratagus souce code documentation with Doxygen" VERBATIM
+		COMMENT "Generating Stratagus souce code documentation with Doxygen"
+		VERBATIM
 	)
 	add_custom_target(doc ALL DEPENDS doxygen/index.html)
-	set_directory_properties(PROPERTIES ADDITIONAL_MAKE_CLEAN_FILES doxygen)
+	list(APPEND CLEAN_FILES doxygen)
 endif()
 
 ########### next target ###############
@@ -1009,6 +1196,7 @@ macro(self_packer PACKER_TARGET)
 	add_custom_command(TARGET ${PACKER_TARGET} POST_BUILD
 		COMMAND ${SELF_PACKER_FOR_EXECUTABLE}
 		ARGS ${SELF_PACKER_FOR_EXECUTABLE_FLAGS} ${PACKER_NAME}${CMAKE_EXECUTABLE_SUFFIX}
+		VERBATIM
 	)
 endmacro()
 
@@ -1023,12 +1211,26 @@ endif()
 ########### next target ###############
 
 if(WIN32 AND ENABLE_NSIS AND MAKENSIS_FOUND)
-	file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/COPYING DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+    file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/COPYING DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 	file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/src/win32/stratagus.ico DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+	if(WITH_FLUIDSYNTH AND FLUIDSYNTH_FOUND)
+		file(COPY ${FLUIDSYNTH_DLL} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+		file(COPY ${GLIB_DLL} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+		file(COPY ${GTHREAD_DLL} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+	endif()
+	# also ship lua51.dll
+	find_file(LUA_DLL lua51.dll HINTS ${CMAKE_PREFIX_PATH} PATH_SUFFIXES bin lib)
+	file(COPY ${LUA_DLL} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+	set(MAKENSIS_FLAGS ${MAKENSIS_FLAGS} -DLUADLL=lua51.dll)
+	# ship SDL.dll
+	find_file(SDL_DLL SDL.dll HINTS ${CMAKE_PREFIX_PATH} PATH_SUFFIXES bin lib)
+	file(COPY ${SDL_DLL} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+	set(MAKENSIS_FLAGS ${MAKENSIS_FLAGS} -DSDL=SDL.dll)
 	add_custom_command(OUTPUT Stratagus-${STRATAGUS_VERSION}${MAKENSIS_SUFFIX}
-		COMMAND ${MAKENSIS} ARGS ${MAKENSIS_FLAGS} ${CMAKE_CURRENT_SOURCE_DIR}/src/win32/stratagus.nsi
+		COMMAND ${MAKENSIS} ARGS ${MAKENSIS_FLAGS} -DVERSION=${STRATAGUS_VERSION} -DVIVERSION=${STRATAGUS_VERSION_FULL} ${CMAKE_CURRENT_SOURCE_DIR}/src/win32/stratagus.nsi
 		DEPENDS src/win32/stratagus.nsi stratagus COPYING
-		COMMENT "Generating Stratagus Windows NSIS Installer" VERBATIM
+		COMMENT "Generating Stratagus Windows NSIS Installer"
+		VERBATIM
 	)
 	add_custom_target(nsis ALL DEPENDS Stratagus-${STRATAGUS_VERSION}${MAKENSIS_SUFFIX})
 endif()
@@ -1039,7 +1241,7 @@ install(TARGETS stratagus DESTINATION ${GAMEDIR})
 install(TARGETS png2stratagus DESTINATION ${BINDIR})
 
 if(SQLITE_FOUND)
-	install(TARGETS metaserver DESTINATION ${SBINDIR})
+	install(TARGETS metaserver DESTINATION ${BINDIR} RENAME stratagus-metaserver)
 endif()
 
 if(ENABLE_DOC AND DOXYGEN_FOUND)
@@ -1063,3 +1265,7 @@ endif(ENABLE_DOC AND DOXYGEN_FOUND)
 if(ENABLE_DEV)
 	install(FILES ${gameheaders_HDRS} DESTINATION ${STRATAGUS_HEADERS})
 endif()
+
+########### clean files ###############
+
+set_directory_properties(PROPERTIES ADDITIONAL_MAKE_CLEAN_FILES "${CLEAN_FILES}")

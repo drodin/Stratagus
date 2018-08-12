@@ -33,6 +33,7 @@
 //@{
 
 struct SDL_Color;
+struct lua_State;
 
 /// A platform independent color
 class CColor
@@ -41,6 +42,9 @@ public:
 	CColor() : R(0), G(0), B(0), A(0) {}
 	CColor(unsigned char r, unsigned char g, unsigned char b,
 		   unsigned char a = 0) : R(r), G(g), B(b), A(a) {}
+	CColor(const CColor &color) : R(color.R), G(color.G), B(color.B), A(color.A) {}
+
+	void Parse(lua_State *l, int index = -1);
 
 	/// Cast to a SDL_Color
 	operator SDL_Color() const;

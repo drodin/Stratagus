@@ -10,7 +10,7 @@
 //
 /**@name action_still.cpp - The stand still action. */
 //
-//      (c) Copyright 1998-2006 by Lutz Sammer and Jimmy Salmon
+//      (c) Copyright 1998-2015 by Lutz Sammer, Jimmy Salmon and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -44,6 +44,7 @@
 #include "missile.h"
 #include "player.h"
 #include "script.h"
+#include "settings.h"
 #include "spells.h"
 #include "tileset.h"
 #include "unit.h"
@@ -77,9 +78,6 @@ enum {
 	if (this->Finished) {
 		file.printf(" \"finished\", ");
 	}
-	if (this->AutoTarget != NULL) {
-		file.printf(" \"auto-target\", \"%s\",", UnitReference(AutoTarget).c_str());
-	}
 	if (this->State != 0) { // useless to write default value
 		file.printf("\"state\", %d", this->State);
 	}
@@ -90,14 +88,7 @@ enum {
 {
 	if (!strcmp("state", value)) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->State = LuaToNumber(l, -1);
-		lua_pop(l, 1);
-	} else if (!strcmp("auto-target", value)) {
-		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->AutoTarget = CclGetUnitFromRef(l);
-		lua_pop(l, 1);
+		this->State = LuaToNumber(l, -1, j + 1);
 	} else {
 		return false;
 	}
@@ -109,7 +100,7 @@ enum {
 	return true;
 }
 
-/* virtual */ PixelPos COrder_Still::Show(const CViewport & , const PixelPos &lastScreenPos) const
+/* virtual */ PixelPos COrder_Still::Show(const CViewport &, const PixelPos &lastScreenPos) const
 {
 	if (this->Action == UnitActionStandGround) {
 		Video.FillCircleClip(ColorBlack, lastScreenPos, 2);
@@ -124,13 +115,15 @@ class IsTargetInRange
 public:
 	explicit IsTargetInRange(const CUnit &_attacker) : attacker(&_attacker) {}
 
-	bool operator()(const CUnit *unit) const {
+	bool operator()(const CUnit *unit) const
+	{
 		return unit->IsVisibleAsGoal(*attacker->Player)
 			   && IsDistanceCorrect(attacker->MapDistanceTo(*unit));
 	}
 private:
-	bool IsDistanceCorrect(int distance) const {
-		return attacker->Type->MinAttackRange <= distance
+	bool IsDistanceCorrect(int distance) const
+	{
+		return attacker->Type->MinAttackRange < distance
 			   && distance <= attacker->Stats->Variables[ATTACKRANGE_INDEX].Max;
 	}
 private:
@@ -140,16 +133,16 @@ private:
 
 /* virtual */ void COrder_Still::OnAnimationAttack(CUnit &unit)
 {
-	if (this->AutoTarget == NULL) {
+	CUnit *goal = this->GetGoal();
+	if (goal == NULL) {
 		return;
 	}
-	if (IsTargetInRange(unit)(this->AutoTarget) == false) {
-		this->AutoTarget = NULL;
+	if (IsTargetInRange(unit)(goal) == false) {
+		this->ClearGoal();
 		return;
 	}
-	const Vec2i invalidPos(-1, -1);
 
-	FireMissile(unit, AutoTarget, invalidPos);
+	FireMissile(unit, goal, goal->tilePos);
 	UnHideUnit(unit);
 }
 
@@ -177,18 +170,8 @@ static bool MoveRandomly(CUnit &unit)
 	// pick random location
 	Vec2i pos = unit.tilePos;
 
-	switch ((SyncRand() >> 12) & 15) {
-		case 0: pos.x++; break;
-		case 1: pos.y++; break;
-		case 2: pos.x--; break;
-		case 3: pos.y--; break;
-		case 4: pos.x++; pos.y++; break;
-		case 5: pos.x--; pos.y++; break;
-		case 6: pos.y--; pos.x++; break;
-		case 7: pos.x--; pos.y--; break;
-		default:
-			break;
-	}
+	pos.x += SyncRand(unit.Type->RandomMovementDistance * 2 + 1) - unit.Type->RandomMovementDistance;
+	pos.y += SyncRand(unit.Type->RandomMovementDistance * 2 + 1) - unit.Type->RandomMovementDistance;
 
 	// restrict to map
 	Map.Clamp(pos);
@@ -229,7 +212,8 @@ class IsAReparableUnitBy
 {
 public:
 	explicit IsAReparableUnitBy(const CUnit &_worker) : worker(&_worker) {}
-	bool operator()(CUnit *unit) const {
+	bool operator()(CUnit *unit) const
+	{
 		return (unit->IsTeamed(*worker)
 				&& unit->Type->RepairHP
 				&& unit->Variable[HP_INDEX].Value < unit->Variable[HP_INDEX].Max
@@ -294,13 +278,22 @@ bool COrder_Still::AutoAttackStand(CUnit &unit)
 		return false;
 	}
 	// Removed units can only attack in AttackRange, from bunker
-	this->AutoTarget = AttackUnitsInRange(unit);
+	CUnit *autoAttackUnit = AttackUnitsInRange(unit);
 
-	if (this->AutoTarget == NULL) {
+	if (autoAttackUnit == NULL) {
+		return false;
+	}
+	// If unit is removed, use containers x and y
+	const CUnit *firstContainer = unit.Container ? unit.Container : &unit;
+	if (firstContainer->MapDistanceTo(*autoAttackUnit) > unit.Stats->Variables[ATTACKRANGE_INDEX].Max) {
+		return false;
+	}
+	if (GameSettings.Inside && CheckObstaclesBetweenTiles(unit.tilePos, autoAttackUnit->tilePos, MapFieldRocks | MapFieldForest) == false) {
 		return false;
 	}
 	this->State = SUB_STILL_ATTACK; // Mark attacking.
-	UnitHeadingFromDeltaXY(unit, this->AutoTarget->tilePos + this->AutoTarget->Type->GetHalfTileSize() - unit.tilePos);
+	this->SetGoal(autoAttackUnit);
+	UnitHeadingFromDeltaXY(unit, autoAttackUnit->tilePos + autoAttackUnit->Type->GetHalfTileSize() - unit.tilePos);
 	return true;
 }
 
@@ -354,7 +347,7 @@ bool AutoAttack(CUnit &unit)
 {
 	// If unit is not bunkered and removed, wait
 	if (unit.Removed
-		&& (unit.Container == NULL || unit.Container->Type->AttackFromTransporter == false)) {
+		&& (unit.Container == NULL || unit.Container->Type->BoolFlag[ATTACKFROMTRANSPORTER_INDEX].value == false)) {
 		return ;
 	}
 	this->Finished = false;

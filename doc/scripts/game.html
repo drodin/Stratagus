@@ -14,8 +14,8 @@
 ----
 ----    You should have received a copy of the GNU General Public License
 ----    along with this program; if not, write to the Free Software
-----    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
-----    02111-1307, USA.
+----    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+----    02110-1301, USA.
 -->
     <title>Stratagus Configuration Language Description: Icon</title>
     <meta name="Author" content="johns98@gmx.net">
@@ -651,8 +651,8 @@ Possible values for <i>property</i>:
 <dt>RaceName</dt>
 <dd>Name of race.
 </dd>
-<dt>Ressources</dt>
-<dd>The amount of ressources available for the ressource whose name is given as third argument.
+<dt>Resources</dt>
+<dd>The amount of resources available for the resource whose name is given as third argument.
 </dd>
 <dt>UnitTypesCount</dt>
 <dd>The amount of units whose type is given as third argument.
@@ -691,7 +691,7 @@ Possible values for <i>property</i>:
 <dd>Total number of buildings.
 </dd>
 <dt>TotalResources</dt>
-<dd>Total ressources of the <i>resource</i> type collected by the player.
+<dd>Total resources of the <i>resource</i> type collected by the player.
 </dd>
 <dt>TotalRazings</dt>
 <dd>Total buildings destroyed.
@@ -720,22 +720,37 @@ Returns the current player. Usefull mostly in for AI scripts.
 </pre>
 
 <a name="GetUnitVariable"></a>
-<h3>GetUnitVariable(unit, VariableName)</h3>
+<h3>GetUnitVariable(unit, VariableName, third_element)</h3>
 
-Get a unit's mana.
+Get a unit's variable.
 
 <dl>
 <dt>unit</dt>
 <dd>Unit to get info for.</dd>
 <dt>VariableName</dt>
 <dd>Name of the variable to get info for.</dd>
+<dt>third_element</dt>
+<dd>Used for certain alternate uses of the function, described below.</dd>
 </dl>
+<p>
+
+Besides variable names, the <i>VariableName</i> field takes the following alternate values:
+<dl>
+<dt>IndividualUpgrade</dt>
+<dd>Use this to get whether the unit has a certain individual upgrade. Use the upgrade's ident in the <i>third_element</i> field.
+</dd>
+<dt>Active</dt>
+<dd>Use this to get whether the unit's AI is active.
+</dd>
+<dt>Idle</dt>
+<dd>Use this to get whether the unit is idle.
+</dd>
 
 <h4>Example</h4>
 
 <pre>
 -- Get mana of the unit (slot #11).
-GetUnitMana(11, "Mana");
+GetUnitVariable(11, "Mana");
 </pre>
 
 <a name="Group"></a>
@@ -1322,7 +1337,7 @@ Possible values for <i>property</i>:
 <dt>RaceName</dt>
 <dd>Name of the race of the player. Don't change this value during the game.
 </dd>
-<dt>Ressources</dt>
+<dt>Resources</dt>
 <dd>The amount of resources available of the <i>resource</i> kind.
 </dd>
 <dt>UnitLimit</dt>
@@ -1344,7 +1359,7 @@ Possible values for <i>property</i>:
 <dd>Total number of buildings.
 </dd>
 <dt>TotalResources</dt>
-<dd>Total ressources of the <i>resource</i> type collected by the player.
+<dd>Total resources of the <i>resource</i> type collected by the player.
 </dd>
 <dt>TotalRazings</dt>
 <dd>Total buildings destroyed.
@@ -1401,7 +1416,7 @@ Set ThisPlayer.
 </pre>
 
 <a name="SetUnitVariable"></a>
-<h3>SetUnitVariable(unit, VariableName, amount)</h3>
+<h3>SetUnitVariable(unit, VariableName, amount, fourth_element)</h3>
 Set the amount of VariableName of the unit.
 <dl>
 <dt>unit</dt>
@@ -1410,13 +1425,25 @@ Set the amount of VariableName of the unit.
 <dd>Variable to set.</dd>
 <dt>amount</dt>
 <dd>New amount of VariableName for the unit.</dd>
+<dt>fourth_element</dt>
+<dd>Used for certain alternative uses of the function, described below.</dd>
 </dl>
+<p>
+
+Besides variable names, the <i>VariableName</i> field takes the following alternate string values:
+<dl>
+<dt>IndividualUpgrade</dt>
+<dd>Use this to make the unit acquire or lose an individual upgrade. Use the upgrade's ident in the <i>amount</i> field, and whether the upgrade should be acquired or lost in the <i>fourth_element</i> field (set it to true or false).
+</dd>
+<dt>Active</dt>
+<dd>Use this to set the unit's AI to active. Use true or false for the <i>amount</i> field.
+</dd>
 
 <h4>Example</h4>
 
 <pre>
 --  Set mana of the unit (slot 11)
-SetUnitVariable(12, "Mana", 255)
+SetUnitVariable(11, "Mana", 255)
 </pre>
 
 <a name="SharedVision"></a>
@@ -1537,7 +1564,7 @@ Unit(0, "type", "unit-vault", "player", 0,
 </pre>
 
 <hr>
-(C) Copyright 2002-2012 by The <a href="https://launchpad.net/stratagus">Stratagus</a> Project under the <a href="../gpl.html">GNU General Public License</a>.<br>
+(C) Copyright 2002-2015 by The <a href="https://launchpad.net/stratagus">Stratagus</a> Project under the <a href="../gpl.html">GNU General Public License</a>.<br>
 All trademarks and copyrights on this page are owned by their respective owners.<br>
 </body>
 </html>
