@@ -8,12 +8,26 @@ android {
         applicationId "com.drodin.stratagus"
         minSdkVersion 14
         targetSdkVersion 28
+        externalNativeBuild {
+            cmake {
+                arguments   '-DANDROID_STL=c++_static',
+                            '-DANDROID_STUDIO=1',
+                            '-DCMAKE_VERBOSE_MAKEFILE=1',
+                            '-DENABLE_USEGAMEDIR=ON'
+            }
+        }
     }
 
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.txt'
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "../../CMakeLists.txt"
         }
     }
 }

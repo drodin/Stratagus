@@ -39,8 +39,33 @@ set(STRATAGUS_PATCH_LEVEL 2)
 set(STRATAGUS_PATCH_LEVEL2 0)
 #########################
 
+# For Android Studio we will force generated toolchain
+if(ANDROID_STUDIO)
+  set(gen_toolchain "${CMAKE_CURRENT_BINARY_DIR}/generated/toolchain.cmake")
+  configure_file(
+      "${CMAKE_CURRENT_LIST_DIR}/cmake/template/toolchain.cmake.in"
+      "${gen_toolchain}"
+      @ONLY
+  )
+  set(CMAKE_TOOLCHAIN_FILE "${gen_toolchain}" CACHE PATH "" FORCE)
+endif()
+
+# Example of stepping into external sources.
+# USE CAREFULLY, please check documentation:
+# * https://docs.hunter.sh/en/latest/reference/user-variables.html#hunter-keep-package-sources
+option(HUNTER_KEEP_PACKAGE_SOURCES "Keep third party sources" ON)
+
+option(HUNTER_STATUS_DEBUG "Print debug info" ON)
+
+include(cmake/HunterGate.cmake)
+HunterGate(
+    URL "https://github.com/ruslo/hunter/archive/v0.23.12.tar.gz"
+    SHA1 "f6a2b596beb8bbd7d81d01a0fcf417f97d779fbf"
+    LOCAL
+)
+
 project(stratagus)
-cmake_minimum_required(VERSION 2.6)
+cmake_minimum_required(VERSION 3.9.2)
 
 set(STRATAGUS_VERSION "${STRATAGUS_MAJOR_VERSION}.${STRATAGUS_MINOR_VERSION}.${STRATAGUS_PATCH_LEVEL}")
 set(STRATAGUS_VERSION_FULL "${STRATAGUS_VERSION}.${STRATAGUS_PATCH_LEVEL2}")
@@ -619,6 +644,13 @@ if(WIN32 AND MSVC AND NOT CMAKE_PREFIX_PATH)
   set(CMAKE_PREFIX_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../dependencies)
 endif()
 
+option(CMAKE_VERBOSE_MAKEFILE "Verbose makefile" ON)
+
+# If CMAKE_DEBUG_POSTFIX is emtpy Hunter will initialize with 'd'.
+# We have to explicitly set DEBUG_POSTFIX to simplify library
+# load from Java code.
+set_target_properties(stratagus PROPERTIES DEBUG_POSTFIX "")
+
 # Find all libraries
 
 option(ENABLE_STATIC "Compile Stratagus as static executable" OFF)
@@ -629,11 +661,16 @@ endif()
 
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules ${CMAKE_MODULE_PATH})
 
-find_package(Lua51 REQUIRED)
-find_package(PNG REQUIRED)
-find_package(SDL2 REQUIRED)
-find_package(Tolua++ REQUIRED)
-find_package(ZLIB REQUIRED)
+hunter_add_package(Lua)
+find_package(Lua CONFIG REQUIRED)
+hunter_add_package(PNG)
+find_package(PNG CONFIG REQUIRED)
+hunter_add_package(SDL2)
+find_package(SDL2 CONFIG REQUIRED)
+hunter_add_package(toluapp)
+find_package(toluapp CONFIG REQUIRED)
+hunter_add_package(ZLIB)
+find_package(ZLIB CONFIG REQUIRED)
 
 if(WIN32)
 	find_package(MakeNSIS)
@@ -650,7 +687,9 @@ find_package(Theora)
 find_package(X11)
 find_package(OpenGL)
 find_package(OpenGLES)
+if(!ANDROID)
 find_package(SDL_gles)
+endif()
 
 find_package(Sqlite)
 find_package(Doxygen)
@@ -727,7 +766,7 @@ endif()
 
 add_definitions(${PNG_DEFINITIONS} -DUSE_ZLIB -DPIXMAPS=\"${PIXMAPSDIRABS}\")
 include_directories(${LUA_INCLUDE_DIR} ${PNG_INCLUDE_DIR} ${SDL2_INCLUDE_DIR} ${TOLUA++_INCLUDE_DIR} ${ZLIB_INCLUDE_DIRS})
-set(stratagus_LIBS ${stratagus_LIBS} ${LUA_LIBRARIES} ${PNG_LIBRARIES} ${SDL2_LIBRARY} ${TOLUA++_LIBRARY} ${ZLIB_LIBRARIES})
+set(stratagus_LIBS ${stratagus_LIBS} Lua::lua_lib PNG::png SDL2::SDL2 toluapp::toluapp ZLIB::zlib)
 
 if(WIN32 AND NOT ENABLE_STDIO_REDIRECT)
 	add_definitions(-DNO_STDIO_REDIRECT)
@@ -852,6 +891,9 @@ if(CMAKE_COMPILER_IS_GNUCXX)
 endif()
 if(CMAKE_COMPILER_IS_GNUC)
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsigned-char")
+endif()
+if(ANDROID)
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsigned-char -DDYNAMIC_LOAD")
 endif()
 # TODO: Add support for other compilers
 
@@ -1075,6 +1117,10 @@ else()
 	list(APPEND CLEAN_FILES version-generated.h)
 endif()
 
+if(ANDROID)
+    set(TOLUA++_APP "toluapp")
+endif()
+
 add_custom_command(OUTPUT tolua.cpp
 	COMMAND ${TOLUA++_APP} ARGS -L stratagus.lua -o ${CMAKE_CURRENT_BINARY_DIR}/tolua.cpp stratagus.pkg
 	DEPENDS ${tolua_FILES}
@@ -1082,8 +1128,15 @@ add_custom_command(OUTPUT tolua.cpp
 	VERBATIM
 )
 
+
+if(ANDROID)
+add_library(stratagus SHARED ${stratagus_SRCS} ${stratagus_HDRS})
+list(APPEND stratagus_LIBS jnigraphics)
+target_link_libraries(stratagus PUBLIC ${stratagus_LIBS})
+else()
 add_executable(stratagus WIN32 ${stratagus_SRCS} ${stratagus_HDRS})
 target_link_libraries(stratagus ${stratagus_LIBS})
+endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 	set_target_properties(stratagus PROPERTIES OUTPUT_NAME stratagus-dbg)
