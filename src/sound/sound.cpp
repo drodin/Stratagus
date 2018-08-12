@@ -10,8 +10,8 @@
 //
 /**@name sound.cpp - The sound. */
 //
-//      (c) Copyright 1998-2007 by Lutz Sammer, Fabrice Rossi,
-//                                 and Jimmy Salmon
+//      (c) Copyright 1998-2015 by Lutz Sammer, Fabrice Rossi,
+//		Jimmy Salmon and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -38,11 +38,13 @@
 
 #include "sound.h"
 
+#include "action/action_resource.h"
 #include "map.h"
 #include "missile.h"
 #include "sound_server.h"
 #include "ui.h"
 #include "unit.h"
+#include "video.h"
 #include "widgets.h"
 
 /*----------------------------------------------------------------------------
@@ -100,8 +102,7 @@ static CSample *ChooseSample(CSound *sound, bool selection, Origin &source)
 
 	if (sound->Number == TWO_GROUPS) {
 		// handle a special sound (selection)
-		if (SelectionHandler.Source.Base == source.Base
-			&& SelectionHandler.Source.Id == source.Id) {
+		if (SelectionHandler.Sound != NULL && (SelectionHandler.Source.Base == source.Base && SelectionHandler.Source.Id == source.Id)) {
 			if (SelectionHandler.Sound == sound->Sound.TwoGroups.First) {
 				result = SimpleChooseSample(*SelectionHandler.Sound);
 				SelectionHandler.HowMany++;
@@ -134,6 +135,10 @@ static CSample *ChooseSample(CSound *sound, bool selection, Origin &source)
 	} else {
 		// normal sound/sound group handling
 		result = SimpleChooseSample(*sound);
+		if (SelectionHandler.Source.Base == source.Base && SelectionHandler.Source.Id == source.Id) {
+			SelectionHandler.HowMany = 0;
+			SelectionHandler.Sound = NULL;
+		}
 		if (selection) {
 			SelectionHandler.Source = source;
 		}
@@ -154,20 +159,26 @@ static CSound *ChooseUnitVoiceSound(const CUnit &unit, UnitVoiceGroup voice)
 {
 	switch (voice) {
 		case VoiceAcknowledging:
-			return unit.Type->Sound.Acknowledgement.Sound;
+			return unit.Type->MapSound.Acknowledgement.Sound;
 		case VoiceAttack:
-			return unit.Type->Sound.Attack.Sound;
-		case VoiceReady:
-			return unit.Type->Sound.Ready.Sound;
-		case VoiceSelected:
-			return unit.Type->Sound.Selected.Sound;
-		case VoiceHelpMe:
-			return unit.Type->Sound.Help.Sound;
-		case VoiceDying:
-			if (unit.Type->Sound.Dead[unit.DamagedType].Sound) {
-				return unit.Type->Sound.Dead[unit.DamagedType].Sound;
+			if (unit.Type->MapSound.Attack.Sound) {
+				return unit.Type->MapSound.Attack.Sound;
 			} else {
-				return unit.Type->Sound.Dead[ANIMATIONS_DEATHTYPES].Sound;
+				return unit.Type->MapSound.Acknowledgement.Sound;
+			}
+		case VoiceBuild:
+			return unit.Type->MapSound.Build.Sound;
+		case VoiceReady:
+			return unit.Type->MapSound.Ready.Sound;
+		case VoiceSelected:
+			return unit.Type->MapSound.Selected.Sound;
+		case VoiceHelpMe:
+			return unit.Type->MapSound.Help.Sound;
+		case VoiceDying:
+			if (unit.Type->MapSound.Dead[unit.DamagedType].Sound) {
+				return unit.Type->MapSound.Dead[unit.DamagedType].Sound;
+			} else {
+				return unit.Type->MapSound.Dead[ANIMATIONS_DEATHTYPES].Sound;
 			}
 		case VoiceWorkCompleted:
 			return GameSounds.WorkComplete[ThisPlayer->Race].Sound;
@@ -176,9 +187,22 @@ static CSound *ChooseUnitVoiceSound(const CUnit &unit, UnitVoiceGroup voice)
 		case VoiceDocking:
 			return GameSounds.Docking.Sound;
 		case VoiceRepairing:
-			return unit.Type->Sound.Repair.Sound;
+			if (unit.Type->MapSound.Repair.Sound) {
+				return unit.Type->MapSound.Repair.Sound;
+			} else {
+				return unit.Type->MapSound.Acknowledgement.Sound;
+			}
 		case VoiceHarvesting:
-			return unit.Type->Sound.Harvest[unit.CurrentResource].Sound;
+			for (size_t i = 0; i != unit.Orders.size(); ++i) {
+				if (unit.Orders[i]->Action == UnitActionResource) {
+					COrder_Resource &order = dynamic_cast<COrder_Resource &>(*unit.Orders[i]);
+					if (unit.Type->MapSound.Harvest[order.GetCurrentResource()].Sound) {
+						return unit.Type->MapSound.Harvest[order.GetCurrentResource()].Sound;
+					} else {
+						return unit.Type->MapSound.Acknowledgement.Sound;
+					}
+				}
+			}
 	}
 
 	return NO_SOUND;
@@ -193,7 +217,7 @@ static CSound *ChooseUnitVoiceSound(const CUnit &unit, UnitVoiceGroup voice)
 **
 **  @return       volume for given distance (0..??)
 */
-static unsigned char VolumeForDistance(unsigned short d, unsigned char range)
+unsigned char VolumeForDistance(unsigned short d, unsigned char range)
 {
 	// FIXME: THIS IS SLOW!!!!!!!
 	if (d <= ViewPointOffset || range == INFINITE_SOUND_RANGE) {
@@ -218,14 +242,10 @@ static unsigned char VolumeForDistance(unsigned short d, unsigned char range)
 **  Calculate the volume associated with a request, either by clipping the
 **  range parameter of this request, or by mapping this range to a volume.
 */
-static unsigned char CalculateVolume(bool isVolume, int power, unsigned char range)
+unsigned char CalculateVolume(bool isVolume, int power, unsigned char range)
 {
 	if (isVolume) {
-		if (power > MaxVolume) {
-			return MaxVolume;
-		} else {
-			return (unsigned char)power;
-		}
+		return std::min(MaxVolume, power);
 	} else {
 		// map distance to volume
 		return VolumeForDistance(power, range);
@@ -260,7 +280,7 @@ void PlayUnitSound(const CUnit &unit, UnitVoiceGroup voice)
 	}
 
 	bool selection = (voice == VoiceSelected || voice == VoiceBuilding);
-	Origin source = {&unit, UnitNumber(unit)};
+	Origin source = {&unit, unsigned(UnitNumber(unit))};
 
 	if (UnitSoundIsPlaying(&source)) {
 		return;
@@ -284,13 +304,20 @@ void PlayUnitSound(const CUnit &unit, UnitVoiceGroup voice)
 */
 void PlayUnitSound(const CUnit &unit, CSound *sound)
 {
-	Origin source = {&unit, UnitNumber(unit)};
+	if (!sound) {
+		return;
+	}
+	Origin source = {&unit, unsigned(UnitNumber(unit))};
+	unsigned char volume = CalculateVolume(false, ViewPointDistanceToUnit(unit), sound->Range);
+	if (volume == 0) {
+		return;
+	}
 
 	int channel = PlaySample(ChooseSample(sound, false, source));
 	if (channel == -1) {
 		return;
 	}
-	SetChannelVolume(channel, CalculateVolume(false, ViewPointDistanceToUnit(unit), sound->Range));
+	SetChannelVolume(channel, volume);
 	SetChannelStereo(channel, CalculateStereo(unit));
 }
 
@@ -302,18 +329,25 @@ void PlayUnitSound(const CUnit &unit, CSound *sound)
 */
 void PlayMissileSound(const Missile &missile, CSound *sound)
 {
-	int stereo = ((missile.position.x + missile.Type->G->Width / 2 -
+	if (!sound) {
+		return;
+	}
+	int stereo = ((missile.position.x + (missile.Type->G ? missile.Type->G->Width / 2 : 0) +
 				   UI.SelectedViewport->MapPos.x * PixelTileSize.x) * 256 /
 				  ((UI.SelectedViewport->MapWidth - 1) * PixelTileSize.x)) - 128;
 	clamp(&stereo, -128, 127);
 
 	Origin source = {NULL, 0};
+	unsigned char volume = CalculateVolume(false, ViewPointDistanceToMissile(missile), sound->Range);
+	if (volume == 0) {
+		return;
+	}
 
 	int channel = PlaySample(ChooseSample(sound, false, source));
 	if (channel == -1) {
 		return;
 	}
-	SetChannelVolume(channel, CalculateVolume(false, ViewPointDistanceToMissile(missile), sound->Range));
+	SetChannelVolume(channel, volume);
 	SetChannelStereo(channel, stereo);
 }
 
@@ -323,13 +357,16 @@ void PlayMissileSound(const Missile &missile, CSound *sound)
 **  @param sound   Sound to play
 **  @param volume  Volume level to play the sound
 */
-void PlayGameSound(CSound *sound, unsigned char volume)
+void PlayGameSound(CSound *sound, unsigned char volume, bool always)
 {
+	if (!sound) {
+		return;
+	}
 	Origin source = {NULL, 0};
 
 	CSample *sample = ChooseSample(sound, false, source);
 
-	if (SampleIsPlaying(sample)) {
+	if (!always && SampleIsPlaying(sample)) {
 		return;
 	}
 

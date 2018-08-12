@@ -102,6 +102,7 @@ static mng_bool MNG_DECL my_processheader(mng_handle handle, mng_uint32 width,
 
 	Mng *mng = (Mng *)mng_get_userdata(handle);
 
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		unsigned w;
 		unsigned h;
@@ -119,6 +120,7 @@ static mng_bool MNG_DECL my_processheader(mng_handle handle, mng_uint32 width,
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
 	}
+#endif
 
 	// Allocate the SDL surface to hold the image
 #if SDL_BYTEORDER == SDL_LIL_ENDIAN
@@ -155,20 +157,19 @@ static mng_ptr MNG_DECL my_getcanvasline(mng_handle handle, mng_uint32 linenr)
 static mng_bool MNG_DECL my_refresh(mng_handle handle, mng_uint32, mng_uint32,
 									mng_uint32, mng_uint32)
 {
-	Mng *mng;
-	int i;
-
-	mng = (Mng *)mng_get_userdata(handle);
+	Mng *mng = (Mng *)mng_get_userdata(handle);
 	SDL_LockSurface(mng->surface);
-	for (i = 0; i < mng->surface->h; ++i) {
+	for (int i = 0; i < mng->surface->h; ++i) {
 		memcpy((char *)mng->surface->pixels + i * mng->surface->pitch,
 			   mng->buffer + i * mng->surface->w * 3, mng->surface->w * 3);
 	}
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		glBindTexture(GL_TEXTURE_2D, mng->texture_name);
 		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, mng->surface->w, mng->surface->h,
 						GL_RGB, GL_UNSIGNED_BYTE, mng->surface->pixels);
 	}
+#endif
 	SDL_UnlockSurface(mng->surface);
 
 	return MNG_TRUE;
@@ -181,9 +182,7 @@ static mng_uint32 MNG_DECL my_gettickcount(mng_handle)
 
 static mng_bool MNG_DECL my_settimer(mng_handle handle, mng_uint32 msecs)
 {
-	Mng *mng;
-
-	mng = (Mng *)mng_get_userdata(handle);
+	Mng *mng = (Mng *)mng_get_userdata(handle);
 	mng->ticks = GetTicks() + msecs;
 
 	return MNG_TRUE;
@@ -192,9 +191,7 @@ static mng_bool MNG_DECL my_settimer(mng_handle handle, mng_uint32 msecs)
 static mng_bool MNG_DECL my_processmend(mng_handle handle, mng_uint32 iterationsdone,
 										mng_uint32)
 {
-	Mng *mng;
-
-	mng = (Mng *)mng_get_userdata(handle);
+	Mng *mng = (Mng *)mng_get_userdata(handle);
 	mng->iteration = iterationsdone;
 
 	return MNG_TRUE;
@@ -203,9 +200,7 @@ static mng_bool MNG_DECL my_processmend(mng_handle handle, mng_uint32 iterations
 static mng_bool MNG_DECL my_errorproc(mng_handle handle, mng_int32,
 									  mng_int8, mng_chunkid, mng_uint32, mng_int32, mng_int32, mng_pchar errortext)
 {
-	Mng *mng;
-
-	mng = (Mng *)mng_get_userdata(handle);
+	Mng *mng = (Mng *)mng_get_userdata(handle);
 	mng->iteration = 0x7fffffff;
 	if (errortext) {
 		DebugPrint("MNG error: %s\n" _C_ errortext);
@@ -218,9 +213,11 @@ Mng::Mng() :
 	name(NULL), fd(NULL), handle(NULL), surface(NULL), buffer(NULL),
 	ticks(0), iteration(0)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		texture_width = texture_height = texture_name = 0;
 	}
+#endif
 }
 
 
@@ -234,9 +231,11 @@ Mng::~Mng()
 		SDL_FreeSurface(surface);
 	}
 	delete[] buffer;
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL && texture_width) {
 		glDeleteTextures(1, &texture_name);
 	}
+#endif
 }
 
 
@@ -252,10 +251,8 @@ void Mng::Draw(int x, int y)
 		mng_display_resume(handle);
 	}
 
-	if (!UseOpenGL) {
-		SDL_Rect rect = {x, y, surface->w, surface->h};
-		SDL_BlitSurface(surface, NULL, TheScreen, &rect);
-	} else {
+#if defined(USE_OPENGL) || defined(USE_GLES)
+	if (UseOpenGL) {
 		GLint sx = x;
 		GLint ex = sx + surface->w;
 		GLint sy = y;
@@ -285,7 +282,8 @@ void Mng::Draw(int x, int y)
 
 		glDisableClientState(GL_TEXTURE_COORD_ARRAY);
 		glDisableClientState(GL_VERTEX_ARRAY);
-#else
+#endif
+#ifdef USE_OPENGL
 		glBegin(GL_QUADS);
 		glTexCoord2f(0.0f, 0.0f);
 		glVertex2i(sx, sy);
@@ -297,6 +295,11 @@ void Mng::Draw(int x, int y)
 		glVertex2i(ex, sy);
 		glEnd();
 #endif
+	} else
+#endif
+	{
+		SDL_Rect rect = {(short int)x, (short int)y, (short unsigned int)(surface->w), (short unsigned int)(surface->h)};
+		SDL_BlitSurface(surface, NULL, TheScreen, &rect);
 	}
 }
 
@@ -307,11 +310,7 @@ void Mng::Draw(int x, int y)
 */
 int Mng::Load(const std::string &name)
 {
-	char buf[PATH_MAX];
-
-	LibraryFileName(name.c_str(), buf, sizeof(buf));
-
-	this->name = buf;
+	this->name = LibraryFileName(name.c_str());
 	handle = mng_initialize(this, my_alloc, my_free, MNG_NULL);
 	if (handle == MNG_NULL) {
 		return -1;

@@ -36,6 +36,7 @@
 #include <png.h>
 
 #include "stratagus.h"
+#include "map.h"
 #include "video.h"
 #include "iolib.h"
 #include "iocompat.h"
@@ -57,15 +58,24 @@
 */
 static void CL_png_read_data(png_structp png_ptr, png_bytep data, png_size_t length)
 {
-	png_size_t check;
-	CFile *f;
+	CFile *f = (CFile *)png_get_io_ptr(png_ptr);
+	png_size_t check = (png_size_t)f->read(data, (size_t)length);
 
-	f = (CFile *)png_get_io_ptr(png_ptr);
-	check = (png_size_t)f->read(data, (size_t)length);
 	if (check != length) {
 		png_error(png_ptr, "Read Error");
 	}
 }
+
+class AutoPng_read_structp
+{
+public:
+	explicit AutoPng_read_structp(png_structp png_ptr) : png_ptr(png_ptr), info_ptr(NULL) {}
+	~AutoPng_read_structp() { png_destroy_read_struct(&png_ptr, info_ptr ? &info_ptr : (png_infopp)0, (png_infopp)0); }
+	void setInfo(png_infop info_ptr) { this->info_ptr = info_ptr; }
+private:
+	png_structp png_ptr;
+	png_infop info_ptr;
+};
 
 /**
 **  Load a png graphic file.
@@ -77,65 +87,36 @@ static void CL_png_read_data(png_structp png_ptr, png_bytep data, png_size_t len
 */
 int LoadGraphicPNG(CGraphic *g)
 {
-	CFile fp;
-	SDL_Surface *volatile surface;
-	png_structp png_ptr;
-	png_infop info_ptr;
-	png_uint_32 width;
-	png_uint_32 height;
-	int bit_depth;
-	int color_type;
-	int interlace_type;
-	Uint32 Rmask;
-	Uint32 Gmask;
-	Uint32 Bmask;
-	Uint32 Amask;
-	SDL_Palette *palette;
-	png_bytep *volatile row_pointers;
-	int row;
-	int i;
-	volatile int ckey;
-	png_color_16 *transv;
-	char name[PATH_MAX];
-	int ret;
-
-	ckey = -1;
-	ret = 0;
-
 	if (g->File.empty()) {
 		return -1;
 	}
-
-	name[0] = '\0';
-	LibraryFileName(g->File.c_str(), name, sizeof(name));
-	if (name[0] == '\0') {
+	const std::string name = LibraryFileName(g->File.c_str());
+	if (name.empty()) {
 		return -1;
 	}
+	CFile fp;
 
-	if (fp.open(name, CL_OPEN_READ) == -1) {
+	if (fp.open(name.c_str(), CL_OPEN_READ) == -1) {
 		perror("Can't open file");
 		return -1;
 	}
 
-	/* Initialize the data we will clean up when we're done */
-	png_ptr = NULL; info_ptr = NULL; row_pointers = NULL; surface = NULL;
-
-	/* Create the PNG loading context structure */
-	png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING,
-									 NULL, NULL, NULL);
+	// Create the PNG loading context structure
+	png_structp png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
 	if (png_ptr == NULL) {
 		fprintf(stderr, "Couldn't allocate memory for PNG file");
-		ret = -1;
-		goto done;
+		return -1;
 	}
+	// Clean png_ptr on exit
+	AutoPng_read_structp pngRaii(png_ptr);
 
-	/* Allocate/initialize the memory for image information.  REQUIRED. */
-	info_ptr = png_create_info_struct(png_ptr);
+	// Allocate/initialize the memory for image information.  REQUIRED.
+	png_infop info_ptr = png_create_info_struct(png_ptr);
 	if (info_ptr == NULL) {
 		fprintf(stderr, "Couldn't create image information for PNG file");
-		ret = -1;
-		goto done;
+		return -1;
 	}
+	pngRaii.setInfo(info_ptr);
 
 	/* Set error handling if you are using setjmp/longjmp method (this is
 	 * the normal method of doing things with libpng).  REQUIRED unless you
@@ -143,14 +124,19 @@ int LoadGraphicPNG(CGraphic *g)
 	 */
 	if (setjmp(png_jmpbuf(png_ptr))) {
 		fprintf(stderr, "Error reading the PNG file.\n");
-		ret = -1;
-		goto done;
+		return -1;
 	}
 
 	/* Set up the input control */
 	png_set_read_fn(png_ptr, &fp, CL_png_read_data);
 
 	/* Read PNG header info */
+	png_uint_32 width;
+	png_uint_32 height;
+	int bit_depth;
+	int color_type;
+	int interlace_type;
+
 	png_read_info(png_ptr, info_ptr);
 	png_get_IHDR(png_ptr, info_ptr, &width, &height, &bit_depth,
 				 &color_type, &interlace_type, NULL, NULL);
@@ -171,6 +157,9 @@ int LoadGraphicPNG(CGraphic *g)
 	/* For images with a single "transparent colour", set colour key;
 	 if more than one index has transparency, or if partially transparent
 	 entries exist, use full alpha channel */
+	png_color_16 *transv = NULL;
+	volatile int ckey = -1;
+
 	if (png_get_valid(png_ptr, info_ptr, PNG_INFO_tRNS)) {
 		int num_trans;
 		png_bytep trans;
@@ -179,9 +168,7 @@ int LoadGraphicPNG(CGraphic *g)
 		if (color_type == PNG_COLOR_TYPE_PALETTE) {
 			/* Check if all tRNS entries are opaque except one */
 			int i;
-			int t;
-
-			t = -1;
+			int t = -1;
 			for (i = 0; i < num_trans; ++i) {
 				if (trans[i] == 0) {
 					if (t >= 0) {
@@ -214,7 +201,11 @@ int LoadGraphicPNG(CGraphic *g)
 				 &color_type, &interlace_type, NULL, NULL);
 
 	/* Allocate the SDL surface to hold the image */
-	Rmask = Gmask = Bmask = Amask = 0 ;
+	Uint32 Rmask = 0;
+	Uint32 Gmask = 0;
+	Uint32 Bmask = 0;
+	Uint32 Amask = 0;
+
 	if (color_type != PNG_COLOR_TYPE_PALETTE) {
 		if (SDL_BYTEORDER == SDL_LIL_ENDIAN) {
 			Rmask = 0x000000FF;
@@ -222,62 +213,45 @@ int LoadGraphicPNG(CGraphic *g)
 			Bmask = 0x00FF0000;
 			Amask = (png_get_channels(png_ptr, info_ptr) == 4) ? 0xFF000000 : 0;
 		} else {
-			int s;
-
-			s = (png_get_channels(png_ptr, info_ptr) == 4) ? 0 : 8;
+			const int s = (png_get_channels(png_ptr, info_ptr) == 4) ? 0 : 8;
 			Rmask = 0xFF000000 >> s;
 			Gmask = 0x00FF0000 >> s;
 			Bmask = 0x0000FF00 >> s;
 			Amask = 0x000000FF >> s;
 		}
 	}
-	surface = SDL_AllocSurface(SDL_SWSURFACE, width, height,
-							   bit_depth * png_get_channels(png_ptr, info_ptr), Rmask, Gmask, Bmask, Amask);
+	SDL_Surface *surface =
+		SDL_CreateRGBSurface(SDL_SWSURFACE, width, height,
+						 bit_depth * png_get_channels(png_ptr, info_ptr), Rmask, Gmask, Bmask, Amask);
 	if (surface == NULL) {
 		fprintf(stderr, "Out of memory");
-		goto done;
-	}
-
-	if (ckey != -1) {
-		if (color_type != PNG_COLOR_TYPE_PALETTE) {
-			/* FIXME: Should these be truncated or shifted down? */
-			ckey = SDL_MapRGB(surface->format,
-							  (Uint8)transv->red,
-							  (Uint8)transv->green,
-							  (Uint8)transv->blue);
-		}
-		SDL_SetColorKey(surface, SDL_SRCCOLORKEY | SDL_RLEACCEL, ckey);
+		return -1;
 	}
 
 	/* Create the array of pointers to image data */
-	row_pointers = new png_bytep[height];
-	if (row_pointers == NULL) {
-		fprintf(stderr, "Out of memory");
-		VideoPaletteListRemove(surface);
-		SDL_FreeSurface(surface);
-		surface = NULL;
-		goto done;
-	}
-	for (row = 0; row < (int)height; ++row) {
-		row_pointers[row] = (png_bytep)
-							(Uint8 *)surface->pixels + row * surface->pitch;
+	std::vector<png_bytep> row_pointers;
+	row_pointers.resize(height);
+
+	for (int i = 0; i < (int)height; ++i) {
+		row_pointers[i] = (png_bytep)(Uint8 *)surface->pixels + i * surface->pitch;
 	}
 
 	/* Read the entire image in one go */
-	png_read_image(png_ptr, row_pointers);
+	png_read_image(png_ptr, &row_pointers[0]);
 
 	/* read rest of file, get additional chunks in info_ptr - REQUIRED */
 	png_read_end(png_ptr, info_ptr);
 
 	/* Load the palette, if any */
-	palette = surface->format->palette;
+	SDL_Palette *palette = surface->format->palette;
 	if (palette) {
 		if (color_type == PNG_COLOR_TYPE_GRAY) {
 			palette->ncolors = 256;
-			for (i = 0; i < 256; ++i) {
+			for (int i = 0; i < 256; ++i) {
 				palette->colors[i].r = i;
 				palette->colors[i].g = i;
 				palette->colors[i].b = i;
+				palette->colors[i].a = 0xff;
 			}
 		} else {
 			png_colorp pngpalette;
@@ -285,27 +259,30 @@ int LoadGraphicPNG(CGraphic *g)
 			png_get_PLTE(png_ptr, info_ptr, &pngpalette, &num_palette);
 			if (num_palette > 0) {
 				palette->ncolors = num_palette;
-				for (i = 0; i < num_palette; ++i) {
+				for (int i = 0; i < num_palette; ++i) {
 					palette->colors[i].b = pngpalette[i].blue;
 					palette->colors[i].g = pngpalette[i].green;
 					palette->colors[i].r = pngpalette[i].red;
+					palette->colors[i].a = 0xff;
 				}
 			}
 		}
+	}
+
+	if (ckey != -1) {
+		if (color_type != PNG_COLOR_TYPE_PALETTE) {
+			/* FIXME: Should these be truncated or shifted down? */
+			ckey = SDL_MapRGB(surface->format, (Uint8)transv->red, (Uint8)transv->green, (Uint8)transv->blue);
+		}
+		SDL_SetColorKey(surface, SDL_TRUE, ckey);
 	}
 
 	g->Surface = surface;
 	g->GraphicWidth = surface->w;
 	g->GraphicHeight = surface->h;
 
-done:   /* Clean up and return */
-	png_destroy_read_struct(&png_ptr, info_ptr ? &info_ptr : (png_infopp)0,
-							(png_infopp)0);
-	if (row_pointers) {
-		delete[] row_pointers;
-	}
 	fp.close();
-	return ret;
+	return 0;
 }
 
 /**
@@ -343,7 +320,19 @@ void SaveScreenshotPNG(const char *name)
 	/* set up the output control if you are using standard C streams */
 	png_init_io(png_ptr, fp);
 
-	png_set_IHDR(png_ptr, info_ptr, Video.Width, Video.Height, 8,
+	int pngw, pngh;
+#if defined(USE_OPENGL) || defined(USE_GLES)
+	if (UseOpenGL) {
+		pngw = Video.ViewportWidth;
+		pngh = Video.ViewportHeight;
+	}
+	else
+#endif
+	{
+		pngw = Video.Width;
+		pngh = Video.Height;
+	}
+	png_set_IHDR(png_ptr, info_ptr, pngw, pngh, 8,
 				 PNG_COLOR_TYPE_RGB, PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT,
 				 PNG_FILTER_TYPE_DEFAULT);
 
@@ -351,24 +340,32 @@ void SaveScreenshotPNG(const char *name)
 
 	png_write_info(png_ptr, info_ptr);
 
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
-		unsigned char *pixels = new unsigned char[Video.Width * Video.Height * 3];
-		if (!pixels) {
-			fprintf(stderr, "Out of memory\n");
-			exit(1);
+		unsigned char* pixels = new unsigned char[Video.ViewportWidth * Video.ViewportHeight * 3];
+		if (GLShaderPipelineSupported) {
+			// switch to real display
+			glBindFramebuffer(GL_FRAMEBUFFER_EXT, 0);
 		}
-#ifndef USE_GLES
+#ifdef USE_OPENGL
 		glReadBuffer(GL_FRONT);
 #endif
-		glReadPixels(0, 0, Video.Width, Video.Height, GL_RGB, GL_UNSIGNED_BYTE, pixels);
-		for (int i = 0; i < Video.Height; ++i) {
-			png_write_row(png_ptr, pixels + (Video.Height - 1 - i) * Video.Width * 3);
+		glReadPixels(0, 0, Video.ViewportWidth, Video.ViewportHeight, GL_RGB, GL_UNSIGNED_BYTE, pixels);
+		if (GLShaderPipelineSupported) {
+			// switch back to framebuffer
+			glBindFramebuffer(GL_FRAMEBUFFER_EXT, fullscreenFramebuffer);
 		}
-		delete[] pixels;
-	} else {
-		unsigned char *row = new unsigned char[Video.Width * 3];
+		for (int i = 0; i < Video.ViewportHeight; ++i) {
+			png_write_row(png_ptr, &pixels[(Video.ViewportHeight - 1 - i) * Video.ViewportWidth * 3]);
+		}
+		delete []pixels;
+	} else
+#endif
+	{
+		std::vector<unsigned char> row;
 		SDL_PixelFormat *fmt = TheScreen->format;
 
+		row.resize(Video.Width * 3);
 		for (int i = 0; i < Video.Height; ++i) {
 			switch (Video.Depth) {
 				case 15:
@@ -382,7 +379,7 @@ void SaveScreenshotPNG(const char *name)
 					break;
 				}
 				case 24: {
-					memcpy(row, (char *)TheScreen->pixels + i * Video.Width, Video.Width * 3);
+					memcpy(&row[0], (char *)TheScreen->pixels + i * Video.Width, Video.Width * 3);
 					break;
 				}
 				case 32: {
@@ -395,9 +392,8 @@ void SaveScreenshotPNG(const char *name)
 					break;
 				}
 			}
-			png_write_row(png_ptr, row);
+			png_write_row(png_ptr, &row[0]);
 		}
-		delete[] row;
 	}
 
 	png_write_end(png_ptr, info_ptr);
@@ -406,6 +402,92 @@ void SaveScreenshotPNG(const char *name)
 
 	/* clean up after the write, and free any memory allocated */
 	png_destroy_write_struct(&png_ptr, &info_ptr);
+
+	fclose(fp);
+}
+
+/**
+**  Save a whole map to a PNG file.
+**
+**  @param name  PNG filename to save.
+*/
+void SaveMapPNG(const char *name)
+{
+	FILE *fp = fopen(name, "wb");
+	if (fp == NULL) {
+		return;
+	}
+
+	png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+	if (png_ptr == NULL) {
+		fclose(fp);
+		return;
+	}
+
+	png_infop info_ptr = png_create_info_struct(png_ptr);
+	if (info_ptr == NULL) {
+		fclose(fp);
+		png_destroy_write_struct(&png_ptr, NULL);
+		return;
+	}
+
+	if (setjmp(png_jmpbuf(png_ptr))) {
+		/* If we get here, we had a problem reading the file */
+		fclose(fp);
+		png_destroy_write_struct(&png_ptr, &info_ptr);
+		return;
+	}
+
+	const size_t imageWidth = Map.Info.MapWidth * PixelTileSize.x;
+	const size_t imageHeight = Map.Info.MapHeight * PixelTileSize.y;
+
+	/* set up the output control if you are using standard C streams */
+	png_init_io(png_ptr, fp);
+
+	png_set_IHDR(png_ptr, info_ptr, imageWidth, imageHeight, 8,
+		PNG_COLOR_TYPE_RGB, PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT,
+		PNG_FILTER_TYPE_DEFAULT);
+
+	png_write_info(png_ptr, info_ptr);
+
+	SDL_Surface *mapImage = SDL_CreateRGBSurface(SDL_SWSURFACE,
+		imageWidth, imageHeight, 32, RMASK, GMASK, BMASK, 0);
+
+	for (int i = 0; i < Map.Info.MapHeight; ++i) {
+		for (int j = 0; j < Map.Info.MapWidth; ++j) {
+			const CMapField &mf = *Map.Field(i, j);
+			SDL_Rect srcRect, dstRect;
+			unsigned short int tile = mf.getGraphicTile();
+
+			srcRect.x = Map.TileGraphic->frame_map[tile].x;
+			srcRect.y = Map.TileGraphic->frame_map[tile].y;
+			dstRect.x = i * PixelTileSize.x;
+			dstRect.y = j * PixelTileSize.y;
+			srcRect.w = dstRect.w = PixelTileSize.x;
+			srcRect.h = dstRect.h = PixelTileSize.y;
+			SDL_BlitSurface(Map.TileGraphic->Surface, &srcRect, mapImage, &dstRect);
+		}
+	}
+
+	SDL_LockSurface(mapImage);
+	unsigned char *row = new unsigned char[imageWidth * 3];
+	for (size_t i = 0; i < imageHeight; ++i) {
+		for (size_t j = 0; j < imageWidth; ++j) {
+			Uint32 c = ((Uint32 *)mapImage->pixels)[j + i * imageWidth];
+			row[j * 3 + 0] = ((c & RMASK) >> RSHIFT);
+			row[j * 3 + 1] = ((c & GMASK) >> GSHIFT);
+			row[j * 3 + 2] = ((c & BMASK) >> BSHIFT);
+		}
+		png_write_row(png_ptr, row);
+	}
+	delete[] row;
+
+	png_write_end(png_ptr, info_ptr);
+
+	/* clean up after the write, and free any memory allocated */
+	png_destroy_write_struct(&png_ptr, &info_ptr);
+	SDL_UnlockSurface(mapImage);
+	SDL_FreeSurface(mapImage);
 
 	fclose(fp);
 }

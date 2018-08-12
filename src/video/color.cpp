@@ -33,12 +33,34 @@
 
 #include "color.h"
 
+#include "script.h"
+
 #include "SDL.h"
 
 CColor::operator SDL_Color() const
 {
 	SDL_Color c = { R, G, B, A };
 	return c;
+}
+
+void CColor::Parse(lua_State *l, const int offset)
+{
+	if (!lua_istable(l, offset) || lua_rawlen(l, offset) != 3) {
+		LuaError(l, "incorrect argument");
+	}
+	const int r = LuaToNumber(l, offset, 1);
+	const int g = LuaToNumber(l, offset, 2);
+	const int b = LuaToNumber(l, offset, 3);
+
+	if (!(0 <= r && r <= 255
+		  && 0 <= g && g <= 255
+		  && 0 <= b && b <= 255)) {
+		LuaError(l, "Arguments must be in the range 0-255");
+	}
+	this->R = r;
+	this->G = g;
+	this->B = b;
+	this->A = 255;
 }
 
 //@}

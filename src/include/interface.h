@@ -10,7 +10,7 @@
 //
 /**@name interface.h - The user interface header file. */
 //
-//      (c) Copyright 1998-2006 by Lutz Sammer and Jimmy Salmon
+//      (c) Copyright 1998-2015 by Lutz Sammer, Jimmy Salmon and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -47,6 +47,7 @@
 --  Declarations
 ----------------------------------------------------------------------------*/
 
+class CUIButton;
 class CUnit;
 struct EventCallback;
 
@@ -75,7 +76,8 @@ enum ButtonCmd {
 	ButtonCancel,         /// cancel
 	ButtonCancelUpgrade,  /// cancel upgrade
 	ButtonCancelTrain,    /// cancel training
-	ButtonCancelBuild     /// cancel building
+	ButtonCancelBuild,    /// cancel building
+	ButtonCallbackAction
 };
 
 class ButtonAction;
@@ -85,19 +87,21 @@ typedef bool (*ButtonCheckFunc)(const CUnit &, const ButtonAction &);
 class ButtonAction
 {
 public:
-	ButtonAction() : Pos(0), Level(0), Action(ButtonMove), Value(0),
+	ButtonAction() : Pos(0), Level(0), AlwaysShow(false), Action(ButtonMove), Value(0), Payload(NULL),
 		Allowed(NULL), Key(0) {}
 
 	int Pos;          /// button position in the grid
 	int Level;        /// requires button level
+	bool AlwaysShow;  /// button is always shown but drawn grayscale if not available
 	ButtonCmd Action; /// command on button press
 	int Value;        /// extra value for command
+	void* Payload;
 	std::string ValueStr;    /// keep original value string
 
 	ButtonCheckFunc Allowed;    /// Check if this button is allowed
 	std::string AllowStr;       /// argument for allowed
 	std::string UnitMask;       /// for which units is it available
-	IconConfig Icon;            /// icon to display
+	IconConfig Icon;      /// icon to display
 	int Key;                    /// alternative on keyboard
 	std::string Hint;           /// tip texts
 	std::string Description;    /// description shown on status bar (optional)
@@ -114,7 +118,8 @@ enum _button_area_ {
 	ButtonAreaResearching,   /// Researching button
 	ButtonAreaTransporting,  /// Transporting button
 	ButtonAreaButton,        /// Button panel button
-	ButtonAreaMenu           /// Menu button
+	ButtonAreaMenu,          /// Menu button
+	ButtonAreaUser           /// User buttons
 };
 
 /// Menu button under cursor
@@ -198,6 +203,8 @@ extern bool GameRunning;
 extern bool GamePaused;
 /// Flag telling if the game is in observe mode
 extern bool GameObserve;
+/// Flag telling if the game is in establishing mode
+extern bool GameEstablishing;
 /// Flag telling not to advance to the next game cycle
 extern char SkipGameCycle;
 /// Invincibility cheat
@@ -225,6 +232,8 @@ extern CUnit *UnitUnderCursor;
 extern int ButtonAreaUnderCursor;
 /// button number under the cursor
 extern int ButtonUnderCursor;
+/// oldbutton number under the cursor
+extern int OldButtonUnderCursor;
 /// menu button was clicked down
 extern bool GameMenuButtonClicked;
 /// diplomacy button was clicked down
@@ -236,6 +245,8 @@ extern enum _cursor_on_ CursorOn;
 
 /// vladi: used for unit buttons sub-menus etc
 extern int CurrentButtonLevel;
+/// Last drawn popup : used to speed up drawing
+extern ButtonAction *LastDrawnButtonPopup;
 
 /// Time to detect double clicks
 extern int DoubleClickDelay;
@@ -257,10 +268,12 @@ extern void InitButtons();
 extern void CleanButtons();
 /// Make a new button
 extern int AddButton(int pos, int level, const std::string &IconIdent,
-					 ButtonCmd action, const std::string &value, const ButtonCheckFunc func,
-					 const std::string &arg, const std::string &hint, const std::string &descr,
+					 ButtonCmd action, const std::string &value, void* payload, const ButtonCheckFunc func,
+					 const std::string &arg, const int key, const std::string &hint, const std::string &descr,
 					 const std::string &sound, const std::string &cursor, const std::string &umask,
-					 const std::string &popup);
+					 const std::string &popup, bool alwaysShow);
+// Check if the button is allowed for the unit.
+extern bool IsButtonAllowed(const CUnit &unit, const ButtonAction &buttonaction);
 
 //
 // in mouse.cpp
@@ -322,6 +335,13 @@ extern void SetHoldClickDelay(int delay);
 extern void UiTogglePause();
 /// Toggle big map
 extern void UiToggleBigMap();
+/// Toggle terrain display on/off.
+extern void UiToggleTerrain();
+/// Find the next idle worker
+extern void UiFindIdleWorker();
+/// Track unit, the viewport follows the unit.
+extern void UiTrackUnit();
+
 /// Handle cheats
 extern int HandleCheats(const std::string &input);
 
@@ -336,6 +356,8 @@ extern void CancelBuildingMode();
 
 /// Draw menu button area
 extern void DrawMenuButtonArea();
+/// Draw user defined buttons
+extern void DrawUserDefinedButtons();
 /// Update messages
 extern void UpdateMessages();
 /// Draw messages as overlay over of the map
@@ -353,13 +375,6 @@ extern void CleanMessages();
 /// show/hide messages
 extern void ToggleShowMessages();
 
-/// Draw costs in status line
-extern void DrawCosts();
-/// Set costs to be displayed in status line
-extern void SetCosts(int mana, int food, const int *costs);
-/// Clear the costs displayed in status line (undisplay!)
-extern void ClearCosts();
-
 /// Draw the timer
 extern void DrawTimer();
 /// Update the timer
@@ -368,6 +383,8 @@ extern void UpdateTimer();
 extern void UpdateStatusLineForButton(const ButtonAction &button);
 /// Draw the Pie Menu
 extern void DrawPieMenu();
+/// Draw the button popup
+extern void DrawPopup(const ButtonAction &button, const CUIButton &uibutton, int x = 0, int y = 0);
 
 /// Handle the mouse in scroll area
 extern bool HandleMouseScrollArea(const PixelPos &mousePos);
@@ -381,10 +398,16 @@ extern bool ButtonCheckTrue(const CUnit &unit, const ButtonAction &button);
 extern bool ButtonCheckFalse(const CUnit &unit, const ButtonAction &button);
 /// Check if allowed upgrade is ready
 extern bool ButtonCheckUpgrade(const CUnit &unit, const ButtonAction &button);
+/// Check if unit has an individual upgrade
+extern bool ButtonCheckIndividualUpgrade(const CUnit &unit, const ButtonAction &button);
+/// Check if unit's variables pass the condition check
+extern bool ButtonCheckUnitVariable(const CUnit &unit, const ButtonAction &button);
 /// Check if allowed units exists
 extern bool ButtonCheckUnitsOr(const CUnit &unit, const ButtonAction &button);
 /// Check if allowed units exists
 extern bool ButtonCheckUnitsAnd(const CUnit &unit, const ButtonAction &button);
+/// Check if units don't exist
+extern bool ButtonCheckUnitsNot(const CUnit &unit, const ButtonAction &button);
 /// Check if have network play
 extern bool ButtonCheckNetwork(const CUnit &unit, const ButtonAction &button);
 /// Check if don't have network play

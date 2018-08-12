@@ -32,14 +32,6 @@
 
 //@{
 
-#ifndef STDCALL
-#ifdef _MSC_VER
-#define STDCALL __stdcall
-#else
-#define STDCALL
-#endif
-#endif
-
 #if defined(DEBUG_ASTAR)
 #define AstarDebugPrint(x) DebugPrint(x)
 #else
@@ -142,7 +134,7 @@ enum VisitResult {
 class TerrainTraversal
 {
 public:
-	typedef short unsigned int dataType;
+	typedef short int dataType;
 public:
 	void SetSize(unsigned int width, unsigned int height);
 	void Init();

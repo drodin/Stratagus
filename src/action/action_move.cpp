@@ -44,10 +44,14 @@
 #include "map.h"
 #include "pathfinder.h"
 #include "script.h"
+#include "settings.h"
 #include "sound.h"
+#include "tileset.h"
 #include "ui.h"
 #include "unit.h"
+#include "unit_find.h"
 #include "unittype.h"
+#include "video.h"
 
 /*----------------------------------------------------------------------------
 --  Functions
@@ -80,9 +84,7 @@
 {
 	if (!strcmp(value, "range")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Range = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->Range = LuaToNumber(l, -1, j + 1);
 	} else if (!strcmp(value, "tile")) {
 		++j;
 		lua_rawgeti(l, -1, j + 1);
@@ -111,11 +113,15 @@
 
 /* virtual */ void COrder_Move::UpdatePathFinderData(PathFinderInput &input)
 {
-	input.SetMinRange(0);
-	input.SetMaxRange(this->Range);
 	const Vec2i tileSize(0, 0);
-
 	input.SetGoal(this->goalPos, tileSize);
+
+	int distance = this->Range;
+	if (GameSettings.Inside) {
+		CheckObstaclesBetweenTiles(input.GetUnitPos(), this->HasGoal() ? this->GetGoal()->tilePos : this->goalPos, MapFieldRocks | MapFieldForest, &distance);
+	}
+	input.SetMaxRange(distance);
+	input.SetMinRange(0);
 }
 
 /**
@@ -130,7 +136,6 @@ int DoActionMove(CUnit &unit)
 {
 	Vec2i posd; // movement in tile.
 	int d;
-	Vec2i pos;
 
 	Assert(unit.CanMove());
 
@@ -155,10 +160,6 @@ int DoActionMove(CUnit &unit)
 				unit.Moving = 0;
 				return d;
 			case PF_WAIT: // No path, wait
-				// Reset frame to still frame while we wait
-				// FIXME: Unit doesn't animate.
-				unit.Frame = unit.Type->StillFrame;
-				UnitUpdateHeading(unit);
 				unit.Wait = 10;
 
 				unit.Moving = 0;
@@ -167,24 +168,23 @@ int DoActionMove(CUnit &unit)
 				unit.Moving = 1;
 				break;
 		}
-		pos = unit.tilePos;
-		int off = unit.Offset;
-		//
-		// Transporter (un)docking?
-		//
-		// FIXME: This is an ugly hack
-		if (unit.Type->CanTransport()
-			&& ((Map.WaterOnMap(off) && Map.CoastOnMap(pos + posd))
-				|| (Map.CoastOnMap(off) && Map.WaterOnMap(pos + posd)))) {
-			PlayUnitSound(unit, VoiceDocking);
-		}
 
-		pos = unit.tilePos + posd;
+		if (unit.Type->UnitType == UnitTypeNaval) { // Boat (un)docking?
+			const CMapField &mf_cur = *Map.Field(unit.Offset);
+			const CMapField &mf_next = *Map.Field(unit.tilePos + posd);
+
+			if (mf_cur.WaterOnMap() && mf_next.CoastOnMap()) {
+				PlayUnitSound(unit, VoiceDocking);
+			} else if (mf_cur.CoastOnMap() && mf_next.WaterOnMap()) {
+				PlayUnitSound(unit, VoiceDocking); // undocking
+			}
+		}
+		Vec2i pos = unit.tilePos + posd;
 		unit.MoveToXY(pos);
 
 		// Remove unit from the current selection
-		if (unit.Selected && !Map.IsFieldVisible(*ThisPlayer, pos)) {
-			if (NumSelected == 1) { //  Remove building cursor
+		if (unit.Selected && !Map.Field(pos)->playerInfo.IsTeamVisible(*ThisPlayer)) {
+			if (IsOnlySelected(unit)) { //  Remove building cursor
 				CancelBuildingMode();
 			}
 			if (!ReplayRevealMap) {
@@ -203,8 +203,8 @@ int DoActionMove(CUnit &unit)
 		d = unit.pathFinderData->output.Length + 1;
 	}
 
-	unit.pathFinderData->output.Cycles++;//reset have to be manualy controled by caller.
-	int move = UnitShowAnimationScaled(unit, unit.Type->Animations->Move, Map.Field(unit.Offset)->Cost);
+	unit.pathFinderData->output.Cycles++;// reset have to be manualy controlled by caller.
+	int move = UnitShowAnimationScaled(unit, unit.Type->Animations->Move, Map.Field(unit.Offset)->getCost());
 
 	unit.IX += posd.x * move;
 	unit.IY += posd.y * move;
@@ -224,8 +224,17 @@ int DoActionMove(CUnit &unit)
 	Assert(unit.CanMove());
 
 	if (unit.Wait) {
+		if (!unit.Waiting) {
+			unit.Waiting = 1;
+			unit.WaitBackup = unit.Anim;
+		}
+		UnitShowAnimation(unit, unit.Type->Animations->Still);
 		unit.Wait--;
-		return ;
+		return;
+	}
+	if (unit.Waiting) {
+		unit.Anim = unit.WaitBackup;
+		unit.Waiting = 0;
 	}
 	// FIXME: (mr-russ) Make a reachable goal here with GoalReachable ...
 

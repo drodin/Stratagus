@@ -42,6 +42,7 @@
 #include "map.h"
 #include "missile.h"
 #include "pathfinder.h"
+#include "tileset.h"
 #include "unit.h"
 #include "unit_find.h"
 #include "unittype.h"
@@ -58,10 +59,12 @@ class _EnemyOnMapTile
 {
 public:
 	_EnemyOnMapTile(const CUnit &unit, const Vec2i _pos, CUnit **enemy) :
-		source(&unit) , pos(_pos), best(enemy) {
+		source(&unit) , pos(_pos), best(enemy)
+	{
 	}
 
-	void operator()(CUnit *const unit) const {
+	void operator()(CUnit *const unit) const
+	{
 		const CUnitType &type = *unit->Type;
 		// unusable unit ?
 		// if (unit->IsUnusable()) can't attack constructions
@@ -72,18 +75,21 @@ public:
 			|| unit->CurrentAction() == UnitActionDie) {
 			return;
 		}
+		if (unit->Type->UnitType == UnitTypeFly && unit->IsAgressive() == false) {
+			return;
+		}
 		if (pos.x < unit->tilePos.x || pos.x >= unit->tilePos.x + type.TileWidth
 			|| pos.y < unit->tilePos.y || pos.y >= unit->tilePos.y + type.TileHeight) {
 			return;
 		}
-		if (!CanTarget(source->Type, &type)) {
+		if (!CanTarget(*source->Type, type)) {
 			return;
 		}
 		if (!source->Player->IsEnemy(*unit)) { // a friend or neutral
 			return;
 		}
 		// Choose the best target.
-		if (!*best || (*best)->Type->Priority < type.Priority) {
+		if (!*best || (*best)->Variable[PRIORITY_INDEX].Value < unit->Variable[PRIORITY_INDEX].Value) {
 			*best = unit;
 		}
 	}
@@ -115,14 +121,14 @@ class WallFinder
 {
 public:
 	WallFinder(const CUnit &unit, int maxDist, Vec2i *resultPos) :
-		unit(unit),
+		//unit(unit),
 		maxDist(maxDist),
 		movemask(unit.Type->MovementMask & ~(MapFieldLandUnit | MapFieldAirUnit | MapFieldSeaUnit)),
 		resultPos(resultPos)
 	{}
 	VisitResult Visit(TerrainTraversal &terrainTraversal, const Vec2i &pos, const Vec2i &from);
 private:
-	const CUnit &unit;
+	//const CUnit &unit;
 	int maxDist;
 	int movemask;
 	Vec2i *resultPos;
@@ -143,7 +149,7 @@ VisitResult WallFinder::Visit(TerrainTraversal &terrainTraversal, const Vec2i &p
 		}
 		return VisitResult_Finished;
 	}
-	if (Map.CheckMask(pos, movemask)) { // reachable
+	if (Map.Field(pos)->CheckMask(movemask)) { // reachable
 		if (terrainTraversal.Get(pos) <= maxDist) {
 			return VisitResult_Ok;
 		} else {
@@ -207,17 +213,14 @@ int AiFindWall(AiForce *force)
 	return 0;
 }
 
-
 class ReachableTerrainMarker
 {
 public:
 	ReachableTerrainMarker(const CUnit &unit) :
-		unit(unit),
 		movemask(unit.Type->MovementMask & ~(MapFieldLandUnit | MapFieldAirUnit | MapFieldSeaUnit))
 	{}
 	VisitResult Visit(TerrainTraversal &terrainTraversal, const Vec2i &pos, const Vec2i &from);
 private:
-	const CUnit &unit;
 	int movemask;
 };
 
@@ -304,7 +307,8 @@ static bool AiFindTarget(const CUnit &unit, const TerrainTraversal &terrainTrans
 class IsAFreeTransporter
 {
 public:
-	bool operator()(const CUnit *unit) const {
+	bool operator()(const CUnit *unit) const
+	{
 		return unit->Type->CanMove() && unit->BoardCount < unit->Type->MaxOnBoard;
 	}
 };
@@ -339,7 +343,7 @@ int GetTotalBoardCapacity(ITERATOR begin, ITERATOR end)
 int AiForce::PlanAttack()
 {
 	CPlayer &player = *AiPlayer->Player;
-	DebugPrint("%d: Planning for force #%lu of player #%d\n"_C_ player.Index
+	DebugPrint("%d: Planning for force #%lu of player #%d\n" _C_ player.Index
 			   _C_(long unsigned int)(this - & (AiPlayer->Force[0])) _C_ player.Index);
 
 	TerrainTraversal transporterTerrainTraversal;
@@ -374,7 +378,7 @@ int AiForce::PlanAttack()
 	Vec2i pos = this->GoalPos;
 
 	if (AiFindTarget(*landUnit, transporterTerrainTraversal, &pos)) {
-		const int forceIndex = AiPlayer->Force.getIndex(this) + 1;
+		const unsigned int forceIndex = AiPlayer->Force.getIndex(this) + 1;
 
 		if (transporter->GroupId != forceIndex) {
 			DebugPrint("%d: Assign any transporter #%d\n" _C_ player.Index _C_ UnitNumber(*transporter));
@@ -394,7 +398,7 @@ int AiForce::PlanAttack()
 			CUnit &unit = *Units[i];
 
 			if (CanTransport(*transporter, unit)) {
-				totalBoardCapacity--;
+				totalBoardCapacity -= unit.Type->BoardSize;
 			}
 		}
 		if (totalBoardCapacity < 0) { // Not enough transporter.
@@ -433,7 +437,7 @@ static bool ChooseRandomUnexploredPositionNear(const Vec2i &center, Vec2i *pos)
 		pos->y = center.y + SyncRand() % (2 * ray + 1) - ray;
 
 		if (Map.Info.IsPointOnMap(*pos)
-			&& Map.IsFieldExplored(*AiPlayer->Player, *pos) == false) {
+			&& Map.Field(*pos)->playerInfo.IsExplored(*AiPlayer->Player) == false) {
 			return true;
 		}
 		ray = 3 * ray / 2;

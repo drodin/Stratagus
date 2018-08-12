@@ -10,7 +10,7 @@
 //
 /**@name unittype.cpp - The unit types. */
 //
-//      (c) Copyright 1998-2006 by Lutz Sammer and Jimmy Salmon
+//      (c) Copyright 1998-2015 by Lutz Sammer, Jimmy Salmon and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -33,12 +33,7 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <ctype.h>
-
 #include "stratagus.h"
-
-#include <string>
-#include <map>
 
 #include "unittype.h"
 
@@ -55,10 +50,408 @@
 #include "sound.h"
 #include "spells.h"
 #include "tileset.h"
+#include "translate.h"
 #include "ui.h"
 #include "unitsound.h"
 #include "util.h"
 #include "video.h"
+
+#include <ctype.h>
+
+#include <string>
+#include <map>
+
+/*----------------------------------------------------------------------------
+-- Documentation
+----------------------------------------------------------------------------*/
+
+/**
+**  @class CUnitType unittype.h
+**
+**  \#include "unittype.h"
+**
+**  This class contains the information that is shared between all
+**  units of the same type and determins if a unit is a building,
+**  a person, ...
+**
+**  The unit-type class members:
+**
+**  CUnitType::Ident
+**
+**    Unique identifier of the unit-type, used to reference it in
+**    config files and during startup. As convention they start with
+**    "unit-" fe. "unit-farm".
+**  @note Don't use this member in game, use instead the pointer
+**  to this structure. See UnitTypeByIdent().
+**
+**  CUnitType::Name
+**
+**    Pretty name shown by the engine. The name should be shorter
+**    than 17 characters and no word can be longer than 8 characters.
+**
+**  CUnitType::File
+**
+**    Path file name of the sprite file.
+**
+**  CUnitType::ShadowFile
+**
+**    Path file name of shadow sprite file.
+**
+**  CUnitType::DrawLevel
+**
+**    The Level/Order to draw this type of unit in. 0-255 usually.
+**
+**  CUnitType::Width CUnitType::Height
+**
+**    Size of a sprite frame in pixels. All frames of a sprite have
+**    the same size. Also all sprites (tilesets) must have the same
+**    size.
+**
+**  CUnitType::ShadowWidth CUnitType::ShadowHeight
+**
+**    Size of a shadow sprite frame in pixels. All frames of a sprite
+**    have the same size. Also all sprites (tilesets) must have the
+**    same size.
+**
+**  CUnitType::ShadowOffsetX CUnitType::ShadowOffsetY
+**
+**    Vertical offset to draw the shadow in pixels.
+**
+**  CUnitType::Animations
+**
+**    Animation scripts for the different actions. Currently the
+**    animations still, move, attack and die are supported.
+**  @see CAnimations
+**  @see CAnimation
+**
+**  CUnitType::Icon
+**
+**    Icon to display for this unit-type. Contains configuration and
+**    run time variable.
+**  @note This icon can be used for training, but isn't used.
+**
+**  CUnitType::Missile
+**
+**    Configuration and run time variable of the missile weapon.
+**  @note It is planned to support more than one weapons.
+**  And the sound of the missile should be used as fire sound.
+**
+**  CUnitType::Explosion
+**
+**    Configuration and run time variable of the missile explosion.
+**    This is the explosion that happens if unit is set to
+**    ExplodeWhenKilled
+**
+**  CUnitType::CorpseName
+**
+**    Corpse unit-type name, should only be used during setup.
+**
+**  CUnitType::CorpseType
+**
+**    Corpse unit-type pointer, only this should be used during run
+**    time. Many unit-types can share the same corpse.
+**
+**
+**  @todo continue this documentation
+**
+**  CUnitType::Construction
+**
+**    What is shown in construction phase.
+**
+**  CUnitType::SightRange
+**
+**    Sight range
+**
+**  CUnitType::_HitPoints
+**
+**    Maximum hit points
+**
+**
+**  CUnitType::_Costs[::MaxCosts]
+**
+**    How many resources needed
+**
+**  CUnitType::RepairHP
+**
+**    The HP given to a unit each cycle it's repaired.
+**    If zero, unit cannot be repaired
+**
+**    CUnitType::RepairCosts[::MaxCosts]
+**
+**    Costs per repair cycle to fix a unit.
+**
+**  CUnitType::TileWidth
+**
+**    Tile size on map width
+**
+**  CUnitType::TileHeight
+**
+**    Tile size on map height
+**
+**  CUnitType::BoxWidth
+**
+**    Selected box size width
+**
+**  CUnitType::BoxHeight
+**
+**    Selected box size height
+**
+**  CUnitType::NumDirections
+**
+**    Number of directions the unit can face
+**
+**  CUnitType::MinAttackRange
+**
+**    Minimal attack range
+**
+**  CUnitType::ReactRangeComputer
+**
+**    Reacts on enemy for computer
+**
+**  CUnitType::ReactRangePerson
+**
+**    Reacts on enemy for person player
+**
+**  CUnitType::Priority
+**
+**    Priority value / AI Treatment
+**
+**  CUnitType::BurnPercent
+**
+**    The burning limit in percents. If the unit has lees than
+**    this it will start to burn.
+**
+**  CUnitType::BurnDamageRate
+**
+**    Burn rate in HP per second
+**
+**  CUnitType::UnitType
+**
+**    Land / fly / naval
+**
+**  @note original only visual effect, we do more with this!
+**
+**  CUnitType::DecayRate
+**
+**    Decay rate in 1/6 seconds
+**
+**  CUnitType::AnnoyComputerFactor
+**
+**    How much this annoys the computer
+**
+**  @todo not used
+**
+**  CUnitType::MouseAction
+**
+**    Right click action
+**
+**  CUnitType::Points
+**
+**    How many points you get for unit. Used in the final score table.
+**
+**  CUnitType::CanTarget
+**
+**    Which units can it attack
+**
+**  CUnitType::LandUnit
+**
+**    Land animated
+**
+**  CUnitType::AirUnit
+**
+**    Air animated
+**
+**  CUnitType::SeaUnit
+**
+**    Sea animated
+**
+**  CUnitType::ExplodeWhenKilled
+**
+**    Death explosion animated
+**
+**  CUnitType::RandomMovementProbability
+**
+**    When the unit is idle this is the probability that it will
+**    take a step in a random direction, in percents.
+**
+**  CUnitType::ClicksToExplode
+**
+**    If this is non-zero, then after that many clicks the unit will
+**    commit suicide. Doesn't work with resource workers/resources.
+**
+**  CUnitType::Building
+**
+**    Unit is a Building
+**
+**  CUnitType::Transporter
+**
+**    Can transport units
+**
+**  CUnitType::MaxOnBoard
+**
+**    Maximum units on board (for transporters), and resources
+**
+**  CUnitType::StartingResources
+**    Amount of Resources a unit has when It's Built
+**
+**  CUnitType::DamageType
+**    Unit's missile damage type (used for extra death animations)
+**
+**  CUnitType::GivesResource
+**
+**    This equals to the resource Id of the resource given
+**    or 0 (TimeCost) for other buildings.
+**
+**  CUnitType::ResInfo[::MaxCosts]
+**
+**    Information about resource harvesting. If NULL, it can't
+**    harvest it.
+**
+**  CUnitType::NeutralMinimapColorRGB
+**
+**    Says what color a unit will have when it's neutral and
+**    is displayed on the minimap.
+**
+**  CUnitType::CanStore[::MaxCosts]
+**
+**    What resource types we can store here.
+**
+**  CUnitType::CanCastSpell
+**
+**    Unit is able to use spells
+**
+**  CUnitType::CanAttack
+**
+**    Unit is able to attack.
+**
+**  CUnitType::RepairRange
+**
+**    Unit can repair buildings. It will use the actack animation.
+**    It will heal 4 points for every repair cycle, and cost 1 of
+**    each resource, alternatively(1 cycle wood, 1 cycle gold)
+**  @todo The above should be more configurable.
+**    If units have a repair range, they can repair, and this is the
+**    distance.
+**
+**    CUnitType::ShieldPiercing
+**
+**    Can directly damage shield-protected units, without shield damaging.
+**
+**  CUnitType::Sound
+**
+**    Sounds for events
+**
+**  CUnitType::Weapon
+**
+**    Current sound for weapon
+**
+**  @todo temporary solution
+**
+**  CUnitType::FieldFlags
+**
+**    Flags that are set, if a unit enters a map field or cleared, if
+**    a unit leaves a map field.
+**
+**  CUnitType::MovementMask
+**
+**    Movement mask, this value is and'ed to the map field flags, to
+**    see if a unit can enter or placed on the map field.
+**
+**  CUnitType::Stats[::PlayerMax]
+**
+**    Unit status for each player
+**  @todo This stats should? be moved into the player struct
+**
+**  CUnitType::Type
+**
+**    Type as number
+**  @todo Should us a general name f.e. Slot here?
+**
+**  CUnitType::Sprite
+**
+**    Sprite images
+**
+**  CUnitType::ShadowSprite
+**
+**    Shadow sprite images
+**
+**  CUnitType::PlayerColorSprite
+**
+**    Sprite images of the player colors.  This image is drawn
+**    over CUnitType::Sprite.  Used with OpenGL only.
+**
+**
+*/
+/**
+**
+**  @class ResourceInfo unittype.h
+**
+** \#include "unittype.h"
+**
+**    This class contains information about how a unit will harvest a resource.
+**
+**  ResourceInfo::FileWhenLoaded
+**
+**    The harvester's animation file will change when it's loaded.
+**
+**  ResourceInfo::FileWhenEmpty;
+**
+**    The harvester's animation file will change when it's empty.
+**    The standard animation is used only when building/repairing.
+**
+**
+**  ResourceInfo::HarvestFromOutside
+**
+**    Unit will harvest from the outside. The unit will use it's
+**    Attack animation (seems it turned into a generic Action anim.)
+**
+**  ResourceInfo::ResourceId
+**
+**    The resource this is for. Mostly redundant.
+**
+**  ResourceInfo::FinalResource
+**
+**    The resource is converted to this at the depot. Useful for
+**    a fisherman who harvests fish, but it all turns to food at the
+**    depot.
+**
+**  ResourceInfo::WaitAtResource
+**
+**    Cycles the unit waits while inside a resource.
+**
+**  ResourceInfo::ResourceStep
+**
+**    The unit makes so-caled mining cycles. Each mining cycle
+**    it does some sort of animation and gains ResourceStep
+**    resources. You can stop after any number of steps.
+**    when the quantity in the harvester reaches the maximum
+**    (ResourceCapacity) it will return home. I this is 0 then
+**    it's considered infinity, and ResourceCapacity will now
+**    be the limit.
+**
+**  ResourceInfo::ResourceCapacity
+**
+**    Maximum amount of resources a harvester can carry. The
+**    actual amount can be modified while unloading.
+**
+**  ResourceInfo::LoseResources
+**
+**    Special lossy behaviour for loaded harvesters. Harvesters
+**    with loads other than 0 and ResourceCapacity will lose their
+**    cargo on any new order.
+**
+**  ResourceInfo::WaitAtDepot
+**
+**    Cycles the unit waits while inside the depot to unload.
+**
+**  ResourceInfo::TerrainHarvester
+**
+**    The unit will harvest terrain. For now this only works
+**    for wood. maybe it could be made to work for rocks, but
+**    more than that requires a tileset rewrite.
+**  @todo more configurable.
+**
+*/
 
 /*----------------------------------------------------------------------------
 --  Variables
@@ -128,33 +521,26 @@ int GetResourceIdByName(lua_State *l, const char *resourceName)
 	return res;
 }
 
-/// Parse integer in animation frame.
-extern int ParseAnimInt(CUnit *unit, const char *parseint);
-
 CUnitType::CUnitType() :
 	Slot(0), Width(0), Height(0), OffsetX(0), OffsetY(0), DrawLevel(0),
 	ShadowWidth(0), ShadowHeight(0), ShadowOffsetX(0), ShadowOffsetY(0),
 	Animations(NULL), StillFrame(0),
-	DeathExplosion(NULL), OnHit(NULL), OnEachCycle(NULL), OnEachSecond(NULL),
+	DeathExplosion(NULL), OnHit(NULL), OnEachCycle(NULL), OnEachSecond(NULL), OnInit(NULL),
+	TeleportCost(0), TeleportEffectIn(NULL), TeleportEffectOut(NULL),
 	CorpseType(NULL), Construction(NULL), RepairHP(0), TileWidth(0), TileHeight(0),
-	BoxWidth(0), BoxHeight(0), NumDirections(0), MinAttackRange(0),
-	ReactRangeComputer(0), ReactRangePerson(0), Priority(0),
+	BoxWidth(0), BoxHeight(0), BoxOffsetX(0), BoxOffsetY(0), NumDirections(0),
+	MinAttackRange(0), ReactRangeComputer(0), ReactRangePerson(0),
 	BurnPercent(0), BurnDamageRate(0), RepairRange(0),
 	CanCastSpell(NULL), AutoCastActive(NULL),
-	AutoBuildRate(0), RandomMovementProbability(0), ClicksToExplode(0),
-	MaxOnBoard(0), StartingResources(0),
-	UnitType(UnitTypeLand), DecayRate(0), AnnoyComputerFactor(0),
+	AutoBuildRate(0), RandomMovementProbability(0), RandomMovementDistance(1), ClicksToExplode(0),
+	MaxOnBoard(0), BoardSize(1), ButtonLevelForTransporter(0), StartingResources(0),
+	UnitType(UnitTypeLand), DecayRate(0), AnnoyComputerFactor(0), AiAdjacentRange(-1),
 	MouseAction(0), CanTarget(0),
-	Flip(0), Revealer(0), LandUnit(0), AirUnit(0), SeaUnit(0),
-	ExplodeWhenKilled(0), Building(0), VisibleUnderFog(0),
-	PermanentCloak(0), DetectCloak(0),
-	Coward(0), AttackFromTransporter(0),
-	Vanishes(0), GroundAttack(0), ShoreBuilding(0), CanAttack(0),
-	BuilderOutside(0), BuilderLost(0), CanHarvest(0), Harvester(0),
-	Neutral(0), SelectableByRectangle(0), IsNotSelectable(0), Decoration(0),
-	Indestructible(0), Teleporter(0), ShieldPiercing(0), SaveCargo(0),
-	NonSolid(0), Wall(0),
-	GivesResource(0), Supply(0), Demand(0), FieldFlags(0), MovementMask(0),
+	Flip(0), LandUnit(0), AirUnit(0), SeaUnit(0),
+	ExplodeWhenKilled(0), Building(0),
+	CanAttack(0),
+	Neutral(0),
+	GivesResource(0), PoisonDrain(0), FieldFlags(0), MovementMask(0),
 	Sprite(NULL), ShadowSprite(NULL)
 {
 #ifdef USE_MNG
@@ -163,8 +549,6 @@ CUnitType::CUnitType() :
 	memset(RepairCosts, 0, sizeof(RepairCosts));
 	memset(CanStore, 0, sizeof(CanStore));
 	memset(ResInfo, 0, sizeof(ResInfo));
-	memset(&NeutralMinimapColorRGB, 0, sizeof(NeutralMinimapColorRGB));
-	memset(ImproveIncomes, 0, sizeof(ImproveIncomes));
 	memset(MissileOffsets, 0, sizeof(MissileOffsets));
 }
 
@@ -174,6 +558,9 @@ CUnitType::~CUnitType()
 	delete OnHit;
 	delete OnEachCycle;
 	delete OnEachSecond;
+	delete OnInit;
+	delete TeleportEffectIn;
+	delete TeleportEffectOut;
 
 	BoolFlag.clear();
 
@@ -208,8 +595,7 @@ CUnitType::~CUnitType()
 	CGraphic::Free(ShadowSprite);
 #ifdef USE_MNG
 	if (this->Portrait.Num) {
-		int j;
-		for (j = 0; j < this->Portrait.Num; ++j) {
+		for (int j = 0; j < this->Portrait.Num; ++j) {
 			delete this->Portrait.Mngs[j];
 			// delete[] this->Portrait.Files[j];
 		}
@@ -240,6 +626,128 @@ bool CUnitType::CanMove() const
 	return Animations && Animations->Move;
 }
 
+bool CUnitType::CanSelect(GroupSelectionMode mode) const
+{
+	if (!BoolFlag[ISNOTSELECTABLE_INDEX].value) {
+		switch (mode) {
+			case SELECTABLE_BY_RECTANGLE_ONLY:
+				return BoolFlag[SELECTABLEBYRECTANGLE_INDEX].value;
+			case NON_SELECTABLE_BY_RECTANGLE_ONLY:
+				return !BoolFlag[SELECTABLEBYRECTANGLE_INDEX].value;
+			default:
+				return true;
+		}
+	}
+	return false;
+}
+
+void UpdateUnitStats(CUnitType &type, int reset)
+{
+	if (reset) {
+		type.MapDefaultStat = type.DefaultStat;
+		for (int player = 0; player < PlayerMax; ++player) {
+			type.Stats[player] = type.MapDefaultStat;
+		}
+		type.MapSound = type.Sound;
+	}
+
+	// Non-solid units can always be entered and they don't block anything
+	if (type.BoolFlag[NONSOLID_INDEX].value) {
+		if (type.Building) {
+			type.MovementMask = MapFieldLandUnit |
+								MapFieldSeaUnit |
+								MapFieldBuilding |
+								MapFieldCoastAllowed |
+								MapFieldWaterAllowed |
+								MapFieldNoBuilding |
+								MapFieldUnpassable;
+			if (type.BoolFlag[DECORATION_INDEX].value && type.MapDefaultStat.Variables[HP_INDEX].Max == 0) {
+				// special case, a decoration with no HP can always be built over
+				type.FieldFlags = 0;
+			} else {
+				type.FieldFlags = MapFieldNoBuilding;
+			}
+		} else {
+			type.MovementMask = 0;
+			type.FieldFlags = 0;
+		}
+		return;
+	}
+
+	//  As side effect we calculate the movement flags/mask here.
+	switch (type.UnitType) {
+		case UnitTypeLand:                              // on land
+			type.MovementMask =
+				MapFieldLandUnit |
+				MapFieldSeaUnit |
+				MapFieldBuilding | // already occuppied
+				MapFieldCoastAllowed |
+				MapFieldWaterAllowed | // can't move on this
+				MapFieldUnpassable;
+			break;
+		case UnitTypeFly:                               // in air
+			type.MovementMask = MapFieldAirUnit; // already occuppied
+			break;
+		case UnitTypeNaval:                             // on water
+			if (type.CanTransport()) {
+				type.MovementMask =
+					MapFieldLandUnit |
+					MapFieldSeaUnit |
+					MapFieldBuilding | // already occuppied
+					MapFieldLandAllowed; // can't move on this
+				// Johns: MapFieldUnpassable only for land units?
+			} else {
+				type.MovementMask =
+					MapFieldLandUnit |
+					MapFieldSeaUnit |
+					MapFieldBuilding | // already occuppied
+					MapFieldCoastAllowed |
+					MapFieldLandAllowed | // can't move on this
+					MapFieldUnpassable;
+			}
+			break;
+		default:
+			DebugPrint("Where moves this unit?\n");
+			type.MovementMask = 0;
+			break;
+	}
+	if (type.Building || type.BoolFlag[SHOREBUILDING_INDEX].value) {
+		// Shore building is something special.
+		if (type.BoolFlag[SHOREBUILDING_INDEX].value) {
+			type.MovementMask =
+				MapFieldLandUnit |
+				MapFieldSeaUnit |
+				MapFieldBuilding | // already occuppied
+				MapFieldLandAllowed; // can't build on this
+		}
+		type.MovementMask |= MapFieldNoBuilding;
+		//
+		// A little chaos, buildings without HP can be entered.
+		// The oil-patch is a very special case.
+		//
+		if (type.MapDefaultStat.Variables[HP_INDEX].Max) {
+			type.FieldFlags = MapFieldBuilding;
+		} else {
+			type.FieldFlags = MapFieldNoBuilding;
+		}
+	} else {
+		switch (type.UnitType) {
+			case UnitTypeLand: // on land
+				type.FieldFlags = MapFieldLandUnit;
+				break;
+			case UnitTypeFly: // in air
+				type.FieldFlags = MapFieldAirUnit;
+				break;
+			case UnitTypeNaval: // on water
+				type.FieldFlags = MapFieldSeaUnit;
+				break;
+			default:
+				DebugPrint("Where moves this unit?\n");
+				type.FieldFlags = 0;
+				break;
+		}
+	}
+}
 
 
 /**
@@ -248,110 +756,10 @@ bool CUnitType::CanMove() const
 */
 void UpdateStats(int reset)
 {
-	//
-	//  Update players stats
-	//
+	// Update players stats
 	for (std::vector<CUnitType *>::size_type j = 0; j < UnitTypes.size(); ++j) {
 		CUnitType &type = *UnitTypes[j];
-		if (reset) {
-			for (int player = 0; player < PlayerMax; ++player) {
-				type.Stats[player] = type.DefaultStat;
-			}
-		}
-
-		// Non-solid units can always be entered and they don't block anything
-		if (type.NonSolid) {
-			if (type.Building) {
-				type.MovementMask = MapFieldLandUnit |
-									MapFieldSeaUnit |
-									MapFieldBuilding |
-									MapFieldCoastAllowed |
-									MapFieldWaterAllowed |
-									MapFieldNoBuilding |
-									MapFieldUnpassable;
-				type.FieldFlags = MapFieldNoBuilding;
-			} else {
-				type.MovementMask = 0;
-				type.FieldFlags = 0;
-			}
-			continue;
-		}
-
-		//
-		//  As side effect we calculate the movement flags/mask here.
-		//
-		switch (type.UnitType) {
-			case UnitTypeLand:                              // on land
-				type.MovementMask =
-					MapFieldLandUnit |
-					MapFieldSeaUnit |
-					MapFieldBuilding | // already occuppied
-					MapFieldCoastAllowed |
-					MapFieldWaterAllowed | // can't move on this
-					MapFieldUnpassable;
-				break;
-			case UnitTypeFly:                               // in air
-				type.MovementMask = MapFieldAirUnit; // already occuppied
-				break;
-			case UnitTypeNaval:                             // on water
-				if (type.CanTransport()) {
-					type.MovementMask =
-						MapFieldLandUnit |
-						MapFieldSeaUnit |
-						MapFieldBuilding | // already occuppied
-						MapFieldLandAllowed; // can't move on this
-					// Johns: MapFieldUnpassable only for land units?
-				} else {
-					type.MovementMask =
-						MapFieldLandUnit |
-						MapFieldSeaUnit |
-						MapFieldBuilding | // already occuppied
-						MapFieldCoastAllowed |
-						MapFieldLandAllowed | // can't move on this
-						MapFieldUnpassable;
-				}
-				break;
-			default:
-				DebugPrint("Where moves this unit?\n");
-				type.MovementMask = 0;
-				break;
-		}
-		if (type.Building || type.ShoreBuilding) {
-			// Shore building is something special.
-			if (type.ShoreBuilding) {
-				type.MovementMask =
-					MapFieldLandUnit |
-					MapFieldSeaUnit |
-					MapFieldBuilding | // already occuppied
-					MapFieldLandAllowed; // can't build on this
-			}
-			type.MovementMask |= MapFieldNoBuilding;
-			//
-			// A little chaos, buildings without HP can be entered.
-			// The oil-patch is a very special case.
-			//
-			if (type.DefaultStat.Variables[HP_INDEX].Max) {
-				type.FieldFlags = MapFieldBuilding;
-			} else {
-				type.FieldFlags = MapFieldNoBuilding;
-			}
-		} else {
-			switch (type.UnitType) {
-				case UnitTypeLand: // on land
-					type.FieldFlags = MapFieldLandUnit;
-					break;
-				case UnitTypeFly: // in air
-					type.FieldFlags = MapFieldAirUnit;
-					break;
-				case UnitTypeNaval: // on water
-					type.FieldFlags = MapFieldSeaUnit;
-					break;
-				default:
-					DebugPrint("Where moves this unit?\n");
-					type.FieldFlags = 0;
-					break;
-			}
-		}
+		UpdateUnitStats(type, reset);
 	}
 }
 
@@ -391,6 +799,13 @@ static bool SaveUnitStats(const CUnitStats &stats, const CUnitType &type, int pl
 			file.printf(" ");
 		}
 		file.printf("\"%s\", %d,", DefaultResourceNames[i].c_str(), stats.Storing[i]);
+	}
+	file.printf("},\n\"improve-production\", {");
+	for (unsigned int i = 0; i < MaxCosts; ++i) {
+		if (i) {
+			file.printf(" ");
+		}
+		file.printf("\"%s\", %d,", DefaultResourceNames[i].c_str(), stats.ImproveIncomes[i]);
 	}
 	file.printf("}})\n");
 	return true;
@@ -447,10 +862,9 @@ CUnitType *UnitTypeByIdent(const std::string &ident)
 */
 CUnitType *NewUnitTypeSlot(const std::string &ident)
 {
-	CUnitType *type;
 	size_t new_bool_size = UnitTypeVar.GetNumberBoolFlag();
+	CUnitType *type = new CUnitType;
 
-	type = new CUnitType;
 	if (!type) {
 		fprintf(stderr, "Out of memory\n");
 		ExitFatal(-1);
@@ -475,7 +889,7 @@ CUnitType *NewUnitTypeSlot(const std::string &ident)
 **  @param sprite  Sprite to use for drawing
 **  @param player  Player number for color substitution.
 **  @param frame   Animation frame of unit-type.
-**  @param screenPos  Screen pixel (top left) postion to draw unit-type.
+**  @param screenPos  Screen pixel (top left) position to draw unit-type.
 **
 **  @todo  Do screen position caculation in high level.
 **         Better way to handle in x mirrored sprites.
@@ -496,7 +910,7 @@ void DrawUnitType(const CUnitType &type, CPlayerColorGraphic *sprite, int player
 			sprite->DrawPlayerColorFrameClip(player, frame, pos.x, pos.y);
 		}
 	} else {
-		int row = type.NumDirections / 2 + 1;
+		const int row = type.NumDirections / 2 + 1;
 
 		if (frame < 0) {
 			frame = ((-frame - 1) / row) * type.NumDirections + type.NumDirections - (-frame - 1) % row;
@@ -510,15 +924,15 @@ void DrawUnitType(const CUnitType &type, CPlayerColorGraphic *sprite, int player
 /**
 **  Get the still animation frame
 */
-static int GetStillFrame(CUnitType *type)
+static int GetStillFrame(const CUnitType &type)
 {
-	CAnimation *anim = type->Animations->Still;
+	CAnimation *anim = type.Animations->Still;
 
 	while (anim) {
 		if (anim->Type == AnimationFrame) {
 			CAnimation_Frame &a_frame = *static_cast<CAnimation_Frame *>(anim);
 			// Use the frame facing down
-			return a_frame.ParseAnimInt(NULL) + type->NumDirections / 2;
+			return a_frame.ParseAnimInt(NULL) + type.NumDirections / 2;
 		} else if (anim->Type == AnimationExactFrame) {
 			CAnimation_ExactFrame &a_frame = *static_cast<CAnimation_ExactFrame *>(anim);
 
@@ -526,7 +940,7 @@ static int GetStillFrame(CUnitType *type)
 		}
 		anim = anim->Next;
 	}
-	return type->NumDirections / 2;
+	return type.NumDirections / 2;
 }
 
 /**
@@ -534,40 +948,35 @@ static int GetStillFrame(CUnitType *type)
 */
 void InitUnitTypes(int reset_player_stats)
 {
-	CUnitType *type;
-
 	for (size_t i = 0; i < UnitTypes.size(); ++i) {
-		type = UnitTypes[i];
-		Assert(type->Slot == (int)i);
+		CUnitType &type = *UnitTypes[i];
+		Assert(type.Slot == (int)i);
 
+		if (type.Animations == NULL) {
+			DebugPrint(_("unit-type '%s' without animations, ignored.\n") _C_ type.Ident.c_str());
+			continue;
+		}
 		//  Add idents to hash.
-		UnitTypeMap[type->Ident] = UnitTypes[i];
+		UnitTypeMap[type.Ident] = UnitTypes[i];
 
 		// Determine still frame
-		type->StillFrame = GetStillFrame(type);
+		type.StillFrame = GetStillFrame(type);
 
 		// Lookup BuildingTypes
-		for (std::vector<CBuildRestriction *>::iterator b = type->BuildingRules.begin();
-			 b < type->BuildingRules.end(); ++b) {
+		for (std::vector<CBuildRestriction *>::iterator b = type.BuildingRules.begin();
+			 b < type.BuildingRules.end(); ++b) {
 			(*b)->Init();
 		}
 
 		// Lookup AiBuildingTypes
-		for (std::vector<CBuildRestriction *>::iterator b = type->AiBuildingRules.begin();
-			 b < type->AiBuildingRules.end(); ++b) {
+		for (std::vector<CBuildRestriction *>::iterator b = type.AiBuildingRules.begin();
+			 b < type.AiBuildingRules.end(); ++b) {
 			(*b)->Init();
 		}
 	}
 
 	// LUDO : called after game is loaded -> don't reset stats !
 	UpdateStats(reset_player_stats); // Calculate the stats
-
-	//
-	// Setup hardcoded unit types. FIXME: should be moved to some configs.
-	// Temporary fix: UnitTypeHumanWall and UnitTypeOrcWall are exported to lua
-	//
-	//UnitTypeHumanWall = UnitTypeByIdent("unit-human-wall");
-	//UnitTypeOrcWall = UnitTypeByIdent("unit-orc-wall");
 }
 
 /**
@@ -583,10 +992,12 @@ void LoadUnitTypeSprite(CUnitType &type)
 		if (type.Flip) {
 			type.ShadowSprite->Flip();
 		}
-		type.ShadowSprite->MakeShadow();
+		if (type.ShadowSprite->Surface->format->BytesPerPixel == 1) {
+			type.ShadowSprite->MakeShadow();
+		}
 	}
 
-	if (type.Harvester) {
+	if (type.BoolFlag[HARVESTER_INDEX].value) {
 		for (int i = 0; i < MaxCosts; ++i) {
 			ResourceInfo *resinfo = type.ResInfo[i];
 			if (!resinfo) {
@@ -657,7 +1068,7 @@ void LoadUnitTypes()
 #ifndef DYNAMIC_LOAD
 		// Load Sprite
 		if (!type.Sprite) {
-			ShowLoadProgress("Unit \"%s\"", type.Name.c_str());
+			ShowLoadProgress(_("Unit \"%s\""), type.Name.c_str());
 			LoadUnitTypeSprite(type);
 		}
 #endif
@@ -686,19 +1097,15 @@ void CUnitTypeVar::Clear()
 	DecoVar.clear();
 }
 
-extern void FreeAnimations();
-
 /**
 **  Cleanup the unit-type module.
 */
 void CleanUnitTypes()
 {
-
 	DebugPrint("FIXME: icon, sounds not freed.\n");
 	FreeAnimations();
 
 	// Clean all unit-types
-
 	for (size_t i = 0; i < UnitTypes.size(); ++i) {
 		delete UnitTypes[i];
 	}
@@ -706,9 +1113,7 @@ void CleanUnitTypes()
 	UnitTypeMap.clear();
 	UnitTypeVar.Clear();
 
-	//
 	// Clean hardcoded unit types.
-	//
 	UnitTypeHumanWall = NULL;
 	UnitTypeOrcWall = NULL;
 }

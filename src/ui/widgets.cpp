@@ -94,9 +94,12 @@ void initGuichan()
 {
 	gcn::Graphics *graphics;
 
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		graphics = new MyOpenGLGraphics();
-	} else {
+	} else
+#endif
+	{
 		graphics = new gcn::SDLGraphics();
 
 		// Set the target for the graphics object to be the screen.
@@ -111,7 +114,12 @@ void initGuichan()
 	Gui->setGraphics(graphics);
 	Gui->setInput(Input);
 	Gui->setTop(NULL);
+
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	Gui->setUseDirtyDrawing(!UseOpenGL);
+#else
+	Gui->setUseDirtyDrawing(1);
+#endif
 
 	GuichanCallbacks.ButtonPressed = &MenuHandleButtonDown;
 	GuichanCallbacks.ButtonReleased = &MenuHandleButtonUp;
@@ -134,10 +142,8 @@ void freeGuichan()
 		Gui = NULL;
 	}
 
-	if (Input) {
-		delete Input;
-		Input = NULL;
-	}
+	delete Input;
+	Input = NULL;
 }
 
 /**
@@ -165,7 +171,11 @@ void handleInput(const SDL_Event *event)
 void DrawGuichanWidgets()
 {
 	if (Gui) {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 		Gui->setUseDirtyDrawing(!UseOpenGL && !GameRunning && !Editor.Running);
+#else
+		Gui->setUseDirtyDrawing(!GameRunning && !Editor.Running);
+#endif
 		Gui->draw();
 	}
 }
@@ -188,9 +198,9 @@ LuaActionListener::LuaActionListener(lua_State *l, lua_Object f) :
 }
 
 /**
-**  Called when an action is recieved from a Widget. It is used
-**  to be able to recieve a notification that an action has
-**  occured.
+**  Called when an action is received from a Widget. It is used
+**  to be able to receive a notification that an action has
+**  occurred.
 **
 **  @param eventId  the identifier of the Widget
 */
@@ -208,11 +218,11 @@ LuaActionListener::~LuaActionListener()
 {
 }
 
+#if defined(USE_OPENGL) || defined(USE_GLES)
 
 /*----------------------------------------------------------------------------
 --  MyOpenGLGraphics
 ----------------------------------------------------------------------------*/
-
 
 void MyOpenGLGraphics::_beginDraw()
 {
@@ -310,6 +320,8 @@ void MyOpenGLGraphics::fillRectangle(const gcn::Rectangle &rectangle)
 							 x1, y1, x2 - x1, y2 - y1, c.a);
 }
 
+#endif
+
 /*----------------------------------------------------------------------------
 --  ImageButton
 ----------------------------------------------------------------------------*/
@@ -386,10 +398,17 @@ void ImageButton::draw(gcn::Graphics *graphics)
 	}
 
 	graphics->setFont(getFont());
+	
+	bool is_normal = true;
+	
+	if (hasMouse()) {
+		is_normal = false;
+	}
+
 	if (isPressed()) {
-		graphics->drawText(getCaption(), textX + 4, textY + 4, getAlignment());
+		graphics->drawText(getCaption(), textX + 4, textY + 4, getAlignment(), is_normal);
 	} else {
-		graphics->drawText(getCaption(), textX + 2, textY + 2, getAlignment());
+		graphics->drawText(getCaption(), textX + 2, textY + 2, getAlignment(), is_normal);
 	}
 
 	if (hasFocus()) {
@@ -419,8 +438,8 @@ void ImageButton::adjustSize()
 **  ImageRadioButton constructor
 */
 ImageRadioButton::ImageRadioButton() : gcn::RadioButton(),
-	uncheckedNormalImage(NULL), uncheckedPressedImage(NULL),
-	checkedNormalImage(NULL), checkedPressedImage(NULL),
+	uncheckedNormalImage(NULL), uncheckedPressedImage(NULL), uncheckedDisabledImage(NULL),
+	checkedNormalImage(NULL), checkedPressedImage(NULL), checkedDisabledImage(NULL),
 	mMouseDown(false)
 {
 }
@@ -431,8 +450,8 @@ ImageRadioButton::ImageRadioButton() : gcn::RadioButton(),
 ImageRadioButton::ImageRadioButton(const std::string &caption,
 								   const std::string &group, bool marked) :
 	gcn::RadioButton(caption, group, marked),
-	uncheckedNormalImage(NULL), uncheckedPressedImage(NULL),
-	checkedNormalImage(NULL), checkedPressedImage(NULL),
+	uncheckedNormalImage(NULL), uncheckedPressedImage(NULL), uncheckedDisabledImage(NULL),
+	checkedNormalImage(NULL), checkedPressedImage(NULL), checkedDisabledImage(NULL),
 	mMouseDown(false)
 {
 }
@@ -445,13 +464,17 @@ void ImageRadioButton::drawBox(gcn::Graphics *graphics)
 	gcn::Image *img = NULL;
 
 	if (isMarked()) {
-		if (mMouseDown) {
+		if (isEnabled() == false) {
+			img = checkedDisabledImage;
+		} else if (mMouseDown) {
 			img = checkedPressedImage;
 		} else {
 			img = checkedNormalImage;
 		}
 	} else {
-		if (mMouseDown) {
+		if (isEnabled() == false) {
+			img = uncheckedDisabledImage;
+		} else if (mMouseDown) {
 			img = uncheckedPressedImage;
 		} else {
 			img = uncheckedNormalImage;
@@ -534,9 +557,7 @@ void ImageRadioButton::adjustSize()
 	if (uncheckedNormalImage) {
 		width = uncheckedNormalImage->getWidth();
 		width += width / 2;
-		if (uncheckedNormalImage->getHeight() > height) {
-			height = uncheckedNormalImage->getHeight();
-		}
+		height = std::max(height, uncheckedNormalImage->getHeight());
 	} else {
 		width = getFont()->getHeight();
 		width += width / 2;
@@ -556,8 +577,8 @@ void ImageRadioButton::adjustSize()
 **  Image checkbox constructor
 */
 ImageCheckBox::ImageCheckBox() : gcn::CheckBox(),
-	uncheckedNormalImage(NULL), uncheckedPressedImage(NULL),
-	checkedNormalImage(NULL), checkedPressedImage(NULL),
+	uncheckedNormalImage(NULL), uncheckedPressedImage(NULL), uncheckedDisabledImage(NULL),
+	checkedNormalImage(NULL), checkedPressedImage(NULL), checkedDisabledImage(NULL),
 	mMouseDown(false)
 {
 }
@@ -567,8 +588,8 @@ ImageCheckBox::ImageCheckBox() : gcn::CheckBox(),
 */
 ImageCheckBox::ImageCheckBox(const std::string &caption, bool marked) :
 	gcn::CheckBox(caption, marked),
-	uncheckedNormalImage(NULL), uncheckedPressedImage(NULL),
-	checkedNormalImage(NULL), checkedPressedImage(NULL),
+	uncheckedNormalImage(NULL), uncheckedPressedImage(NULL), uncheckedDisabledImage(NULL),
+	checkedNormalImage(NULL), checkedPressedImage(NULL), checkedDisabledImage(NULL),
 	mMouseDown(false)
 {
 }
@@ -607,13 +628,17 @@ void ImageCheckBox::drawBox(gcn::Graphics *graphics)
 	gcn::Image *img = NULL;
 
 	if (mMarked) {
-		if (mMouseDown) {
+		if (isEnabled() == false) {
+			img = checkedDisabledImage;
+		} else if (mMouseDown) {
 			img = checkedPressedImage;
 		} else {
 			img = checkedNormalImage;
 		}
 	} else {
-		if (mMouseDown) {
+		if (isEnabled() == false) {
+			img = uncheckedDisabledImage;
+		} else if (mMouseDown) {
 			img = uncheckedPressedImage;
 		} else {
 			img = uncheckedNormalImage;
@@ -669,9 +694,7 @@ void ImageCheckBox::adjustSize()
 	if (uncheckedNormalImage) {
 		width = uncheckedNormalImage->getWidth();
 		width += width / 2;
-		if (uncheckedNormalImage->getHeight() > height) {
-			height = uncheckedNormalImage->getHeight();
-		}
+		height = std::max(height, uncheckedNormalImage->getHeight());
 	} else {
 		width = getFont()->getHeight();
 		width += width / 2;
@@ -691,7 +714,7 @@ void ImageCheckBox::adjustSize()
 **  Image slider constructor
 */
 ImageSlider::ImageSlider(double scaleEnd) :
-	Slider(scaleEnd), markerImage(NULL), backgroundImage(NULL)
+	Slider(scaleEnd), markerImage(NULL), backgroundImage(NULL), disabledBackgroundImage(NULL)
 {
 }
 
@@ -699,7 +722,7 @@ ImageSlider::ImageSlider(double scaleEnd) :
 **  Image slider constructor
 */
 ImageSlider::ImageSlider(double scaleStart, double scaleEnd) :
-	Slider(scaleStart, scaleEnd), markerImage(NULL), backgroundImage(NULL)
+	Slider(scaleStart, scaleEnd), markerImage(NULL), backgroundImage(NULL), disabledBackgroundImage(NULL)
 {
 }
 
@@ -708,18 +731,22 @@ ImageSlider::ImageSlider(double scaleStart, double scaleEnd) :
 */
 void ImageSlider::drawMarker(gcn::Graphics *graphics)
 {
-	if (markerImage) {
-		if (getOrientation() == HORIZONTAL) {
-			int v = getMarkerPosition();
-			graphics->drawImage(markerImage, 0, 0, v, 0,
-								markerImage->getWidth(), markerImage->getHeight());
+	gcn::Image *img = markerImage;
+
+	if (isEnabled()) {
+		if (img) {
+			if (getOrientation() == HORIZONTAL) {
+				int v = getMarkerPosition();
+				graphics->drawImage(img, 0, 0, v, 0,
+					img->getWidth(), img->getHeight());
+			} else {
+				int v = (getHeight() - getMarkerLength()) - getMarkerPosition();
+				graphics->drawImage(img, 0, 0, 0, v,
+					img->getWidth(), img->getHeight());
+			}
 		} else {
-			int v = (getHeight() - getMarkerLength()) - getMarkerPosition();
-			graphics->drawImage(markerImage, 0, 0, 0, v,
-								markerImage->getWidth(), markerImage->getHeight());
+			Slider::drawMarker(graphics);
 		}
-	} else {
-		Slider::drawMarker(graphics);
 	}
 }
 
@@ -728,10 +755,19 @@ void ImageSlider::drawMarker(gcn::Graphics *graphics)
 */
 void ImageSlider::draw(gcn::Graphics *graphics)
 {
-	if (backgroundImage) {
-		graphics->drawImage(backgroundImage, 0, 0, 0, 0,
-							backgroundImage->getWidth(), backgroundImage->getHeight());
-		drawMarker(graphics);
+	gcn::Image *img = NULL;
+
+	if (isEnabled()) {
+		img = backgroundImage;
+	} else {
+		img = disabledBackgroundImage;
+	}
+
+	if (img) {
+		graphics->drawImage(img, 0, 0, 0, 0, img->getWidth(), img->getHeight());
+		if (isEnabled()) {
+			drawMarker(graphics);
+		}
 	} else {
 		Slider::draw(graphics);
 	}
@@ -752,6 +788,14 @@ void ImageSlider::setMarkerImage(gcn::Image *image)
 void ImageSlider::setBackgroundImage(gcn::Image *image)
 {
 	backgroundImage = image;
+}
+
+/**
+**  Set the disabled background image
+*/
+void ImageSlider::setDisabledBackgroundImage(gcn::Image *image)
+{
+	disabledBackgroundImage = image;
 }
 
 
@@ -860,11 +904,7 @@ void MultiLineLabel::adjustSize()
 	for (int i = 0; i < (int)this->mTextRows.size(); ++i) {
 		int w = this->getFont()->getWidth(this->mTextRows[i]);
 		if (width < w) {
-			if (w <= this->mLineWidth) {
-				width = w;
-			} else {
-				width = this->mLineWidth;
-			}
+			width = std::min(w, this->mLineWidth);
 		}
 	}
 	this->setWidth(width);
@@ -1141,7 +1181,7 @@ void Windows::add(gcn::Widget *widget, int x, int y)
 **  @param y   Y coordinate of the mouse relative to the widndow.
 **
 **  @note Once dragged, without release the mouse,
-**    if you go virtualy outside the container then go back,
+**    if you go virtually outside the container then go back,
 **    you have to wait the virtual cursor are in the container.
 **    It is because x, y argument refer to a virtual cursor :(
 **  @note An another thing is strange
@@ -1197,7 +1237,7 @@ void Windows::mouseMotion(int x, int y)
 	setPosition(x, y);
 
 	// Move the cursor.
-	// Usefull only when window reachs the limit.
+	// Useful only when window reachs the limit.
 	getAbsolutePosition(absx, absy);
 	CursorScreenPos.x = absx + mMouseXOffset;
 	CursorScreenPos.y = absy + mMouseYOffset;
@@ -1225,6 +1265,81 @@ void Windows::setBaseColor(const gcn::Color &color)
 	container.setBaseColor(color);
 }
 
+/*----------------------------------------------------------------------------
+--  ImageTextField
+----------------------------------------------------------------------------*/
+
+void ImageTextField::draw(gcn::Graphics *graphics)
+{
+	gcn::Font *font;
+	int x, y;
+	CGraphic *img = this->itemImage;
+	if (!img) {
+		fprintf(stderr, "Not all graphics for ImageTextField were set\n");
+		ExitFatal(1);
+	}
+	img->Resize(getWidth(), img->getHeight());
+	graphics->drawImage(img, 0, 0, 0, 0, getWidth(), img->getHeight());
+
+	if (hasFocus())
+	{
+		drawCaret(graphics, getFont()->getWidth(mText.substr(0, mCaretPosition)) - mXScroll);
+	}
+
+	graphics->setColor(getForegroundColor());
+	font = getFont();
+	graphics->setFont(font);
+
+	x = 1 - mXScroll;
+	y = 1;
+
+	if (mSelectEndOffset != 0)
+	{
+		unsigned int first;
+		unsigned int len;
+		int selX;
+		int selW;
+		std::string tmpStr;
+
+		getTextSelectionPositions(&first, &len);
+
+		tmpStr = std::string(mText.substr(0, first));
+		selX = font->getWidth(tmpStr);
+
+		tmpStr = std::string(mText.substr(first, len));
+		selW = font->getWidth(tmpStr);
+
+		graphics->setColor(gcn::Color(127, 127, 127));
+		graphics->fillRectangle(gcn::Rectangle(x + selX, y, selW, font->getHeight()));
+	}
+
+	graphics->drawText(mText, x, y);
+}
+
+void ImageTextField::drawBorder(gcn::Graphics *graphics)
+{
+	gcn::Color faceColor = getBaseColor();
+	gcn::Color highlightColor, shadowColor;
+	int alpha = getBaseColor().a;
+	int width = getWidth() + getBorderSize() * 2 - 1;
+	int height = getHeight() + getBorderSize() * 2 - 1;
+	height = itemImage ? std::max<int>(height, itemImage->getHeight()) : height;
+	highlightColor = faceColor + 0x303030;
+	highlightColor.a = alpha;
+	shadowColor = faceColor - 0x303030;
+	shadowColor.a = alpha;
+
+	unsigned int i;
+	for (i = 0; i < getBorderSize(); ++i)
+	{
+		graphics->setColor(shadowColor);
+		graphics->drawLine(i,i, width - i, i);
+		graphics->drawLine(i,i + 1, i, height - i - 1);
+		graphics->setColor(highlightColor);
+		graphics->drawLine(width - i,i + 1, width - i, height - i);
+		graphics->drawLine(i,height - i, width - i - 1, height - i);
+	}
+}
 
 /*----------------------------------------------------------------------------
 --  LuaListModel
@@ -1236,17 +1351,142 @@ void Windows::setBaseColor(const gcn::Color &color)
 */
 void LuaListModel::setList(lua_State *lua, lua_Object *lo)
 {
-	int args;
-	int j;
-
 	list.clear();
 
-	args = lua_rawlen(lua, *lo);
-	for (j = 0; j < args; ++j) {
-		lua_rawgeti(lua, *lo, j + 1);
-		list.push_back(std::string(LuaToString(lua, -1)));
-		lua_pop(lua, 1);
+	const int args = lua_rawlen(lua, *lo);
+	for (int j = 0; j < args; ++j) {
+		list.push_back(std::string(LuaToString(lua, *lo, j + 1)));
 	}
+}
+
+/*----------------------------------------------------------------------------
+--  ImageListBox
+----------------------------------------------------------------------------*/
+
+ImageListBox::ImageListBox() : gcn::ListBox(), itemImage(NULL)
+{
+}
+
+ImageListBox::ImageListBox(gcn::ListModel *listModel) : gcn::ListBox(listModel), itemImage(NULL)
+{
+}
+
+void ImageListBox::draw(gcn::Graphics *graphics)
+{
+	if (mListModel == NULL) {
+		return;
+	}
+
+	graphics->setColor(getForegroundColor());
+	graphics->setFont(getFont());
+
+	int i, fontHeight;
+	int y = 0;
+	CGraphic *img = itemImage;
+	img->Resize(getWidth(), img->getHeight());
+
+	fontHeight = std::max<int>(getFont()->getHeight(), img->getHeight());
+
+    /**
+        * @todo Check cliprects so we do not have to iterate over elements in the list model
+        */
+	for (i = 0; i < mListModel->getNumberOfElements(); ++i) {
+		graphics->drawImage(img, 0, 0, 0, y, getWidth(), img->getHeight());
+		if (i == mSelected) {
+			graphics->drawText("~<" + mListModel->getElementAt(i) + "~>", 1, y + (fontHeight - getFont()->getHeight()) / 2);
+		} else {
+			graphics->drawText(mListModel->getElementAt(i), 1, y + (fontHeight - getFont()->getHeight()) / 2);
+		}
+
+		y += fontHeight;
+	}
+	img->SetOriginalSize();
+}
+
+void ImageListBox::drawBorder(gcn::Graphics *graphics)
+{
+	gcn::Color faceColor = getBaseColor();
+	gcn::Color highlightColor, shadowColor;
+	int alpha = getBaseColor().a;
+	int width = getWidth() + getBorderSize() * 2 - 1;
+	int height = getHeight() + getBorderSize() * 2 - 1;
+	highlightColor = faceColor + 0x303030;
+	highlightColor.a = alpha;
+	shadowColor = faceColor - 0x303030;
+	shadowColor.a = alpha;
+
+	unsigned int i;
+	for (i = 0; i < getBorderSize(); ++i)
+	{
+		graphics->setColor(shadowColor);
+		graphics->drawLine(i,i, width - i, i);
+		graphics->drawLine(i,i + 1, i, height - i - 1);
+		graphics->setColor(highlightColor);
+		graphics->drawLine(width - i,i + 1, width - i, height - i);
+		graphics->drawLine(i,height - i, width - i - 1, height - i);
+	}
+}
+
+void ImageListBox::adjustSize()
+{
+	if (mListModel != NULL)
+	{
+		setHeight((itemImage ? std::max<int>(getFont()->getHeight(), itemImage->getHeight()) : getFont()->getHeight()) * mListModel->getNumberOfElements());
+	}
+}
+
+void ImageListBox::mousePress(int, int y, int button)
+{
+	if (button == gcn::MouseInput::LEFT && hasMouse())
+	{
+		setSelected(y / (itemImage ? std::max<int>(getFont()->getHeight(), itemImage->getHeight()) : getFont()->getHeight()));
+		generateAction();
+	}
+}
+
+void ImageListBox::setSelected(int selected)
+{
+	if (mListModel == NULL)
+	{
+		mSelected = -1;
+	}
+	else
+	{
+		if (selected < 0)
+		{
+			mSelected = -1;
+		}
+		else if (selected >= mListModel->getNumberOfElements())
+		{
+			mSelected = mListModel->getNumberOfElements() - 1;
+		}
+		else
+		{
+			mSelected = selected;
+		}
+
+		Widget *par = getParent();
+		if (par == NULL)
+		{
+			return;
+		}
+
+		gcn::ScrollArea* scrollArea = dynamic_cast<gcn::ScrollArea *>(par);
+		if (scrollArea != NULL)
+		{
+			gcn::Rectangle scroll;
+			scroll.y = (itemImage ? std::max<int>(getFont()->getHeight(), itemImage->getHeight()) : getFont()->getHeight()) * mSelected;
+			scroll.height = (itemImage ? std::max<int>(getFont()->getHeight(), itemImage->getHeight()) : getFont()->getHeight());
+			scrollArea->scrollToRectangle(scroll);
+		}
+	}
+}
+
+void ImageListBox::setListModel(gcn::ListModel *listModel)
+{
+	mSelected = -1;
+	mListModel = listModel;
+	adjustSize();
 }
 
 
@@ -1267,11 +1507,34 @@ ListBoxWidget::ListBoxWidget(unsigned int width, unsigned int height)
 	setBackgroundColor(gcn::Color(128, 128, 128));
 }
 
+/**
+**  ImageListBoxWidget constructor.
+**
+**  @todo  Size should be parametrable, maybe remove default constructor?
+*/
+ImageListBoxWidget::ImageListBoxWidget(unsigned int width, unsigned int height) : ListBoxWidget(width, height),
+	upButtonImage(NULL), downButtonImage(NULL), leftButtonImage(NULL), rightButtonImage(NULL), hBarButtonImage(NULL), 
+	vBarButtonImage(NULL),	markerImage(NULL)
+{
+	setDimension(gcn::Rectangle(0, 0, width, height));
+	setContent(&listbox);
+}
+
 
 /**
 **  Set the list
 */
 void ListBoxWidget::setList(lua_State *lua, lua_Object *lo)
+{
+	lualistmodel.setList(lua, lo);
+	listbox.setListModel(&lualistmodel);
+	adjustSize();
+}
+
+/**
+**  Set the list
+*/
+void ImageListBoxWidget::setList(lua_State *lua, lua_Object *lo)
 {
 	lualistmodel.setList(lua, lo);
 	listbox.setListModel(&lualistmodel);
@@ -1291,6 +1554,18 @@ void ListBoxWidget::setSelected(int selected)
 }
 
 /**
+**  Sets the ListModel index of the selected element.
+**
+**  @param selected  The ListModel index of the selected element.
+**
+**  @see gcn::ListBox
+*/
+void ImageListBoxWidget::setSelected(int selected)
+{
+	listbox.setSelected(selected);
+}
+
+/**
 **  Gets the ListModel index of the selected element.
 **
 **  @return  The ListModel index of the selected element.
@@ -1300,6 +1575,18 @@ void ListBoxWidget::setSelected(int selected)
 int ListBoxWidget::getSelected() const
 {
 	return const_cast<gcn::ListBox &>(listbox).getSelected();
+}
+
+/**
+**  Gets the ListModel index of the selected element.
+**
+**  @return  The ListModel index of the selected element.
+**
+**  @see gcn::ListBox
+*/
+int ImageListBoxWidget::getSelected() const
+{
+	return const_cast<ImageListBox &>(listbox).getSelected();
 }
 
 /**
@@ -1315,11 +1602,35 @@ void ListBoxWidget::setBackgroundColor(const gcn::Color &color)
 }
 
 /**
+**  Set background color of the ListBoxWidget.
+**
+**  @param color  Color to set.
+*/
+void ImageListBoxWidget::setBackgroundColor(const gcn::Color &color)
+{
+	ScrollArea::setBackgroundColor(color);
+	ScrollArea::setBaseColor(color);
+	listbox.setBackgroundColor(color);
+}
+
+/**
 **  Set font of the ListBox.
 **
 **  @param font  Font to set.
 */
 void ListBoxWidget::setFont(gcn::Font *font)
+{
+	listbox.setFont(font);
+	listbox.setWidth(getWidth());
+	adjustSize();
+}
+
+/**
+**  Set font of the ListBox.
+**
+**  @param font  Font to set.
+*/
+void ImageListBoxWidget::setFont(gcn::Font *font)
 {
 	listbox.setFont(font);
 	listbox.setWidth(getWidth());
@@ -1351,11 +1662,391 @@ void ListBoxWidget::adjustSize()
 }
 
 /**
+**  Adjust size of the listBox.
+**
+**  @todo Fix width of the scroll area (depend of v-scroll or not).
+*/
+void ImageListBoxWidget::adjustSize()
+{
+	int i;
+	int width;
+	gcn::ListModel *listmodel;
+
+	width = listbox.getWidth();
+	Assert(listbox.getListModel());
+	listmodel = listbox.getListModel();
+	for (i = 0; i < listmodel->getNumberOfElements(); ++i) {
+		if (width < listbox.getFont()->getWidth(listmodel->getElementAt(i))) {
+			width = listbox.getFont()->getWidth(listmodel->getElementAt(i));
+		}
+	}
+	if (width != listbox.getWidth()) {
+		listbox.setWidth(width);
+	}
+}
+
+/**
 **  Add an action listener
 */
 void ListBoxWidget::addActionListener(gcn::ActionListener *actionListener)
 {
 	listbox.addActionListener(actionListener);
+}
+
+/**
+**  Add an action listener
+*/
+void ImageListBoxWidget::addActionListener(gcn::ActionListener *actionListener)
+{
+	listbox.addActionListener(actionListener);
+}
+
+
+
+/**
+**  Draw the list box  
+**
+**  @param  graphics Graphics to use
+*/
+void ImageListBoxWidget::draw(gcn::Graphics *graphics)
+{
+	CGraphic *img = NULL;
+
+	// Check if we have all required graphics
+	if (!this->upButtonImage || !this->downButtonImage || !this->leftButtonImage || !this->rightButtonImage
+		|| !this->upPressedButtonImage || !this->downPressedButtonImage || !this->leftPressedButtonImage || !this->rightPressedButtonImage
+		|| !this->markerImage || !this->hBarButtonImage || !this->vBarButtonImage) {
+			fprintf(stderr, "Not all graphics for ImageListBoxWidget were set\n");
+			ExitFatal(1);
+	}
+
+	gcn::Rectangle rect = getContentDimension();
+	img = itemImage;
+	img->Resize(rect.width, img->getHeight());
+	int y = 0;
+	while (y + img->getHeight() <= rect.height) {
+		graphics->drawImage(img, 0, 0, 0, y, getWidth(), img->getHeight());
+		y += img->getHeight();
+	}
+	img->SetOriginalSize();
+
+	if (mVBarVisible)
+	{
+		if (mUpButtonPressed) {
+			this->drawUpPressedButton(graphics);
+		} else {
+			this->drawUpButton(graphics);
+		}
+		if (mDownButtonPressed) {
+			this->drawDownPressedButton(graphics);
+		} else {
+			this->drawDownButton(graphics);
+		}
+		this->drawVBar(graphics);
+		this->drawVMarker(graphics);
+	}
+	if (mHBarVisible)
+	{
+		if (mLeftButtonPressed) {
+			this->drawLeftPressedButton(graphics);
+		} else {
+			this->drawLeftButton(graphics);
+		}
+		if (mRightButtonPressed) {
+			this->drawRightPressedButton(graphics);
+		} else {
+			this->drawRightButton(graphics);
+		}
+		this->drawHBar(graphics);
+		this->drawHMarker(graphics);
+	}
+	if (mContent)
+	{
+		gcn::Rectangle contdim = mContent->getDimension();
+		graphics->pushClipArea(getContentDimension());
+
+		if (mContent->getBorderSize() > 0)
+		{
+			gcn::Rectangle rec = mContent->getDimension();
+			rec.x -= mContent->getBorderSize();
+			rec.y -= mContent->getBorderSize();
+			rec.width += 2 * mContent->getBorderSize();
+			rec.height += 2 * mContent->getBorderSize();
+			graphics->pushClipArea(rec);
+			mContent->drawBorder(graphics);
+			graphics->popClipArea();
+		}
+
+		graphics->pushClipArea(contdim);
+		mContent->draw(graphics);
+		graphics->popClipArea();
+		graphics->popClipArea();
+	}
+}
+
+/**
+**  Draw the list box border 
+**
+**  @param  graphics Graphics to use
+*/
+void ImageListBoxWidget::drawBorder(gcn::Graphics *graphics)
+{
+	gcn::Color faceColor = getBaseColor();
+	gcn::Color highlightColor, shadowColor;
+	int alpha = getBaseColor().a;
+	int width = getWidth() + getBorderSize() * 2 - 1;
+	int height = getHeight() + getBorderSize() * 2 - 1;
+	highlightColor = faceColor + 0x303030;
+	highlightColor.a = alpha;
+	shadowColor = faceColor - 0x303030;
+	shadowColor.a = alpha;
+
+	unsigned int i;
+	for (i = 0; i < getBorderSize(); ++i)
+	{
+		graphics->setColor(shadowColor);
+		graphics->drawLine(i,i, width - i, i);
+		graphics->drawLine(i,i + 1, i, height - i - 1);
+		graphics->setColor(highlightColor);
+		graphics->drawLine(width - i,i + 1, width - i, height - i);
+		graphics->drawLine(i,height - i, width - i - 1, height - i);
+	}
+}
+
+void ImageListBoxWidget::drawUpButton(gcn::Graphics* graphics)
+{
+	gcn::Rectangle dim = getUpButtonDimension();
+	graphics->pushClipArea(dim);
+
+	CGraphic *img = NULL;
+
+	img = upButtonImage;
+	graphics->drawImage(img, 0, 0, 0, 0, img->getWidth(), img->getHeight());
+	graphics->popClipArea();
+}
+
+void ImageListBoxWidget::drawDownButton(gcn::Graphics* graphics)
+{
+	gcn::Rectangle dim = getDownButtonDimension();
+	graphics->pushClipArea(dim);
+
+	CGraphic *img = NULL;
+
+	img = downButtonImage;
+	graphics->drawImage(img, 0, 0, 0, 0, img->getWidth(), img->getHeight());
+	graphics->popClipArea();
+}
+
+void ImageListBoxWidget::drawLeftButton(gcn::Graphics* graphics)
+{
+	gcn::Rectangle dim = getLeftButtonDimension();
+	graphics->pushClipArea(dim);
+
+	CGraphic *img = NULL;
+
+	img = leftButtonImage;
+	graphics->drawImage(img, 0, 0, 0, 0, img->getWidth(), img->getHeight());
+	graphics->popClipArea();
+}
+
+void ImageListBoxWidget::drawRightButton(gcn::Graphics* graphics)
+{
+	gcn::Rectangle dim = getRightButtonDimension();
+	graphics->pushClipArea(dim);
+
+	CGraphic *img = NULL;
+
+	img = rightButtonImage;
+	graphics->drawImage(img, 0, 0, 0, 0, img->getWidth(), img->getHeight());
+	graphics->popClipArea();
+}
+
+void ImageListBoxWidget::drawUpPressedButton(gcn::Graphics* graphics)
+{
+	gcn::Rectangle dim = getUpButtonDimension();
+	graphics->pushClipArea(dim);
+
+	CGraphic *img = NULL;
+
+	img = upPressedButtonImage;
+	graphics->drawImage(img, 0, 0, 0, 0, img->getWidth(), img->getHeight());
+	graphics->popClipArea();
+}
+
+void ImageListBoxWidget::drawDownPressedButton(gcn::Graphics* graphics)
+{
+	gcn::Rectangle dim = getDownButtonDimension();
+	graphics->pushClipArea(dim);
+
+	CGraphic *img = NULL;
+
+	img = downPressedButtonImage;
+	graphics->drawImage(img, 0, 0, 0, 0, img->getWidth(), img->getHeight());
+	graphics->popClipArea();
+}
+
+void ImageListBoxWidget::drawLeftPressedButton(gcn::Graphics* graphics)
+{
+	gcn::Rectangle dim = getLeftButtonDimension();
+	graphics->pushClipArea(dim);
+
+	CGraphic *img = NULL;
+
+	img = leftPressedButtonImage;
+	graphics->drawImage(img, 0, 0, 0, 0, img->getWidth(), img->getHeight());
+	graphics->popClipArea();
+}
+
+void ImageListBoxWidget::drawRightPressedButton(gcn::Graphics* graphics)
+{
+	gcn::Rectangle dim = getRightButtonDimension();
+	graphics->pushClipArea(dim);
+
+	CGraphic *img = NULL;
+
+	img = rightPressedButtonImage;
+	graphics->drawImage(img, 0, 0, 0, 0, img->getWidth(), img->getHeight());
+	graphics->popClipArea();
+}
+
+void ImageListBoxWidget::drawHBar(gcn::Graphics *graphics)
+{
+	gcn::Rectangle dim = getHorizontalBarDimension();
+	graphics->pushClipArea(dim);
+
+	CGraphic *img = NULL;
+
+	img = hBarButtonImage;
+	img->Resize(dim.width, dim.height);
+	graphics->drawImage(img, 0, 0, 0, 0, img->getWidth(), img->getHeight());
+	img->SetOriginalSize();
+
+	graphics->popClipArea();
+}
+
+void ImageListBoxWidget::drawVBar(gcn::Graphics *graphics)
+{
+	gcn::Rectangle dim = getVerticalBarDimension();
+	graphics->pushClipArea(dim);
+
+	CGraphic *img = NULL;
+
+	img = vBarButtonImage;
+	img->Resize(dim.width, dim.height);
+	graphics->drawImage(img, 0, 0, 0, 0, img->getWidth(), img->getHeight());
+	img->SetOriginalSize();
+
+	graphics->popClipArea();
+}
+
+void ImageListBoxWidget::drawHMarker(gcn::Graphics *graphics)
+{
+	gcn::Rectangle dim = getHorizontalMarkerDimension();
+	graphics->pushClipArea(dim);
+
+	CGraphic *img = NULL;
+
+	img = markerImage;
+	graphics->drawImage(img, 0, 0, 0, 0, img->getWidth(), img->getHeight());
+
+	graphics->popClipArea();
+}
+
+void ImageListBoxWidget::drawVMarker(gcn::Graphics *graphics)
+{
+	gcn::Rectangle dim = getVerticalMarkerDimension();
+	graphics->pushClipArea(dim);
+
+	CGraphic *img = NULL;
+
+	img = markerImage;
+	graphics->drawImage(img, 0, 0, 0, 0, img->getWidth(), img->getHeight());
+
+	graphics->popClipArea();
+}
+
+gcn::Rectangle ImageListBoxWidget::getVerticalMarkerDimension()
+{
+	if (!mVBarVisible)
+	{
+		return gcn::Rectangle(0, 0, 0, 0);
+	}
+
+	int length, pos;
+	gcn::Rectangle barDim = getVerticalBarDimension();
+
+	if (mContent && mContent->getHeight() != 0)
+	{
+		length = this->markerImage->getHeight();
+	}
+	else
+	{
+		length = barDim.height;
+	}
+
+	if (length < mScrollbarWidth)
+	{
+		length = mScrollbarWidth;
+	}
+
+	if (length > barDim.height)
+	{
+		length = barDim.height;
+	}
+
+	if (getVerticalMaxScroll() != 0)
+	{
+		pos = ((barDim.height - length) * getVerticalScrollAmount())
+			/ getVerticalMaxScroll();
+	}
+	else
+	{
+		pos = 0;
+	}
+
+	return gcn::Rectangle(barDim.x, barDim.y + pos, mScrollbarWidth, length);
+}
+
+gcn::Rectangle ImageListBoxWidget::getHorizontalMarkerDimension()
+{
+	if (!mHBarVisible)
+	{
+		return gcn::Rectangle(0, 0, 0, 0);
+	}
+
+	int length, pos;
+	gcn::Rectangle barDim = getHorizontalBarDimension();
+
+	if (mContent && mContent->getWidth() != 0)
+	{
+		length = this->markerImage->getHeight();
+	}
+	else
+	{
+		length = barDim.width;
+	}
+
+	if (length < mScrollbarWidth)
+	{
+		length = mScrollbarWidth;
+	}
+
+	if (length > barDim.width)
+	{
+		length = barDim.width;
+	}
+
+	if (getHorizontalMaxScroll() != 0)
+	{
+		pos = ((barDim.width - length) * getHorizontalScrollAmount())
+			/ getHorizontalMaxScroll();
+	}
+	else
+	{
+		pos = 0;
+	}
+
+	return gcn::Rectangle(barDim.x + pos, barDim.y, length, mScrollbarWidth);
 }
 
 
@@ -1383,7 +2074,255 @@ void DropDownWidget::setSize(int width, int height)
 }
 
 /*----------------------------------------------------------------------------
---  DropDownWidget
+--  ImageDropDownWidget
+----------------------------------------------------------------------------*/
+
+/**
+**  Set the list
+*/
+
+void ImageDropDownWidget::setListModel(LuaListModel *listModel)
+{
+	Assert(mScrollArea && mScrollArea->getContent() != NULL);
+
+	mListBox.setListModel(listModel);
+
+	if (mListBox.getSelected() < 0)
+	{
+		mListBox.setSelected(0);
+	}
+
+	adjustHeight();
+}
+
+void ImageDropDownWidget::setList(lua_State *lua, lua_Object *lo)
+{
+	listmodel.setList(lua, lo);
+	setListModel(&listmodel);
+}
+
+/**
+**  Set the drop down size
+*/
+void ImageDropDownWidget::setSize(int width, int height)
+{
+	DropDown::setSize(width, height);
+	this->getListBox()->setSize(width, height);
+}
+
+void ImageDropDownWidget::draw(gcn::Graphics *graphics)
+{
+	Assert(mScrollArea && mScrollArea->getContent() != NULL);
+	int h;
+
+	if (mDroppedDown)
+	{
+		h = mOldH;
+	}
+	else
+	{
+		h = getHeight();
+	}
+
+	CGraphic *img = this->itemImage;
+	if (!this->itemImage || !this->DownNormalImage || !this->DownPressedImage) {
+		fprintf(stderr, "Not all graphics for ImageDropDownWidget were set\n");
+		ExitFatal(1);
+	}
+
+	int alpha = getBaseColor().a;
+	gcn::Color faceColor = getBaseColor();
+	faceColor.a = alpha;
+	gcn::Color highlightColor = faceColor + 0x303030;
+	highlightColor.a = alpha;
+	gcn::Color shadowColor = faceColor - 0x303030;
+	shadowColor.a = alpha;
+
+
+	img->Resize(getWidth(), h);
+	graphics->drawImage(img, 0, 0, 0, 0, getWidth(), h);
+	img->SetOriginalSize();
+	
+	graphics->setFont(getFont());
+
+	if (mListBox.getListModel() && mListBox.getSelected() >= 0)
+	{
+		graphics->drawText(mListBox.getListModel()->getElementAt(mListBox.getSelected()),
+			1, (h - getFont()->getHeight()) / 2);
+	}
+
+	if (hasFocus())
+	{
+		graphics->drawRectangle(gcn::Rectangle(0, 0, getWidth() - h, h));
+	}
+
+	drawButton(graphics);
+
+	if (mDroppedDown)
+	{
+		graphics->pushClipArea(mScrollArea->getDimension());
+		mScrollArea->draw(graphics);
+		graphics->popClipArea();
+
+		// Draw two lines separating the ListBox with se selected
+		// element view.
+		graphics->setColor(highlightColor);
+		graphics->drawLine(0, h, getWidth(), h);
+		graphics->setColor(shadowColor);
+		graphics->drawLine(0, h + 1,getWidth(),h + 1);
+	}
+}
+
+void ImageDropDownWidget::drawBorder(gcn::Graphics *graphics)
+{
+	gcn::Color faceColor = getBaseColor();
+	gcn::Color highlightColor, shadowColor;
+	int alpha = getBaseColor().a;
+	int width = getWidth() + getBorderSize() * 2 - 1;
+	int height = getHeight() + getBorderSize() * 2 - 1;
+	highlightColor = faceColor + 0x303030;
+	highlightColor.a = alpha;
+	shadowColor = faceColor - 0x303030;
+	shadowColor.a = alpha;
+
+	unsigned int i;
+	for (i = 0; i < getBorderSize(); ++i)
+	{
+		graphics->setColor(shadowColor);
+		graphics->drawLine(i,i, width - i, i);
+		graphics->drawLine(i,i + 1, i, height - i - 1);
+		graphics->setColor(highlightColor);
+		graphics->drawLine(width - i,i + 1, width - i, height - i);
+		graphics->drawLine(i,height - i, width - i - 1, height - i);
+	}
+}
+
+void ImageDropDownWidget::drawButton(gcn::Graphics *graphics)
+{
+	int h;
+	if (mDroppedDown)
+	{
+		h = mOldH;
+	}
+	else
+	{
+		h = getHeight();
+	}
+	int x = getWidth() - h;
+	int y = 0;
+
+	CGraphic *img = NULL;
+	if (mDroppedDown) {
+		img = this->DownPressedImage;
+	} else {
+		img = this->DownNormalImage;
+	}
+	img->Resize(h, h);
+	graphics->drawImage(img, 0, 0, x, y, h, h);
+	img->SetOriginalSize();
+}
+
+int ImageDropDownWidget::getSelected()
+{
+	Assert(mScrollArea && mScrollArea->getContent() != NULL);
+
+	return mListBox.getSelected();
+}
+
+void ImageDropDownWidget::setSelected(int selected)
+{
+	Assert(mScrollArea && mScrollArea->getContent() != NULL);
+
+	if (selected >= 0)
+	{
+		mListBox.setSelected(selected);
+	}
+}
+
+void ImageDropDownWidget::adjustHeight()
+{
+	Assert(mScrollArea && mScrollArea->getContent() != NULL);
+
+	int listBoxHeight = mListBox.getHeight();
+	int h2 = mOldH ? mOldH : getFont()->getHeight();
+
+	setHeight(h2);
+
+	// The addition/subtraction of 2 compensates for the seperation lines
+	// seperating the selected element view and the scroll area.
+
+	if (mDroppedDown && getParent())
+	{
+		int h = getParent()->getHeight() - getY();
+
+		if (listBoxHeight > h - h2 - 2)
+		{
+			mScrollArea->setHeight(h - h2 - 2);
+			setHeight(h);
+		}
+		else
+		{
+			setHeight(listBoxHeight + h2 + 2);
+			mScrollArea->setHeight(listBoxHeight);
+		}
+	}
+
+	mScrollArea->setWidth(getWidth());
+	mScrollArea->setPosition(0, h2 + 2);
+}
+
+void ImageDropDownWidget::setListBox(ImageListBox *listBox)
+{
+	listBox->setSelected(mListBox.getSelected());
+	listBox->setListModel(mListBox.getListModel());
+	listBox->addActionListener(this);
+
+	if (mScrollArea->getContent() != NULL)
+	{
+		mListBox.removeActionListener(this);
+	}
+
+	mListBox = *listBox;
+
+	mScrollArea->setContent(&mListBox);
+
+	if (mListBox.getSelected() < 0)
+	{
+		mListBox.setSelected(0);
+	}
+}
+
+void ImageDropDownWidget::setFont(gcn::Font *font)
+{
+	gcn::Widget::setFont(font);
+	mListBox.setFont(font);
+}
+
+void ImageDropDownWidget::_mouseInputMessage(const gcn::MouseInput &mouseInput)
+{
+	gcn::BasicContainer::_mouseInputMessage(mouseInput);
+
+	if (mDroppedDown)
+	{
+		Assert(mScrollArea && mScrollArea->getContent() != NULL);
+
+		if (mouseInput.y >= mOldH)
+		{
+			gcn::MouseInput mi = mouseInput;
+			mi.y -= mScrollArea->getY();
+			mScrollArea->_mouseInputMessage(mi);
+
+			if (mListBox.hasFocus())
+			{
+				mi.y -= mListBox.getY();
+				mListBox._mouseInputMessage(mi);
+			}
+		}
+	}
+}
+
+/*----------------------------------------------------------------------------
+--  StatBoxWidget
 ----------------------------------------------------------------------------*/
 
 /**

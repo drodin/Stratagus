@@ -79,14 +79,12 @@ void AddTranslation(const char *str1, const char *str2)
 */
 void LoadPO(const char *file)
 {
-	char fullfile[1024];
-
 	if (!file || !*file) {
 		return;
 	}
 
-	LibraryFileName(file, fullfile, sizeof(fullfile));
-	FILE *fd = fopen(fullfile, "rb");
+	const std::string fullfile = LibraryFileName(file);
+	FILE *fd = fopen(fullfile.c_str(), "rb");
 	if (!fd) {
 		fprintf(stderr, "Could not open file: %s\n", file);
 		return;
@@ -184,6 +182,7 @@ void LoadPO(const char *file)
 **/
 void SetTranslationsFiles(const char *stratagusfile, const char *gamefile)
 {
+	Entries.clear();
 	LoadPO(stratagusfile);
 	LoadPO(gamefile);
 }

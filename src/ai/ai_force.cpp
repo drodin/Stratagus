@@ -10,7 +10,7 @@
 //
 /**@name ai_force.cpp - AI force functions. */
 //
-//      (c) Copyright 2001-2005 by Lutz Sammer and Jimmy Salmon
+//      (c) Copyright 2001-2015 by Lutz Sammer, Jimmy Salmon and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -44,6 +44,7 @@
 #include "depend.h"
 #include "map.h"
 #include "pathfinder.h"
+#include "tileset.h"
 #include "unit.h"
 #include "unit_find.h"
 #include "unittype.h"
@@ -54,18 +55,21 @@
 #define AIATTACK_RANGE 0
 #define AIATTACK_ALLMAP 1
 #define AIATTACK_BUILDING 2
+#define AIATTACK_AGRESSIVE 3
 
 template <const int FIND_TYPE>
 class AiForceEnemyFinder
 {
 public:
-	AiForceEnemyFinder(int force, const CUnit **enemy) : enemy(enemy) {
+	AiForceEnemyFinder(int force, const CUnit **enemy) : enemy(enemy)
+	{
 		Assert(enemy != NULL);
 		*enemy = NULL;
 		AiPlayer->Force[force].Units.for_each_if(*this);
 	}
 
-	AiForceEnemyFinder(AiForce &force, const CUnit **enemy) : enemy(enemy) {
+	AiForceEnemyFinder(AiForce &force, const CUnit **enemy) : enemy(enemy)
+	{
 		Assert(enemy != NULL);
 		*enemy = NULL;
 		force.Units.for_each_if(*this);
@@ -73,7 +77,8 @@ public:
 
 	bool found() const { return *enemy != NULL; }
 
-	bool operator()(const CUnit *const unit) const {
+	bool operator()(const CUnit *const unit) const
+	{
 		if (unit->Type->CanAttack == false) {
 			return *enemy == NULL;
 		}
@@ -82,8 +87,14 @@ public:
 		} else if (FIND_TYPE == AIATTACK_ALLMAP) {
 			*enemy = AttackUnitsInDistance(*unit, MaxMapWidth);
 		} else if (FIND_TYPE == AIATTACK_BUILDING) {
-			*enemy = AttackUnitsInDistance(*unit, MaxMapWidth, true);
-			Assert(!*enemy || (*enemy)->Type->Building);
+			*enemy = AttackUnitsInDistance(*unit, MaxMapWidth, IsBuildingType());
+			Assert(!*enemy);
+			if (*enemy == NULL || !(*enemy)->Type->Building) {
+				*enemy = AttackUnitsInDistance(*unit, MaxMapWidth);
+			}
+		} else if (FIND_TYPE == AIATTACK_AGRESSIVE) {
+			*enemy = AttackUnitsInDistance(*unit, MaxMapWidth, IsAggresiveUnit());
+			Assert(!*enemy || (*enemy)->IsAgressive());
 			if (*enemy == NULL) {
 				*enemy = AttackUnitsInDistance(*unit, MaxMapWidth);
 			}
@@ -92,6 +103,19 @@ public:
 	}
 private:
 	const CUnit **enemy;
+};
+
+class IsAnAlliedUnitOf
+{
+public:
+	explicit IsAnAlliedUnitOf(const CPlayer &_player) : player(&_player) {}
+	bool operator()(const CUnit *unit) const
+	{
+		return unit->IsVisibleAsGoal(*player) && (unit->Player->Index == player->Index
+												  || unit->IsAllied(*player));
+	}
+private:
+	const CPlayer *player;
 };
 
 /*----------------------------------------------------------------------------
@@ -120,10 +144,10 @@ void AiResetUnitTypeEquiv()
 **  @param a  the first unittype
 **  @param b  the second unittype
 */
-void AiNewUnitTypeEquiv(CUnitType *a, CUnitType *b)
+void AiNewUnitTypeEquiv(const CUnitType &a, const CUnitType &b)
 {
-	int find = UnitTypeEquivs[a->Slot];
-	int replace = UnitTypeEquivs[b->Slot];
+	int find = UnitTypeEquivs[a.Slot];
+	int replace = UnitTypeEquivs[b.Slot];
 
 	// Always record equivalences with the lowest unittype.
 	if (find < replace) {
@@ -165,14 +189,15 @@ int AiFindUnitTypeEquiv(const CUnitType &unittype, int *result)
 class UnitTypePrioritySorter_Decreasing
 {
 public:
-	bool operator()(int lhs, int rhs) const {
-		return UnitTypes[lhs]->Priority > UnitTypes[rhs]->Priority;
+	bool operator()(int lhs, int rhs) const
+	{
+		return UnitTypes[lhs]->MapDefaultStat.Variables[PRIORITY_INDEX].Value > UnitTypes[rhs]->MapDefaultStat.Variables[PRIORITY_INDEX].Value;
 	}
 };
 
 /**
 **  Find All unittypes equivalent to a given one, and which are available
-**  UnitType are returned in the prefered order ( ie palladin >> knight... )
+**  UnitType are returned in the preferred order (ie palladin >> knight...)
 **
 **  @param unittype     The unittype to find equivalence for
 **  @param usableTypes  int array which will hold the result. (Size UnitTypeMax+1)
@@ -203,11 +228,13 @@ int AiFindAvailableUnitTypeEquiv(const CUnitType &unittype, int *usableTypes)
 class AiForceCounter
 {
 public:
-	AiForceCounter(CUnitCache &units, unsigned int *d, const size_t len) : data(d) {
+	AiForceCounter(CUnitCache &units, unsigned int *d, const size_t len) : data(d)
+	{
 		memset(data, 0, len);
 		units.for_each(*this);
 	}
-	inline void operator()(const CUnit *const unit) const {
+	inline void operator()(const CUnit *const unit) const
+	{
 		data[UnitTypeEquivs[unit->Type->Slot]]++;
 	}
 private:
@@ -226,7 +253,7 @@ void AiForce::CountTypes(unsigned int *counter, const size_t len)
 **
 **  @return       True if it fits, false otherwise.
 */
-bool AiForce::IsBelongsTo(const CUnitType *type)
+bool AiForce::IsBelongsTo(const CUnitType &type)
 {
 	bool flag = false;
 	unsigned int counter[UnitTypeMax + 1];
@@ -241,7 +268,7 @@ bool AiForce::IsBelongsTo(const CUnitType *type)
 		const int slot = aitype.Type->Slot;
 
 		if (counter[slot] < aitype.Want) {
-			if (UnitTypeEquivs[type->Slot] == slot) {
+			if (UnitTypeEquivs[type.Slot] == slot) {
 				if (counter[slot] < aitype.Want - 1) {
 					Completed = false;
 				}
@@ -285,12 +312,67 @@ void AiForce::RemoveDeadUnit()
 	}
 }
 
+class AiForceRallyPointFinder
+{
+public:
+	AiForceRallyPointFinder(const CUnit &startUnit, int distance, const Vec2i &startPos, Vec2i *resultPos) :
+		startUnit(startUnit), distance(distance), startPos(startPos),
+		movemask(startUnit.Type->MovementMask & ~(MapFieldLandUnit | MapFieldAirUnit | MapFieldSeaUnit | MapFieldBuilding)),
+		resultPos(resultPos)
+	{}
+	VisitResult Visit(TerrainTraversal &terrainTraversal, const Vec2i &pos, const Vec2i &from);
+private:
+	const CUnit &startUnit;
+	const int distance;
+	const Vec2i startPos;
+	const int movemask;
+	Vec2i *resultPos;
+};
+
+VisitResult AiForceRallyPointFinder::Visit(TerrainTraversal &terrainTraversal, const Vec2i &pos, const Vec2i &from)
+{
+	const int minDist = 15;
+	if (AiEnemyUnitsInDistance(*startUnit.Player, NULL, pos, minDist) == false
+		&& Distance(pos, startPos) <= abs(distance - minDist)) {
+		*resultPos = pos;
+		return VisitResult_Finished;
+	}
+	if (CanMoveToMask(pos, movemask)) { // reachable
+		return VisitResult_Ok;
+	} else { // unreachable
+		return VisitResult_DeadEnd;
+	}
+}
+
+bool AiForce::NewRallyPoint(const Vec2i &startPos, Vec2i *resultPos)
+{
+	Assert(this->Units.size() > 0);
+	const CUnit &leader = *(this->Units[0]);
+	const int distance = leader.MapDistanceTo(startPos);
+
+	WaitOnRallyPoint = AI_WAIT_ON_RALLY_POINT;
+
+	TerrainTraversal terrainTraversal;
+
+	terrainTraversal.SetSize(Map.Info.MapWidth, Map.Info.MapHeight);
+	terrainTraversal.Init();
+
+	Assert(Map.Info.IsPointOnMap(startPos));
+	terrainTraversal.PushPos(startPos);
+
+	AiForceRallyPointFinder aiForceRallyPointFinder(leader, distance, leader.tilePos, resultPos);
+
+	return terrainTraversal.Run(aiForceRallyPointFinder);
+}
+
 void AiForce::Attack(const Vec2i &pos)
 {
+	bool isDefenceForce = false;
 	RemoveDeadUnit();
 
 	if (Units.size() == 0) {
 		this->Attacking = false;
+		this->State = AiForceAttackingState_Waiting;
 		return;
 	}
 	if (!this->Attacking) {
@@ -303,16 +385,39 @@ void AiForce::Attack(const Vec2i &pos)
 	}
 	Vec2i goalPos(pos);
 
+	bool isNaval = false;
+	for (size_t i = 0; i != this->Units.size(); ++i) {
+		CUnit *const unit = this->Units[i];
+		if (unit->Type->UnitType == UnitTypeNaval && unit->Type->CanAttack) {
+			isNaval = true;
+			break;
+		}
+	}
+	bool isTransporter = false;
+	for (size_t i = 0; i != this->Units.size(); ++i) {
+		CUnit *const unit = this->Units[i];
+		if (unit->Type->CanTransport() && unit->IsAgressive() == false) {
+			isTransporter = true;
+			break;
+		}
+	}
 	if (Map.Info.IsPointOnMap(goalPos) == false) {
 		/* Search in entire map */
 		const CUnit *enemy = NULL;
-		AiForceEnemyFinder<AIATTACK_BUILDING>(*this, &enemy);
+		if (isTransporter) {
+			AiForceEnemyFinder<AIATTACK_AGRESSIVE>(*this, &enemy);
+		} else if (isNaval) {
+			AiForceEnemyFinder<AIATTACK_ALLMAP>(*this, &enemy);
+		} else {
+			AiForceEnemyFinder<AIATTACK_BUILDING>(*this, &enemy);
+		}
 		if (enemy) {
 			goalPos = enemy->tilePos;
 		}
+	} else {
+		isDefenceForce = true;
 	}
-	this->GoalPos = goalPos;
-	if (Map.Info.IsPointOnMap(goalPos) == false) {
+	if (Map.Info.IsPointOnMap(goalPos) == false || isTransporter) {
 		DebugPrint("%d: Need to plan an attack with transporter\n" _C_ AiPlayer->Player->Index);
 		if (State == AiForceAttackingState_Waiting && !PlanAttack()) {
 			DebugPrint("%d: Can't transport\n" _C_ AiPlayer->Player->Index);
@@ -320,8 +425,26 @@ void AiForce::Attack(const Vec2i &pos)
 		}
 		return;
 	}
+	if (this->State == AiForceAttackingState_Waiting && isDefenceForce == false) {
+		Vec2i resultPos;
+		NewRallyPoint(goalPos, &resultPos);
+		this->GoalPos = resultPos;
+		this->State = AiForceAttackingState_GoingToRallyPoint;
+	} else {
+		this->GoalPos = goalPos;
+		this->State = AiForceAttackingState_Attacking;
+	}
 	//  Send all units in the force to enemy.
-	this->State = AiForceAttackingState_Attacking;
+
+	CUnit *leader = NULL;
+	for (size_t i = 0; i != this->Units.size(); ++i) {
+		CUnit *const unit = this->Units[i];
+
+		if (unit->IsAgressive()) {
+			leader = unit;
+			break;
+		}
+	}
 	for (size_t i = 0; i != this->Units.size(); ++i) {
 		CUnit *const unit = this->Units[i];
 
@@ -329,10 +452,14 @@ void AiForce::Attack(const Vec2i &pos)
 			const int delay = i / 5; // To avoid lot of CPU consuption, send them with a small time difference.
 
 			unit->Wait = delay;
-			if (unit->Type->CanAttack) {
-				CommandAttack(*unit, goalPos,  NULL, FlushCommands);
+			if (unit->IsAgressive()) {
+				CommandAttack(*unit, this->GoalPos,  NULL, FlushCommands);
 			} else {
-				CommandMove(*unit, goalPos, FlushCommands);
+				if (leader) {
+					CommandDefend(*unit, *leader, FlushCommands);
+				} else {
+					CommandMove(*unit, this->GoalPos, FlushCommands);
+				}
 			}
 		}
 	}
@@ -352,18 +479,19 @@ void AiForce::ReturnToHome()
 	this->GoalPos = invalidPos;
 	this->Defending = false;
 	this->Attacking = false;
+	this->State = AiForceAttackingState_Waiting;
 }
 
 AiForceManager::AiForceManager()
 {
-	forces.resize(3);
+	forces.resize(AI_MAX_FORCES);
 	memset(script, -1, AI_MAX_FORCES * sizeof(char));
 }
 
-unsigned int AiForceManager::FindFreeForce(AiForceRole role)
+unsigned int AiForceManager::FindFreeForce(AiForceRole role, int begin)
 {
 	/* find free force */
-	unsigned int f = 0;
+	unsigned int f = begin;
 	while (f < forces.size() && (forces[f].State > AiForceAttackingState_Free)) {
 		++f;
 	};
@@ -373,6 +501,30 @@ unsigned int AiForceManager::FindFreeForce(AiForceRole role)
 	forces[f].State = AiForceAttackingState_Waiting;
 	forces[f].Role = role;
 	return f;
+}
+
+/**
+**  Find unit in force
+**
+**  @param    unit  Unit to search for.
+**
+**  @return   Force number, or -1 if not found
+*/
+
+int AiForceManager::GetForce(const CUnit &unit)
+{
+	for (unsigned int i = 0; i < forces.size(); ++i) {
+		AiForce &force = forces[i];
+
+		for (unsigned int j = 0; j < force.Units.size(); ++j) {
+			CUnit &aiunit = *force.Units[j];
+
+			if (UnitNumber(unit) == UnitNumber(aiunit)) {
+				return i;
+			}
+		}
+	}
+	return -1;
 }
 
 /**
@@ -390,22 +542,31 @@ void AiForceManager::RemoveDeadUnit()
 **
 **  @param unit  Unit to assign to force.
 */
-bool AiForceManager::Assign(CUnit &unit)
+bool AiForceManager::Assign(CUnit &unit, int force)
 {
 	if (unit.GroupId != 0) {
 		return false;
 	}
-	// Check to which force it belongs
-	for (unsigned int i = 0; i < forces.size(); ++i) {
-		AiForce &force = forces[i];
-		// No troops for attacking force
-		if (force.IsAttacking()) {
-			continue;
-		}
-		if (force.IsBelongsTo(unit.Type)) {
-			force.Insert(unit);
-			unit.GroupId = i + 1;
+	if (force != -1) {
+		AiForce &f = forces[AiPlayer->Force.getScriptForce(force)];
+		if (f.IsBelongsTo(*unit.Type)) {
+			f.Insert(unit);
+			unit.GroupId = force + 1;
 			return true;
+		}
+	} else {
+		// Check to which force it belongs
+		for (unsigned int i = 0; i < forces.size(); ++i) {
+			AiForce &f = forces[i];
+			// No troops for attacking force
+			if (f.IsAttacking()) {
+				continue;
+			}
+			if (f.IsBelongsTo(*unit.Type)) {
+				f.Insert(unit);
+				unit.GroupId = i + 1;
+				return true;
+			}
 		}
 	}
 	return false;
@@ -414,7 +575,7 @@ bool AiForceManager::Assign(CUnit &unit)
 void AiForceManager::CheckUnits(int *counter)
 {
 	int attacking[UnitTypeMax];
-	const int *unit_types_count = AiPlayer->Player->UnitTypesCount;
+	const int *unit_types_count = AiPlayer->Player->UnitTypesAiActiveCount;
 
 	memset(attacking, 0, sizeof(attacking));
 
@@ -439,9 +600,15 @@ void AiForceManager::CheckUnits(int *counter)
 		}
 		for (unsigned int j = 0; j < force.UnitTypes.size(); ++j) {
 			const AiUnitType &aiut = force.UnitTypes[j];
-			const int t = aiut.Type->Slot;
+			const unsigned int t = aiut.Type->Slot;
 			const int wantedCount = aiut.Want;
-			const int requested = wantedCount - (unit_types_count[t] + counter[t] - attacking[t]);
+			int e = unit_types_count[t];
+			if (t < AiHelpers.Equiv.size()) {
+				for (unsigned int j = 0; j < AiHelpers.Equiv[t].size(); ++j) {
+					e += unit_types_count[AiHelpers.Equiv[t][j]->Slot];
+				}
+			}
+			const int requested = wantedCount - (e + counter[t] - attacking[t]);
 
 			if (requested > 0) {  // Request it.
 				AiAddUnitTypeRequest(*aiut.Type, requested);
@@ -474,7 +641,7 @@ bool AiAssignToForce(CUnit &unit)
 /**
 **  Assign free units to force.
 */
-void AiAssignFreeUnitsToForce()
+void AiAssignFreeUnitsToForce(int force)
 {
 	const int n = AiPlayer->Player->GetUnitCount();
 
@@ -483,7 +650,7 @@ void AiAssignFreeUnitsToForce()
 		CUnit &unit = AiPlayer->Player->GetUnit(i);
 
 		if (unit.Active && unit.GroupId == 0) {
-			AiPlayer->Force.Assign(unit);
+			AiPlayer->Force.Assign(unit, force);
 		}
 	}
 }
@@ -499,7 +666,7 @@ void AiAttackWithForceAt(unsigned int force, int x, int y)
 {
 	const Vec2i pos(x, y);
 
-	if (!(force < AI_MAX_FORCES)) {
+	if (!(force < AI_MAX_FORCE_INTERNAL)) {
 		DebugPrint("Force out of range: %d" _C_ force);
 		return ;
 	}
@@ -519,33 +686,34 @@ void AiAttackWithForceAt(unsigned int force, int x, int y)
 */
 void AiAttackWithForce(unsigned int force)
 {
-	if (!(force < AI_MAX_FORCES)) {
+	if (!(force < AI_MAX_FORCE_INTERNAL)) {
 		DebugPrint("Force out of range: %d" _C_ force);
 		return ;
 	}
 
+	unsigned int intForce = AiPlayer->Force.getScriptForce(force);
 	// The AI finds the first unassigned force, moves all data to it and cleans
 	// the first force, so we can reuse it
-	if (!AiPlayer->Force[force].Defending) {
+	if (!AiPlayer->Force[intForce].Defending) {
 		unsigned int top;
-		unsigned int f = AiPlayer->Force.FindFreeForce();
+		unsigned int f = AiPlayer->Force.FindFreeForce(AiForceRoleDefault, AI_MAX_FORCE_INTERNAL);
 		AiPlayer->Force[f].Reset();
+		AiPlayer->Force[f].FormerForce = force;
+		AiPlayer->Force[f].Role = AiPlayer->Force[intForce].Role;
 
-		AiPlayer->Force[f].Role = AiPlayer->Force[force].Role;
-
-		while (AiPlayer->Force[force].Size()) {
-			CUnit &aiunit = *AiPlayer->Force[force].Units[AiPlayer->Force[force].Size() - 1];
+		while (AiPlayer->Force[intForce].Size()) {
+			CUnit &aiunit = *AiPlayer->Force[intForce].Units[AiPlayer->Force[intForce].Size() - 1];
 			aiunit.GroupId = f + 1;
-			AiPlayer->Force[force].Units.Remove(&aiunit);
+			AiPlayer->Force[intForce].Units.Remove(&aiunit);
 			AiPlayer->Force[f].Units.Insert(&aiunit);
 		}
 
-		while (AiPlayer->Force[force].UnitTypes.size()) {
-			top = AiPlayer->Force[force].UnitTypes.size() - 1;
-			AiPlayer->Force[f].UnitTypes.push_back(AiPlayer->Force[force].UnitTypes[top]);
-			AiPlayer->Force[force].UnitTypes.pop_back();
+		while (AiPlayer->Force[intForce].UnitTypes.size()) {
+			top = AiPlayer->Force[intForce].UnitTypes.size() - 1;
+			AiPlayer->Force[f].UnitTypes.push_back(AiPlayer->Force[intForce].UnitTypes[top]);
+			AiPlayer->Force[intForce].UnitTypes.pop_back();
 		}
-		AiPlayer->Force[force].Reset();
+		AiPlayer->Force[intForce].Reset();
 		AiPlayer->Force[f].Completed = true;
 		force = f;
 	}
@@ -566,7 +734,7 @@ void AiAttackWithForces(int *forces)
 	const Vec2i invalidPos(-1, -1);
 	bool found = false;
 	unsigned int top;
-	unsigned int f = AiPlayer->Force.FindFreeForce();
+	unsigned int f = AiPlayer->Force.FindFreeForce(AiForceRoleDefault, AI_MAX_FORCE_INTERNAL);
 
 	AiPlayer->Force[f].Reset();
 
@@ -645,27 +813,28 @@ static void AiGroupAttackerForTransport(AiForce &aiForce)
 		CUnit &unit = *aiForce.Units[i];
 		CUnit &transporter = *aiForce.Units[transporterIndex];
 
-		if (transporter.IsIdle()
-			&& unit.CurrentAction() == UnitActionBoard
+		if (unit.CurrentAction() == UnitActionBoard
 			&& static_cast<COrder_Board *>(unit.CurrentOrder())->GetGoal() == &transporter) {
 			CommandFollow(transporter, unit, 0);
 		}
-		if (CanTransport(transporter, unit) && unit.IsIdle() && unit.Container == NULL) {
-			CommandBoard(unit, transporter, FlushCommands);
-			CommandFollow(transporter, unit, 0);
-			if (--nbToTransport == 0) { // full : next transporter.
-				for (++transporterIndex; transporterIndex < aiForce.Size(); ++transporterIndex) {
-					const CUnit &nextTransporter = *aiForce.Units[transporterIndex];
+		if (CanTransport(transporter, unit) && (unit.IsIdle() 
+			|| (unit.CurrentAction() == UnitActionBoard && !unit.Moving 
+			&& static_cast<COrder_Board *>(unit.CurrentOrder())->GetGoal() != &transporter)) && unit.Container == NULL) {
+				CommandBoard(unit, transporter, FlushCommands);
+				CommandFollow(transporter, unit, 0);
+				if (--nbToTransport == 0) { // full : next transporter.
+					for (++transporterIndex; transporterIndex < aiForce.Size(); ++transporterIndex) {
+						const CUnit &nextTransporter = *aiForce.Units[transporterIndex];
 
-					if (nextTransporter.Type->CanTransport()) {
-						nbToTransport = nextTransporter.Type->MaxOnBoard - nextTransporter.BoardCount;
+						if (nextTransporter.Type->CanTransport()) {
+							nbToTransport = nextTransporter.Type->MaxOnBoard - nextTransporter.BoardCount;
+							break ;
+						}
+					}
+					if (transporterIndex == aiForce.Size()) { // No more transporter.
 						break ;
 					}
 				}
-				if (transporterIndex == aiForce.Size()) { // No more transporter.
-					break ;
-				}
-			}
 		}
 	}
 }
@@ -677,6 +846,7 @@ static void AiGroupAttackerForTransport(AiForce &aiForce)
 */
 void AiForce::Update()
 {
+	Assert(Defending == false);
 	if (Size() == 0) {
 		Attacking = false;
 		if (!Defending && State > AiForceAttackingState_Waiting) {
@@ -719,68 +889,166 @@ void AiForce::Update()
 		AiGroupAttackerForTransport(*this);
 		return ;
 	}
+	if (State == AiForceAttackingState_AttackingWithTransporter) {
+		// Move transporters to goalpos
+		std::vector<CUnit *> transporters;
+		bool emptyTrans = true;
+		for (unsigned int i = 0; i != Size(); ++i) {
+			CUnit &aiunit = *Units[i];
 
-	Assert(Map.Info.IsPointOnMap(GoalPos));
-	std::vector<CUnit *> idleUnits;
-	const CUnit *leader = NULL;
+			if (aiunit.CanMove() && aiunit.Type->MaxOnBoard) {
+				transporters.push_back(&aiunit);
+				if (aiunit.BoardCount > 0) {
+					emptyTrans = false;
+				}
+			}
+		}
+		if (transporters.empty()) {
+			// Our transporters have been destroyed
+			DebugPrint("%d: Attack force #%lu has lost all agresive units, giving up\n"
+				_C_ AiPlayer->Player->Index _C_(long unsigned int)(this  - & (AiPlayer->Force[0])));
+			Reset(true);
+		} else if (emptyTrans) {
+			// We have emptied our transporters, go go go
+			State = AiForceAttackingState_GoingToRallyPoint;
+		} else {
+			for (size_t i = 0; i != transporters.size(); ++i) {
+				CUnit &trans = *transporters[i];
+				const int delay = i / 5; // To avoid lot of CPU consuption, send them with a small time difference.
+
+				trans.Wait = delay;
+				CommandUnload(trans, this->GoalPos, NULL, FlushCommands);
+			}
+		}
+		return;
+	}
+	CUnit *leader = NULL;
 	for (unsigned int i = 0; i != Size(); ++i) {
 		CUnit &aiunit = *Units[i];
 
-		if (aiunit.IsIdle()) {
-			if (aiunit.IsAliveOnMap()) {
-				idleUnits.push_back(&aiunit);
-			}
-		} else if (leader == NULL && aiunit.CurrentAction() == UnitActionAttack) {
-			const COrder_Attack &order = *static_cast<COrder_Attack *>(aiunit.CurrentOrder());
-
-			if (order.HasGoal() && order.IsValid()) {
-				leader = &aiunit;
-			}
+		if (aiunit.IsAgressive()) {
+			leader = &aiunit;
+			break;
 		}
 	}
-	if (idleUnits.empty()) {
-		return ;
-	}
-	if (leader == NULL) {
-		const int thresholdDist = 5; // Hard coded value
-		int maxDist = 0;
 
-		for (size_t i = 0; i != idleUnits.size(); ++i) {
-			maxDist = std::max(maxDist, idleUnits[i]->MapDistanceTo(this->GoalPos));
+	const int thresholdDist = 5; // Hard coded value
+	Assert(Map.Info.IsPointOnMap(GoalPos));
+	if (State == AiForceAttackingState_GoingToRallyPoint) {
+		// Check if we are near the goalpos
+		int minDist = Units[0]->MapDistanceTo(this->GoalPos);
+		int maxDist = minDist;
+
+		for (size_t i = 0; i != Size(); ++i) {
+			const int distance = Units[i]->MapDistanceTo(this->GoalPos);
+			minDist = std::min(minDist, distance);
+			maxDist = std::max(maxDist, distance);
 		}
-		if (maxDist < thresholdDist) {
+
+		if (WaitOnRallyPoint > 0 && minDist <= thresholdDist) {
+			--WaitOnRallyPoint;
+		}
+		if (maxDist <= thresholdDist || !WaitOnRallyPoint) {
 			const CUnit *unit = NULL;
 
 			AiForceEnemyFinder<AIATTACK_BUILDING>(*this, &unit);
 			if (!unit) {
-				// No enemy found, give up
-				// FIXME: should the force go home or keep trying to attack?
-				DebugPrint("%d: Attack force #%lu can't find a target, giving up\n"
-						   _C_ AiPlayer->Player->Index _C_(long unsigned int)(this - & (AiPlayer->Force[0])));
-				Attacking = false;
-				return;
+				AiForceEnemyFinder<AIATTACK_ALLMAP>(*this, &unit);
+				if (!unit) {
+					// No enemy found, give up
+					// FIXME: should the force go home or keep trying to attack?
+					DebugPrint("%d: Attack force #%lu can't find a target, giving up\n"
+							   _C_ AiPlayer->Player->Index _C_(long unsigned int)(this - & (AiPlayer->Force[0])));
+					Attacking = false;
+					State = AiForceAttackingState_Waiting;
+					return;
+				}
 			}
-			GoalPos = unit->tilePos;
+			this->GoalPos = unit->tilePos;
+			State = AiForceAttackingState_Attacking;
+			for (size_t i = 0; i != this->Size(); ++i) {
+				CUnit &aiunit = *this->Units[i];
+				const int delay = i / 5; // To avoid lot of CPU consuption, send them with a small time difference.
+
+				aiunit.Wait = delay;
+				if (aiunit.IsAgressive()) {
+					CommandAttack(aiunit, this->GoalPos, NULL, FlushCommands);
+				} else {
+					if (leader) {
+						CommandDefend(aiunit, *leader, FlushCommands);
+					} else {
+						CommandMove(aiunit, this->GoalPos, FlushCommands);
+					}
+				}
+			}
 		}
 	}
-	const Vec2i pos = leader != NULL ? leader->tilePos : this->GoalPos;
+
+	std::vector<CUnit *> idleUnits;
+	for (unsigned int i = 0; i != Size(); ++i) {
+		CUnit &aiunit = *Units[i];
+
+		if (aiunit.IsIdle()) {
+			idleUnits.push_back(&aiunit);
+		}
+	}
+
+	if (idleUnits.empty()) {
+		return;
+	}
+
+	if (State == AiForceAttackingState_Attacking && idleUnits.size() == this->Size()) {
+		const CUnit *unit = NULL;
+
+		bool isNaval = false;
+		for (size_t i = 0; i != this->Units.size(); ++i) {
+			CUnit *const unit = this->Units[i];
+			if (unit->Type->UnitType == UnitTypeNaval && unit->Type->CanAttack) {
+				isNaval = true;
+				break;
+			}
+		}
+		if (isNaval) {
+			AiForceEnemyFinder<AIATTACK_ALLMAP>(*this, &unit);
+		} else {
+			AiForceEnemyFinder<AIATTACK_BUILDING>(*this, &unit);
+		}
+		if (!unit) {
+			// No enemy found, give up
+			// FIXME: should the force go home or keep trying to attack?
+			DebugPrint("%d: Attack force #%lu can't find a target, giving up\n"
+					   _C_ AiPlayer->Player->Index _C_(long unsigned int)(this - & (AiPlayer->Force[0])));
+			Attacking = false;
+			State = AiForceAttackingState_Waiting;
+			return;
+		} else {
+			Vec2i resultPos;
+			NewRallyPoint(unit->tilePos, &resultPos);
+			this->GoalPos = resultPos;
+			this->State = AiForceAttackingState_GoingToRallyPoint;
+		}
+	}
 	for (size_t i = 0; i != idleUnits.size(); ++i) {
 		CUnit &aiunit = *idleUnits[i];
 		const int delay = i / 5; // To avoid lot of CPU consuption, send them with a small time difference.
 
 		aiunit.Wait = delay;
-		if (aiunit.Type->CanAttack) {
-			CommandAttack(aiunit, pos, NULL, FlushCommands);
-		} else if (aiunit.Type->CanTransport()) {
-			if (aiunit.BoardCount != 0) {
-				CommandUnload(aiunit, pos, NULL, FlushCommands);
+		if (leader) {
+			if (aiunit.IsAgressive()) {
+				if (State == AiForceAttackingState_Attacking) {
+					CommandAttack(aiunit, leader->tilePos, NULL, FlushCommands);
+				} else {
+					CommandAttack(aiunit, this->GoalPos, NULL, FlushCommands);
+				}
 			} else {
-				// FIXME : Retrieve unit blocked (transport previously full)
-				CommandMove(aiunit, aiunit.Player->StartPos, FlushCommands);
-				this->Remove(aiunit);
+				CommandDefend(aiunit, *leader, FlushCommands);
 			}
 		} else {
-			CommandMove(aiunit, pos, FlushCommands);
+			if (aiunit.IsAgressive()) {
+				CommandAttack(aiunit, this->GoalPos, NULL, FlushCommands);
+			} else {
+				CommandMove(aiunit, this->GoalPos, FlushCommands);
+			}
 		}
 	}
 }
@@ -797,39 +1065,59 @@ void AiForceManager::Update()
 			if (force.Size() == 0) {
 				force.Attacking = false;
 				force.Defending = false;
+				force.State = AiForceAttackingState_Waiting;
 				continue;
 			}
 			const int nearDist = 5;
 
 			if (Map.Info.IsPointOnMap(force.GoalPos) == false) {
 				force.ReturnToHome();
+			} else {
 				//  Check if some unit from force reached goal point
-			} else if (force.Units[0]->MapDistanceTo(force.GoalPos) <= nearDist) {
-				//  Look if still enemies in attack range.
-				const CUnit *dummy = NULL;
-				if (!AiForceEnemyFinder<AIATTACK_RANGE>(force, &dummy).found()) {
-					force.ReturnToHome();
-				}
-			} else { // Find idle units and order them to defend
-				std::vector<CUnit *> idleUnits;
 				for (unsigned int i = 0; i != force.Size(); ++i) {
-					CUnit &aiunit = *force.Units[i];
-
-					if (aiunit.IsIdle() && aiunit.IsAliveOnMap()) {
-						idleUnits.push_back(&aiunit);
+					if (force.Units[i]->MapDistanceTo(force.GoalPos) <= nearDist) {
+						//  Look if still enemies in attack range.
+						const CUnit *dummy = NULL;
+						if (!AiForceEnemyFinder<AIATTACK_RANGE>(force, &dummy).found()) {
+							force.ReturnToHome();
+						}
 					}
 				}
-				for (unsigned int i = 0; i != idleUnits.size(); ++i) {
-					CUnit *const unit = idleUnits[i];
 
-					if (unit->Container == NULL) {
-						const int delay = i / 5; // To avoid lot of CPU consuption, send them with a small time difference.
+				if (force.Defending == false) {
+					// force is no longer defending
+					return;
+				}
 
-						unit->Wait = delay;
-						if (unit->Type->CanAttack) {
-							CommandAttack(*unit, force.GoalPos, NULL, FlushCommands);
-						} else {
-							CommandMove(*unit, force.GoalPos, FlushCommands);
+				// Find idle units and order them to defend
+				// Don't attack if there aren't our units near goal point
+				std::vector<CUnit *> nearGoal;
+				const Vec2i offset(15, 15);
+				Select(force.GoalPos - offset, force.GoalPos + offset, nearGoal,
+					   IsAnAlliedUnitOf(*force.Units[0]->Player));
+				if (nearGoal.empty()) {
+					force.ReturnToHome();
+				} else {
+					std::vector<CUnit *> idleUnits;
+					for (unsigned int i = 0; i != force.Size(); ++i) {
+						CUnit &aiunit = *force.Units[i];
+
+						if (aiunit.IsIdle() && aiunit.IsAliveOnMap()) {
+							idleUnits.push_back(&aiunit);
+						}
+					}
+					for (unsigned int i = 0; i != idleUnits.size(); ++i) {
+						CUnit *const unit = idleUnits[i];
+
+						if (unit->Container == NULL) {
+							const int delay = i / 5; // To avoid lot of CPU consuption, send them with a small time difference.
+
+							unit->Wait = delay;
+							if (unit->Type->CanAttack) {
+								CommandAttack(*unit, force.GoalPos, NULL, FlushCommands);
+							} else {
+								CommandMove(*unit, force.GoalPos, FlushCommands);
+							}
 						}
 					}
 				}

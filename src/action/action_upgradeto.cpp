@@ -10,7 +10,7 @@
 //
 /**@name action_upgradeto.cpp - The unit upgrading to new action. */
 //
-//      (c) Copyright 1998-2005 by Lutz Sammer and Jimmy Salmon
+//      (c) Copyright 1998-2015 by Lutz Sammer, Jimmy Salmon and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -106,9 +106,13 @@ static int TransformUnitIntoType(CUnit &unit, const CUnitType &newtype)
 	CPlayer &player = *unit.Player;
 	player.UnitTypesCount[oldtype.Slot]--;
 	player.UnitTypesCount[newtype.Slot]++;
+	if (unit.Active) {
+		player.UnitTypesAiActiveCount[oldtype.Slot]--;
+		player.UnitTypesAiActiveCount[newtype.Slot]++;
+	}
 
-	player.Demand += newtype.Demand - oldtype.Demand;
-	player.Supply += newtype.Supply - oldtype.Supply;
+	player.Demand += newtype.Stats[player.Index].Variables[DEMAND_INDEX].Value - oldtype.Stats[player.Index].Variables[DEMAND_INDEX].Value;
+	player.Supply += newtype.Stats[player.Index].Variables[SUPPLY_INDEX].Value - oldtype.Stats[player.Index].Variables[SUPPLY_INDEX].Value;
 
 	// Change resource limit
 	for (int i = 0; i < MaxCosts; ++i) {
@@ -122,15 +126,19 @@ static int TransformUnitIntoType(CUnit &unit, const CUnitType &newtype)
 	const CUnitStats &newstats = newtype.Stats[player.Index];
 
 	for (unsigned int i = 0; i < UnitTypeVar.GetNumberVariable(); ++i) {
-		if (unit.Variable[i].Max) {
+		if (i == KILL_INDEX || i == XP_INDEX) {
+			unit.Variable[i].Value = unit.Variable[i].Max;
+		} else if (unit.Variable[i].Max && unit.Variable[i].Value) {
 			unit.Variable[i].Value = newstats.Variables[i].Max *
 									 unit.Variable[i].Value / unit.Variable[i].Max;
+			unit.Variable[i].Max = std::max(newstats.Variables[i].Max, unit.Variable[i].Max);
+			unit.Variable[i].Increase = newstats.Variables[i].Increase;
+			unit.Variable[i].Enable = newstats.Variables[i].Enable;
 		} else {
 			unit.Variable[i].Value = newstats.Variables[i].Value;
+			unit.Variable[i].Max = unit.Variable[i].Value;
+			unit.Variable[i].Enable = newstats.Variables[i].Enable;
 		}
-		unit.Variable[i].Max = newstats.Variables[i].Max;
-		unit.Variable[i].Increase = newstats.Variables[i].Increase;
-		unit.Variable[i].Enable = newstats.Variables[i].Enable;
 	}
 
 	unit.Type = const_cast<CUnitType *>(&newtype);
@@ -138,7 +146,9 @@ static int TransformUnitIntoType(CUnit &unit, const CUnitType &newtype)
 
 	if (newtype.CanCastSpell && !unit.AutoCastSpell) {
 		unit.AutoCastSpell = new char[SpellTypeTable.size()];
+		unit.SpellCoolDownTimers = new int[SpellTypeTable.size()];
 		memset(unit.AutoCastSpell, 0, SpellTypeTable.size() * sizeof(char));
+		memset(unit.SpellCoolDownTimers, 0, SpellTypeTable.size() * sizeof(int));
 	}
 
 	UpdateForNewUnit(unit, 1);
@@ -177,9 +187,7 @@ static int TransformUnitIntoType(CUnit &unit, const CUnitType &newtype)
 {
 	if (!strcmp(value, "type")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Type = UnitTypeByIdent(LuaToString(l, -1));
-		lua_pop(l, 1);
+		this->Type = UnitTypeByIdent(LuaToString(l, -1, j + 1));
 	} else {
 		return false;
 	}
@@ -192,7 +200,7 @@ static int TransformUnitIntoType(CUnit &unit, const CUnitType &newtype)
 }
 
 
-/* virtual */ PixelPos COrder_TransformInto::Show(const CViewport & , const PixelPos &lastScreenPos) const
+/* virtual */ PixelPos COrder_TransformInto::Show(const CViewport &, const PixelPos &lastScreenPos) const
 {
 	return lastScreenPos;
 }
@@ -223,14 +231,10 @@ static int TransformUnitIntoType(CUnit &unit, const CUnitType &newtype)
 {
 	if (!strcmp(value, "type")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Type = UnitTypeByIdent(LuaToString(l, -1));
-		lua_pop(l, 1);
+		this->Type = UnitTypeByIdent(LuaToString(l, -1, j + 1));
 	} else if (!strcmp(value, "ticks")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Ticks = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->Ticks = LuaToNumber(l, -1, j + 1);
 	} else {
 		return false;
 	}
@@ -242,7 +246,7 @@ static int TransformUnitIntoType(CUnit &unit, const CUnitType &newtype)
 	return true;
 }
 
-/* virtual */ PixelPos COrder_UpgradeTo::Show(const CViewport & , const PixelPos &lastScreenPos) const
+/* virtual */ PixelPos COrder_UpgradeTo::Show(const CViewport &, const PixelPos &lastScreenPos) const
 {
 	return lastScreenPos;
 }
@@ -266,7 +270,7 @@ static void AnimateActionUpgradeTo(CUnit &unit)
 	const CUnitType &newtype = *this->Type;
 	const CUnitStats &newstats = newtype.Stats[player.Index];
 
-	this->Ticks += player.SpeedUpgrade / SPEEDUP_FACTOR;
+	this->Ticks += std::max(1, player.SpeedUpgrade / SPEEDUP_FACTOR);
 	if (this->Ticks < newstats.Costs[TimeCost]) {
 		unit.Wait = CYCLES_PER_SECOND / 6;
 		return ;
@@ -278,7 +282,7 @@ static void AnimateActionUpgradeTo(CUnit &unit)
 	}
 
 	if (TransformUnitIntoType(unit, newtype) == 0) {
-		player.Notify(NotifyGreen, unit.tilePos, _("Upgrade to %s canceled"), newtype.Name.c_str());
+		player.Notify(NotifyYellow, unit.tilePos, _("Upgrade to %s canceled"), newtype.Name.c_str());
 		this->Finished = true;
 		return ;
 	}

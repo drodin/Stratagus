@@ -42,10 +42,13 @@
 #include "spell/spell_areabombardment.h"
 #include "spell/spell_capture.h"
 #include "spell/spell_demolish.h"
+#include "spell/spell_luacallback.h"
 #include "spell/spell_polymorph.h"
 #include "spell/spell_spawnmissile.h"
 #include "spell/spell_spawnportal.h"
 #include "spell/spell_summon.h"
+#include "spell/spell_teleport.h"
+#include "luacallback.h"
 #include "script_sound.h"
 #include "script.h"
 #include "unittype.h"
@@ -64,13 +67,11 @@
 static SpellActionType *CclSpellAction(lua_State *l)
 {
 	if (!lua_istable(l, -1)) {
-		LuaError(l, "incorrect argument");
+		LuaError(l, "expected a table of tables as spell action");
 	}
 	const int args = lua_rawlen(l, -1);
 
-	lua_rawgeti(l, -1, 1);
-	const char *value = LuaToString(l, -1);
-	lua_pop(l, 1);
+	const char *value = LuaToString(l, -1, 1);
 
 	SpellActionType *spellaction = NULL;
 	if (!strcmp(value, "adjust-variable")) {
@@ -85,6 +86,8 @@ static SpellActionType *CclSpellAction(lua_State *l)
 		spellaction = new Spell_Capture;
 	} else if (!strcmp(value, "demolish")) {
 		spellaction = new Spell_Demolish;
+	} else if (!strcmp(value, "lua-callback")) {
+		spellaction = new Spell_LuaCallback;
 	} else if (!strcmp(value, "polymorph")) {
 		spellaction = new Spell_Polymorph;
 	} else if (!strcmp(value, "spawn-missile")) {
@@ -93,6 +96,8 @@ static SpellActionType *CclSpellAction(lua_State *l)
 		spellaction = new Spell_SpawnPortal;
 	} else if (!strcmp(value, "summon")) {
 		spellaction = new Spell_Summon;
+	} else if (!strcmp(value, "teleport")) {
+		spellaction = new Spell_Teleport;
 	} else {
 		LuaError(l, "Unsupported action type: %s" _C_ value);
 	}
@@ -144,6 +149,8 @@ static void CclSpellCondition(lua_State *l, ConditionInfo *condition)
 	// Initialize min/max stuff to values with no effect.
 	for (unsigned int i = 0; i < UnitTypeVar.GetNumberVariable(); i++) {
 		condition->Variable[i].Check = false;
+		condition->Variable[i].ExactValue = -1;
+		condition->Variable[i].ExceptValue = -1;
 		condition->Variable[i].MinValue = -1;
 		condition->Variable[i].MaxValue = -1;
 		condition->Variable[i].MinMax = -1;
@@ -156,28 +163,22 @@ static void CclSpellCondition(lua_State *l, ConditionInfo *condition)
 	}
 	const int args = lua_rawlen(l, -1);
 	for (int j = 0; j < args; ++j) {
-		lua_rawgeti(l, -1, j + 1);
-		const char *value = LuaToString(l, -1);
-		lua_pop(l, 1);
+		const char *value = LuaToString(l, -1, j + 1);
 		++j;
 		if (!strcmp(value, "alliance")) {
-			lua_rawgeti(l, -1, j + 1);
-			condition->Alliance = Ccl2Condition(l, LuaToString(l, -1));
-			lua_pop(l, 1);
+			condition->Alliance = Ccl2Condition(l, LuaToString(l, -1, j + 1));
 		} else if (!strcmp(value, "opponent")) {
-			lua_rawgeti(l, -1, j + 1);
-			condition->Opponent = Ccl2Condition(l, LuaToString(l, -1));
-			lua_pop(l, 1);
+			condition->Opponent = Ccl2Condition(l, LuaToString(l, -1, j + 1));
 		} else if (!strcmp(value, "self")) {
+			condition->TargetSelf = Ccl2Condition(l, LuaToString(l, -1, j + 1));
+		} else if (!strcmp(value, "callback")) {
 			lua_rawgeti(l, -1, j + 1);
-			condition->TargetSelf = Ccl2Condition(l, LuaToString(l, -1));
+			condition->CheckFunc = new LuaCallback(l, -1);
 			lua_pop(l, 1);
 		} else {
 			int index = UnitTypeVar.BoolFlagNameLookup[value];
 			if (index != -1) {
-				lua_rawgeti(l, -1, j + 1);
-				condition->BoolFlag[index] = Ccl2Condition(l, LuaToString(l, -1));
-				lua_pop(l, 1);
+				condition->BoolFlag[index] = Ccl2Condition(l, LuaToString(l, -1, j + 1));
 				continue;
 			}
 			index = UnitTypeVar.VariableNameLookup[value];
@@ -191,6 +192,10 @@ static void CclSpellCondition(lua_State *l, ConditionInfo *condition)
 					condition->Variable[index].Check = true;
 					if (!strcmp(key, "Enable")) {
 						condition->Variable[index].Enable = Ccl2Condition(l, LuaToString(l, -1));
+					} else if (!strcmp(key, "ExactValue")) {
+						condition->Variable[index].ExactValue = LuaToNumber(l, -1);
+					} else if (!strcmp(key, "ExceptValue")) {
+						condition->Variable[index].ExceptValue = LuaToNumber(l, -1);
 					} else if (!strcmp(key, "MinValue")) {
 						condition->Variable[index].MinValue = LuaToNumber(l, -1);
 					} else if (!strcmp(key, "MaxValue")) {
@@ -230,17 +235,42 @@ static void CclSpellAutocast(lua_State *l, AutoCastInfo *autocast)
 	}
 	const int args = lua_rawlen(l, -1);
 	for (int j = 0; j < args; ++j) {
-		lua_rawgeti(l, -1, j + 1);
-		const char *value = LuaToString(l, -1);
-		lua_pop(l, 1);
+		const char *value = LuaToString(l, -1, j + 1);
 		++j;
 		if (!strcmp(value, "range")) {
+			autocast->Range = LuaToNumber(l, -1, j + 1);
+		} else if (!strcmp(value, "min-range")) {
+			autocast->MinRange = LuaToNumber(l, -1, j + 1);
+		} else if (!strcmp(value, "position-autocast")) {
 			lua_rawgeti(l, -1, j + 1);
-			autocast->Range = LuaToNumber(l, -1);
+			autocast->PositionAutoCast = new LuaCallback(l, -1);
 			lua_pop(l, 1);
 		} else if (!strcmp(value, "combat")) {
+			autocast->Combat = Ccl2Condition(l, LuaToString(l, -1, j + 1));
+		} else if (!strcmp(value, "attacker")) {
+			autocast->Attacker = Ccl2Condition(l, LuaToString(l, -1, j + 1));
+		} else if (!strcmp(value, "corpse")) {
+			autocast->Corpse = Ccl2Condition(l, LuaToString(l, -1, j + 1));
+		} else if (!strcmp(value, "priority")) {
 			lua_rawgeti(l, -1, j + 1);
-			autocast->Combat = Ccl2Condition(l, LuaToString(l, -1));
+			if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 2) {
+				LuaError(l, "incorrect argument");
+			}
+			lua_rawgeti(l, -1, 1);
+			std::string var = LuaToString(l, -1);
+			int index = UnitTypeVar.VariableNameLookup[var.c_str()];// User variables
+			if (index == -1) {
+				if (!strcmp(var.c_str(), "Distance")) {
+					index = ACP_DISTANCE;
+				} else {
+					fprintf(stderr, "Bad variable name '%s'\n", var.c_str());
+					Exit(1);
+				}
+			}
+			autocast->PriorytyVar = index;
+			lua_pop(l, 1);
+			autocast->ReverseSort = LuaToBoolean(l, -1, 2);
+
 			lua_pop(l, 1);
 		} else if (!strcmp(value, "condition")) {
 			if (!autocast->Condition) {
@@ -266,7 +296,7 @@ static int CclDefineSpell(lua_State *l)
 	const std::string identname = LuaToString(l, 1);
 	SpellType *spell = SpellTypeByIdent(identname);
 	if (spell != NULL) {
-		DebugPrint("Redefining spell-type `%s'\n" _C_ identname.c_str());
+		DebugPrint("Redefining spell-type '%s'\n" _C_ identname.c_str());
 	} else {
 		spell = new SpellType(SpellTypeTable.size(), identname);
 		for (std::vector<CUnitType *>::size_type i = 0; i < UnitTypes.size(); ++i) { // adjust array for caster already defined
@@ -294,6 +324,21 @@ static int CclDefineSpell(lua_State *l)
 			spell->Name = LuaToString(l, i + 1);
 		} else if (!strcmp(value, "manacost")) {
 			spell->ManaCost = LuaToNumber(l, i + 1);
+		} else if (!strcmp(value, "cooldown")) {
+			spell->CoolDown = LuaToNumber(l, i + 1);
+		} else if (!strcmp(value, "res-cost")) {
+			lua_pushvalue(l, i + 1);
+			if (!lua_istable(l, -1)) {
+				LuaError(l, "incorrect argument");
+			}
+			const int len = lua_rawlen(l, -1);
+			if (len != MaxCosts) {
+				LuaError(l, "resource table size isn't correct");
+			}
+			for (int j = 1; j < len; ++j) { // exclude the time
+				spell->Costs[j] = LuaToNumber(l, -1, j + 1);
+			}
+			lua_pop(l, 1);
 		} else if (!strcmp(value, "range")) {
 			if (!lua_isstring(l, i + 1) && !lua_isnumber(l, i + 1)) {
 				LuaError(l, "incorrect argument");
@@ -307,6 +352,9 @@ static int CclDefineSpell(lua_State *l)
 			}
 		} else if (!strcmp(value, "repeat-cast")) {
 			spell->RepeatCast = 1;
+			--i;
+		} else if (!strcmp(value, "force-use-animation")) {
+			spell->ForceUseAnimation = true;
 			--i;
 		} else if (!strcmp(value, "target")) {
 			value = LuaToString(l, i + 1);

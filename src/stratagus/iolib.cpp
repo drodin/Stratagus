@@ -41,6 +41,7 @@
 #include "game.h"
 #include "iocompat.h"
 #include "map.h"
+#include "parameters.h"
 #include "util.h"
 
 #include <stdarg.h>
@@ -500,29 +501,30 @@ long CFile::PImpl::tell()
 **  Find a file with its correct extension ("", ".gz" or ".bz2")
 **
 **  @param file      The string with the file path. Upon success, the string
-**                   is replaced by the full filename witht he correct extension.
+**                   is replaced by the full filename with the correct extension.
 **  @param filesize  Size of the file buffer
 **
 **  @return true if the file has been found.
 */
-static bool FindFileWithExtension(char *file, size_t filesize)
+static bool FindFileWithExtension(char(&file)[PATH_MAX])
 {
-	char buf[PATH_MAX];
-
 	if (!access(file, R_OK)) {
 		return true;
 	}
+#if defined(USE_ZLIB) || defined(USE_BZ2LIB)
+	char buf[PATH_MAX];
+#endif
 #ifdef USE_ZLIB // gzip or bzip2 in global shared directory
 	sprintf(buf, "%s.gz", file);
 	if (!access(buf, R_OK)) {
-		strcpy_s(file, filesize, buf);
+		strcpy_s(file, PATH_MAX, buf);
 		return true;
 	}
 #endif
 #ifdef USE_BZ2LIB
 	sprintf(buf, "%s.bz2", file);
 	if (!access(buf, R_OK)) {
-		strcpy_s(file, filesize, buf);
+		strcpy_s(file, PATH_MAX, buf);
 		return true;
 	}
 #endif
@@ -537,87 +539,100 @@ static bool FindFileWithExtension(char *file, size_t filesize)
 **
 **  @param file        Filename to open.
 **  @param buffer      Allocated buffer for generated filename.
-**  @param buffersize  Size of the buffer
-**
-**  @return Pointer to buffer.
 */
-char *LibraryFileName(const char *file, char *buffer, size_t buffersize)
+static void LibraryFileName(const char *file, char(&buffer)[PATH_MAX])
 {
 	// Absolute path or in current directory.
-	strcpy_s(buffer, buffersize, file);
+	strcpy_s(buffer, PATH_MAX, file);
 	if (*buffer == '/') {
-		return buffer;
+		return;
 	}
-	if (FindFileWithExtension(buffer, buffersize)) {
-		return buffer;
+	if (FindFileWithExtension(buffer)) {
+		return;
 	}
 
 	// Try in map directory
 	if (*CurrentMapPath) {
 		if (*CurrentMapPath == '.' || *CurrentMapPath == '/') {
-			strcpy_s(buffer, buffersize, CurrentMapPath);
+			strcpy_s(buffer, PATH_MAX, CurrentMapPath);
 			char *s = strrchr(buffer, '/');
 			if (s) {
 				s[1] = '\0';
 			}
-			strcat_s(buffer, buffersize, file);
+			strcat_s(buffer, PATH_MAX, file);
 		} else {
-			strcpy_s(buffer, buffersize, StratagusLibPath.c_str());
+			strcpy_s(buffer, PATH_MAX, StratagusLibPath.c_str());
 			if (*buffer) {
-				strcat_s(buffer, buffersize, "/");
+				strcat_s(buffer, PATH_MAX, "/");
 			}
-			strcat_s(buffer, buffersize, CurrentMapPath);
+			strcat_s(buffer, PATH_MAX, CurrentMapPath);
 			char *s = strrchr(buffer, '/');
 			if (s) {
 				s[1] = '\0';
 			}
-			strcat_s(buffer, buffersize, file);
+			strcat_s(buffer, PATH_MAX, file);
 		}
-		if (FindFileWithExtension(buffer, buffersize)) {
-			return buffer;
+		if (FindFileWithExtension(buffer)) {
+			return;
 		}
 	}
 
 	// In user home directory
 	if (!GameName.empty()) {
 		sprintf(buffer, "%s/%s/%s", Parameters::Instance.GetUserDirectory().c_str(), GameName.c_str(), file);
-		if (FindFileWithExtension(buffer, buffersize)) {
-			return buffer;
+		if (FindFileWithExtension(buffer)) {
+			return;
 		}
 	}
 
 	// In global shared directory
 	sprintf(buffer, "%s/%s", StratagusLibPath.c_str(), file);
-	if (FindFileWithExtension(buffer, buffersize)) {
-		return buffer;
+	if (FindFileWithExtension(buffer)) {
+		return;
 	}
 
 	// Support for graphics in default graphics dir.
 	// They could be anywhere now, but check if they haven't
 	// got full paths.
 	sprintf(buffer, "graphics/%s", file);
-	if (FindFileWithExtension(buffer, buffersize)) {
-		return buffer;
+	if (FindFileWithExtension(buffer)) {
+		return;
 	}
 	sprintf(buffer, "%s/graphics/%s", StratagusLibPath.c_str(), file);
-	if (FindFileWithExtension(buffer, buffersize)) {
-		return buffer;
+	if (FindFileWithExtension(buffer)) {
+		return;
 	}
 
 	// Support for sounds in default sounds dir.
 	// They could be anywhere now, but check if they haven't
 	// got full paths.
 	sprintf(buffer, "sounds/%s", file);
-	if (FindFileWithExtension(buffer, buffersize)) {
-		return buffer;
+	if (FindFileWithExtension(buffer)) {
+		return;
 	}
 	sprintf(buffer, "%s/sounds/%s", StratagusLibPath.c_str(), file);
-	if (FindFileWithExtension(buffer, buffersize)) {
-		return buffer;
+	if (FindFileWithExtension(buffer)) {
+		return;
 	}
 
-	DebugPrint("File `%s' not found\n" _C_ file);
-	strcpy_s(buffer, buffersize, file);
+	// Support for scripts in default scripts dir.
+	sprintf(buffer, "scripts/%s", file);
+	if (FindFileWithExtension(buffer)) {
+		return;
+	}
+	sprintf(buffer, "%s/scripts/%s", StratagusLibPath.c_str(), file);
+	if (FindFileWithExtension(buffer)) {
+		return;
+	}
+
+	DebugPrint("File '%s' not found\n" _C_ file);
+	strcpy_s(buffer, PATH_MAX, file);
+}
+
+extern std::string LibraryFileName(const char *file)
+{
+	char buffer[PATH_MAX];
+	LibraryFileName(file, buffer);
 	return buffer;
 }
 
@@ -626,7 +641,7 @@ bool CanAccessFile(const char *filename)
 	if (filename && filename[0] != '\0') {
 		char name[PATH_MAX];
 		name[0] = '\0';
-		LibraryFileName(filename, name, sizeof(name));
+		LibraryFileName(filename, name);
 		return (name[0] != '\0' && 0 == access(name, R_OK));
 	}
 	return false;
@@ -654,7 +669,7 @@ int ReadDataDirectory(const char *dirname, std::vector<FileList> &fl)
 	}
 	char *np = buffer + n;
 
-#ifndef _MSC_VER
+#ifndef USE_WIN32
 	DIR *dirp = opendir(dirname);
 	struct dirent *dp;
 
@@ -691,7 +706,7 @@ int ReadDataDirectory(const char *dirname, std::vector<FileList> &fl)
 					fl.insert(std::lower_bound(fl.begin(), fl.end(), nfl), nfl);
 				}
 			}
-#ifndef _MSC_VER
+#ifndef USE_WIN32
 		}
 		closedir(dirp);
 #else
@@ -721,7 +736,8 @@ class RawFileWriter : public FileWriter
 	FILE *file;
 
 public:
-	RawFileWriter(const std::string &filename) {
+	RawFileWriter(const std::string &filename)
+	{
 		file = fopen(filename.c_str(), "wb");
 		if (!file) {
 			fprintf(stderr, "Can't open file '%s' for writing\n", filename.c_str());
@@ -729,11 +745,13 @@ public:
 		}
 	}
 
-	virtual ~RawFileWriter() {
+	virtual ~RawFileWriter()
+	{
 		if (file) { fclose(file); }
 	}
 
-	virtual int write(const char *data, unsigned int size) {
+	virtual int write(const char *data, unsigned int size)
+	{
 		return fwrite(data, size, 1, file);
 	}
 };
@@ -743,7 +761,8 @@ class GzFileWriter : public FileWriter
 	gzFile file;
 
 public:
-	GzFileWriter(const std::string &filename) {
+	GzFileWriter(const std::string &filename)
+	{
 		file = gzopen(filename.c_str(), "wb9");
 		if (!file) {
 			fprintf(stderr, "Can't open file '%s' for writing\n", filename.c_str());
@@ -751,11 +770,13 @@ public:
 		}
 	}
 
-	virtual ~GzFileWriter() {
+	virtual ~GzFileWriter()
+	{
 		if (file) { gzclose(file); }
 	}
 
-	virtual int write(const char *data, unsigned int size) {
+	virtual int write(const char *data, unsigned int size)
+	{
 		return gzwrite(file, data, size);
 	}
 };

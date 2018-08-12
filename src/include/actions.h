@@ -52,6 +52,7 @@ enum UnitAction {
 	UnitActionStill,        /// unit stand still, does nothing
 	UnitActionStandGround,  /// unit stands ground
 	UnitActionFollow,       /// unit follows units
+	UnitActionDefend,       /// unit defends unit
 	UnitActionMove,         /// unit moves to position/unit
 	UnitActionAttack,       /// unit attacks position/unit
 	UnitActionAttackGround, /// unit attacks ground
@@ -92,7 +93,8 @@ struct lua_State;
 class COrder
 {
 public:
-	explicit COrder(int action) : Goal(), Action(action), Finished(false) {
+	explicit COrder(int action) : Goal(), Action(action), Finished(false)
+	{
 	}
 	virtual ~COrder();
 
@@ -119,6 +121,7 @@ public:
 	CUnit *GetGoal() const { return Goal; };
 	void SetGoal(CUnit *const new_goal);
 	void ClearGoal();
+	virtual const Vec2i GetGoalPos() const;
 
 	virtual bool OnAiHitUnit(CUnit &unit, CUnit *attacker, int /*damage*/);
 
@@ -128,6 +131,7 @@ public:
 	static COrder *NewActionBoard(CUnit &unit);
 	static COrder *NewActionBuild(const CUnit &builder, const Vec2i &pos, CUnitType &building);
 	static COrder *NewActionBuilt(CUnit &builder, CUnit &unit);
+	static COrder *NewActionDefend(CUnit &dest);
 	static COrder *NewActionDie();
 	static COrder *NewActionFollow(CUnit &dest);
 	static COrder *NewActionMove(const Vec2i &pos);
@@ -138,7 +142,7 @@ public:
 	static COrder *NewActionResource(CUnit &harvester, const Vec2i &pos);
 	static COrder *NewActionResource(CUnit &harvester, CUnit &mine);
 	static COrder *NewActionReturnGoods(CUnit &harvester, CUnit *depot);
-	static COrder *NewActionSpellCast(const SpellType &spell, const Vec2i &pos, CUnit *target);
+	static COrder *NewActionSpellCast(const SpellType &spell, const Vec2i &pos, CUnit *target, bool isAutocast = false);
 	static COrder *NewActionStandGround();
 	static COrder *NewActionStill();
 	static COrder *NewActionTrain(CUnit &trainer, CUnitType &type);

@@ -45,7 +45,7 @@
 ----------------------------------------------------------------------------*/
 
 /**
-** Bitmask, denoting a postion left/right/above/below clip rectangle
+** Bitmask, denoting a position left/right/above/below clip rectangle
 ** (mainly used by VideoDrawLineClip)
 */
 #define ClipCodeInside 0 /// Clipping inside rectangle
@@ -104,15 +104,12 @@ void VideoDrawPixel32(Uint32 color, int x, int y)
 */
 static void VideoDoDrawTransPixel16(Uint32 color, int x, int y, unsigned char alpha)
 {
-	Uint16 *p;
-	unsigned long dp;
-
 	// Loses precision for speed
 	alpha = (255 - alpha) >> 3;
 
-	p = &((Uint16 *)TheScreen->pixels)[x + y * Video.Width];
+	Uint16 *p = &((Uint16 *)TheScreen->pixels)[x + y * Video.Width];
 	color = (((color << 16) | color) & 0x07E0F81F);
-	dp = *p;
+	unsigned long dp = *p;
 	dp = ((dp << 16) | dp) & 0x07E0F81F;
 	dp = ((((dp - color) * alpha) >> 5) + color) & 0x07E0F81F;
 	*p = (Uint16)((dp >> 16) | dp);
@@ -133,20 +130,15 @@ void VideoDrawTransPixel16(Uint32 color, int x, int y, unsigned char alpha)
 */
 static void VideoDoDrawTransPixel32(Uint32 color, int x, int y, unsigned char alpha)
 {
-	unsigned long sp2;
-	unsigned long dp1;
-	unsigned long dp2;
-	Uint32 *p;
-
 	alpha = 255 - alpha;
 
-	p = &((Uint32 *)TheScreen->pixels)[x + y * Video.Width];
+	Uint32 *p = &((Uint32 *)TheScreen->pixels)[x + y * Video.Width];
 
-	sp2 = (color & 0xFF00FF00) >> 8;
+	const unsigned long sp2 = (color & 0xFF00FF00) >> 8;
 	color &= 0x00FF00FF;
 
-	dp1 = *p;
-	dp2 = (dp1 & 0xFF00FF00) >> 8;
+	unsigned long dp1 = *p;
+	unsigned long dp2 = (dp1 & 0xFF00FF00) >> 8;
 	dp1 &= 0x00FF00FF;
 
 	dp1 = ((((dp1 - color) * alpha) >> 8) + color) & 0x00FF00FF;
@@ -305,12 +297,6 @@ void DrawTransHLineClip(Uint32 color, int x, int y,
 */
 void DrawLine(Uint32 color, int sx, int sy, int dx, int dy)
 {
-	int x;
-	int y;
-	int xlen;
-	int ylen;
-	int incr;
-
 	if (sx == dx) {
 		if (sy < dy) {
 			DrawVLine(color, sx, sy, dy - sy + 1);
@@ -331,15 +317,13 @@ void DrawLine(Uint32 color, int sx, int sy, int dx, int dy)
 
 	// exchange coordinates
 	if (sy > dy) {
-		int t;
-		t = dx;
-		dx = sx;
-		sx = t;
-		t = dy;
-		dy = sy;
-		sy = t;
+		std::swap(dx, sx);
+		std::swap(dy, sy);
 	}
-	ylen = dy - sy;
+	int xlen;
+	int incr;
+
+	int ylen = dy - sy;
 
 	if (sx > dx) {
 		xlen = sx - dx;
@@ -349,17 +333,14 @@ void DrawLine(Uint32 color, int sx, int sy, int dx, int dy)
 		incr = 1;
 	}
 
-	y = sy;
-	x = sx;
+	int y = sy;
+	int x = sx;
 
 	if (xlen > ylen) {
 		int p;
 
 		if (sx > dx) {
-			int t;
-			t = sx;
-			sx = dx;
-			dx = t;
+			std::swap(sx, dx);
 			y = dy;
 		}
 
@@ -380,9 +361,7 @@ void DrawLine(Uint32 color, int sx, int sy, int dx, int dy)
 	}
 
 	if (ylen > xlen) {
-		int p;
-
-		p = (xlen << 1) - ylen;
+		int p = (xlen << 1) - ylen;
 
 		Video.LockScreen();
 		for (y = sy; y < dy; ++y) {
@@ -415,12 +394,6 @@ void DrawLine(Uint32 color, int sx, int sy, int dx, int dy)
 */
 void DrawLineClip(Uint32 color, int sx, int sy, int dx, int dy)
 {
-	int x;
-	int y;
-	int xlen;
-	int ylen;
-	int incr;
-
 	if (sx == dx) {
 		if (sy < dy) {
 			DrawVLineClip(color, sx, sy, dy - sy + 1);
@@ -441,15 +414,12 @@ void DrawLineClip(Uint32 color, int sx, int sy, int dx, int dy)
 
 	// exchange coordinates
 	if (sy > dy) {
-		int t;
-		t = dx;
-		dx = sx;
-		sx = t;
-		t = dy;
-		dy = sy;
-		sy = t;
+		std::swap(dx, sx);
+		std::swap(dy, sy);
 	}
-	ylen = dy - sy;
+	int ylen = dy - sy;
+	int xlen;
+	int incr;
 
 	if (sx > dx) {
 		xlen = sx - dx;
@@ -459,21 +429,16 @@ void DrawLineClip(Uint32 color, int sx, int sy, int dx, int dy)
 		incr = 1;
 	}
 
-	y = sy;
-	x = sx;
+	int y = sy;
+	int x = sx;
 
 	if (xlen > ylen) {
-		int p;
-
 		if (sx > dx) {
-			int t;
-			t = sx;
-			sx = dx;
-			dx = t;
+			std::swap(dx, sx);
 			y = dy;
 		}
 
-		p = (ylen << 1) - xlen;
+		int p = (ylen << 1) - xlen;
 
 		Video.LockScreen();
 		for (x = sx; x < dx; ++x) {
@@ -490,9 +455,7 @@ void DrawLineClip(Uint32 color, int sx, int sy, int dx, int dy)
 	}
 
 	if (ylen > xlen) {
-		int p;
-
-		p = (xlen << 1) - ylen;
+		int p = (xlen << 1) - ylen;
 
 		Video.LockScreen();
 		for (y = sy; y < dy; ++y) {
@@ -602,7 +565,7 @@ void DrawTransRectangleClip(Uint32 color, int x, int y,
 */
 void FillRectangle(Uint32 color, int x, int y, int w, int h)
 {
-	SDL_Rect drect = {x, y, w, h};
+	SDL_Rect drect = {Sint16(x), Sint16(y), Uint16(w), Uint16(h)};
 	SDL_FillRect(TheScreen, &drect, color);
 }
 
@@ -660,15 +623,11 @@ void FillTransRectangleClip(Uint32 color, int x, int y,
 */
 void DrawCircle(Uint32 color, int x, int y, int r)
 {
-	int p;
-	int px;
-	int py;
-
-	p = 1 - r;
-	py = r;
+	int p = 1 - r;
+	int py = r;
 
 	Video.LockScreen();
-	for (px = 0; px <= py + 1; ++px) {
+	for (int px = 0; px <= py + 1; ++px) {
 		VideoDoDrawPixel(color, x + px, y + py);
 		VideoDoDrawPixel(color, x + px, y - py);
 		VideoDoDrawPixel(color, x - px, y + py);
@@ -695,15 +654,11 @@ void DrawCircle(Uint32 color, int x, int y, int r)
 void DrawTransCircle(Uint32 color, int x, int y,
 					 int r, unsigned char alpha)
 {
-	int p;
-	int px;
-	int py;
-
-	p = 1 - r;
-	py = r;
+	int p = 1 - r;
+	int py = r;
 
 	Video.LockScreen();
-	for (px = 0; px <= py + 1; ++px) {
+	for (int px = 0; px <= py + 1; ++px) {
 		VideoDoDrawTransPixel(color, x + px, y + py, alpha);
 		VideoDoDrawTransPixel(color, x + px, y - py, alpha);
 		VideoDoDrawTransPixel(color, x - px, y + py, alpha);
@@ -729,15 +684,11 @@ void DrawTransCircle(Uint32 color, int x, int y,
 */
 void DrawCircleClip(Uint32 color, int x, int y, int r)
 {
-	int p;
-	int px;
-	int py;
-
-	p = 1 - r;
-	py = r;
+	int p = 1 - r;
+	int py = r;
 
 	Video.LockScreen();
-	for (px = 0; px <= py + 1; ++px) {
+	for (int px = 0; px <= py + 1; ++px) {
 		VideoDoDrawPixelClip(color, x + px, y + py);
 		VideoDoDrawPixelClip(color, x + px, y - py);
 		VideoDoDrawPixelClip(color, x - px, y + py);
@@ -764,15 +715,11 @@ void DrawCircleClip(Uint32 color, int x, int y, int r)
 void DrawTransCircleClip(Uint32 color, int x, int y,
 						 int r, unsigned char alpha)
 {
-	int p;
-	int px;
-	int py;
-
-	p = 1 - r;
-	py = r;
+	int p = 1 - r;
+	int py = r;
 
 	Video.LockScreen();
-	for (px = 0; px <= py + 1; ++px) {
+	for (int px = 0; px <= py + 1; ++px) {
 		VideoDoDrawTransPixelClip(color, x + px, y + py, alpha);
 		VideoDoDrawTransPixelClip(color, x + px, y - py, alpha);
 		VideoDoDrawTransPixelClip(color, x - px, y + py, alpha);
@@ -798,14 +745,10 @@ void DrawTransCircleClip(Uint32 color, int x, int y,
 */
 void FillCircle(Uint32 color, int x, int y, int r)
 {
-	int p;
-	int px;
-	int py;
+	int p = 1 - r;
+	int py = r;
 
-	p = 1 - r;
-	py = r;
-
-	for (px = 0; px <= py; ++px) {
+	for (int px = 0; px <= py; ++px) {
 
 		// Fill up the middle half of the circle
 		DrawVLine(color, x + px, y, py + 1);
@@ -837,14 +780,10 @@ void FillCircle(Uint32 color, int x, int y, int r)
 void FillTransCircle(Uint32 color, int x, int y,
 					 int r, unsigned char alpha)
 {
-	int p;
-	int px;
-	int py;
+	int p = 1 - r;
+	int py = r;
 
-	p = 1 - r;
-	py = r;
-
-	for (px = 0; px <= py; ++px) {
+	for (int px = 0; px <= py; ++px) {
 
 		// Fill up the middle half of the circle
 		DrawTransVLine(color, x + px, y, py + 1, alpha);
@@ -875,14 +814,10 @@ void FillTransCircle(Uint32 color, int x, int y,
 */
 void FillCircleClip(Uint32 color, int x, int y, int r)
 {
-	int p;
-	int px;
-	int py;
+	int p = 1 - r;
+	int py = r;
 
-	p = 1 - r;
-	py = r;
-
-	for (px = 0; px <= py; ++px) {
+	for (int px = 0; px <= py; ++px) {
 
 		// Fill up the middle half of the circle
 		DrawVLineClip(color, x + px, y, py + 1);
@@ -914,14 +849,10 @@ void FillCircleClip(Uint32 color, int x, int y, int r)
 void FillTransCircleClip(Uint32 color, int x, int y,
 						 int r, unsigned char alpha)
 {
-	int p;
-	int px;
-	int py;
+	int p = 1 - r;
+	int py = r;
 
-	p = 1 - r;
-	py = r;
-
-	for (px = 0; px <= py; ++px) {
+	for (int px = 0; px <= py; ++px) {
 
 		// Fill up the middle half of the circle
 		DrawTransVLineClip(color, x + px, y, py + 1, alpha);
@@ -968,6 +899,9 @@ void InitLineDraw()
 }
 
 }
+
+#if defined(USE_OPENGL) || defined(USE_GLES)
+
 namespace linedraw_gl
 {
 
@@ -996,7 +930,8 @@ void DrawPixel(Uint32 color, int x, int y)
 	glDrawArrays(GL_POINTS, 0, 1);
 
 	glDisableClientState(GL_VERTEX_ARRAY);
-#else
+#endif
+#ifdef USE_OPENGL
 	glBegin(GL_POINTS);
 	glVertex2i(x, y);
 	glEnd();
@@ -1012,8 +947,7 @@ void DrawPixel(Uint32 color, int x, int y)
 **  @param y      y coordinate on the screen
 **  @param alpha  alpha value of pixel.
 */
-void DrawTransPixel(Uint32 color, int x, int y,
-					unsigned char alpha)
+void DrawTransPixel(Uint32 color, int x, int y, unsigned char alpha)
 {
 	GLubyte r, g, b;
 
@@ -1045,8 +979,7 @@ void DrawPixelClip(Uint32 color, int x, int y)
 **  @param y      y coordinate on the screen
 **  @param alpha  alpha value of pixel.
 */
-void DrawTransPixelClip(Uint32 color, int x, int y,
-						unsigned char alpha)
+void DrawTransPixelClip(Uint32 color, int x, int y, unsigned char alpha)
 {
 	GLubyte r, g, b;
 
@@ -1082,7 +1015,8 @@ void DrawHLine(Uint32 color, int x, int y, int width)
 	glDrawArrays(GL_LINES, 0, 2);
 
 	glDisableClientState(GL_VERTEX_ARRAY);
-#else
+#endif
+#ifdef USE_OPENGL
 	glBegin(GL_LINES);
 	glVertex2i(x, y);
 	glVertex2i(x + width, y);
@@ -1100,8 +1034,7 @@ void DrawHLine(Uint32 color, int x, int y, int width)
 **  @param width  width of line (0=don't draw).
 **  @param alpha  alpha value of pixels.
 */
-void DrawTransHLine(Uint32 color, int x, int y, int width,
-					unsigned char alpha)
+void DrawTransHLine(Uint32 color, int x, int y, int width, unsigned char alpha)
 {
 	GLubyte r, g, b;
 
@@ -1149,8 +1082,7 @@ void DrawHLineClip(Uint32 color, int x, int y, int width)
 **  @param width  Width of line (0=don't draw)
 **  @param alpha  Alpha value of pixels
 */
-void DrawTransHLineClip(Uint32 color, int x, int y, int width,
-						unsigned char alpha)
+void DrawTransHLineClip(Uint32 color, int x, int y, int width, unsigned char alpha)
 {
 	GLubyte r, g, b;
 
@@ -1186,7 +1118,8 @@ void DrawVLine(Uint32 color, int x, int y, int height)
 	glDrawArrays(GL_LINES, 0, 2);
 
 	glDisableClientState(GL_VERTEX_ARRAY);
-#else
+#endif
+#ifdef USE_OPENGL
 	glBegin(GL_LINES);
 	glVertex2i(x, y);
 	glVertex2i(x, y + height);
@@ -1204,8 +1137,7 @@ void DrawVLine(Uint32 color, int x, int y, int height)
 **  @param height  height of line (0=don't draw).
 **  @param alpha   alpha value of pixels.
 */
-void DrawTransVLine(Uint32 color, int x, int y, int height,
-					unsigned char alpha)
+void DrawTransVLine(Uint32 color, int x, int y, int height, unsigned char alpha)
 {
 	GLubyte r, g, b;
 
@@ -1253,8 +1185,7 @@ void DrawVLineClip(Uint32 color, int x, int y, int height)
 **  @param height  height of line (0=don't draw).
 **  @param alpha   alpha value of pixels.
 */
-void DrawTransVLineClip(Uint32 color, int x, int y,
-						int height, unsigned char alpha)
+void DrawTransVLineClip(Uint32 color, int x, int y, int height, unsigned char alpha)
 {
 	GLubyte r, g, b;
 
@@ -1274,13 +1205,12 @@ void DrawTransVLineClip(Uint32 color, int x, int y,
 */
 void DrawLine(Uint32 color, int x1, int y1, int x2, int y2)
 {
-	float xx1, yy1, xx2, yy2;
 	GLubyte r, g, b, a;
 
-	xx1 = (float)x1;
-	xx2 = (float)x2;
-	yy1 = (float)y1;
-	yy2 = (float)y2;
+	float xx1 = (float)x1;
+	float xx2 = (float)x2;
+	float yy1 = (float)y1;
+	float yy2 = (float)y2;
 
 	if (xx1 <= xx2) {
 		xx2 += 0.5f;
@@ -1308,7 +1238,8 @@ void DrawLine(Uint32 color, int x1, int y1, int x2, int y2)
 	glDrawArrays(GL_LINES, 0, 2);
 
 	glDisableClientState(GL_VERTEX_ARRAY);
-#else
+#endif
+#ifdef USE_OPENGL
 	glBegin(GL_LINES);
 	glVertex2f(xx1, yy1);
 	glVertex2f(xx2, yy2);
@@ -1385,7 +1316,6 @@ void DrawLineClip(Uint32 color, int x1, int y1, int x2, int y2)
 {
 	int code1;
 	int code2;
-	int temp;
 
 	// Make sure coordinates or on/in clipped rectangle
 	while (code1 = ClipCodeLine(x1, y1), code2 = ClipCodeLine(x2, y2),
@@ -1395,25 +1325,25 @@ void DrawLineClip(Uint32 color, int x1, int y1, int x2, int y2)
 		}
 
 		if (!code1) {
-			temp = x1; x1 = x2; x2 = temp;
-			temp = y1; y1 = y2; y2 = temp;
+			std::swap(x1, x2);
+			std::swap(y1, y2);
 			code1 = code2;
 		}
 
 		if (code1 & ClipCodeAbove) {
-			temp = ClipY1;
+			int temp = ClipY1;
 			x1 += (int)(((long)(temp - y1) * (x2 - x1)) / (y2 - y1));
 			y1 = temp;
 		} else if (code1 & ClipCodeBelow) {
-			temp = ClipY2;
+			int temp = ClipY2;
 			x1 += (int)(((long)(temp - y1) * (x2 - x1)) / (y2 - y1));
 			y1 = temp;
 		} else if (code1 & ClipCodeLeft) {
-			temp = ClipX1;
+			int temp = ClipX1;
 			y1 += (int)(((long)(temp - x1) * (y2 - y1)) / (x2 - x1));
 			x1 = temp;
 		} else {  /* code1 & ClipCodeRight */
-			temp = ClipX2;
+			int temp = ClipX2;
 			y1 += (int)(((long)(temp - x1) * (y2 - y1)) / (x2 - x1));
 			x1 = temp;
 		}
@@ -1483,19 +1413,20 @@ void DrawRectangle(Uint32 color, int x, int y, int w, int h)
 	glDrawArrays(GL_LINES, 0, 8);
 
 	glDisableClientState(GL_VERTEX_ARRAY);
-#else
+#endif
+#ifdef USE_OPENGL
 	glBegin(GL_LINES);
 	glVertex2i(x, y);
 	glVertex2i(x + w, y);
 
-	glVertex2i(x + w - 1, y + 1);
-	glVertex2i(x + w - 1, y + h);
+	glVertex2i(x + w, y);
+	glVertex2i(x + w, y + h);
 
-	glVertex2i(x + w - 1, y + h - 1);
-	glVertex2i(x, y + h - 1);
+	glVertex2i(x + w, y + h);
+	glVertex2i(x, y + h);
 
-	glVertex2i(x, y + h - 1);
-	glVertex2i(x, y + 1);
+	glVertex2i(x, y + h);
+	glVertex2i(x, y);
 	glEnd();
 #endif
 	glEnable(GL_TEXTURE_2D);
@@ -1533,12 +1464,6 @@ void DrawTransRectangle(Uint32 color, int x, int y,
 void DrawRectangleClip(Uint32 color, int x, int y,
 					   int w, int h)
 {
-	int f;
-	int left;
-	int right;
-	int top;
-	int bottom;
-
 	// Ensure non-empty rectangle
 	if (!w || !h) {
 		// rectangle is `void'
@@ -1546,10 +1471,13 @@ void DrawRectangleClip(Uint32 color, int x, int y,
 	}
 
 	// Clip rectangle boundary
-	left = right = top = bottom = 1;
+	int left = 1;
+	int right = 1;
+	int top = 1;
+	int bottom = 1;
 
 	if (x < ClipX1) {            // no left side
-		f = ClipX1 - x;
+		int f = ClipX1 - x;
 		if (w <= f) {
 			return;                    // entire rectangle left --> not visible
 		}
@@ -1565,7 +1493,7 @@ void DrawRectangleClip(Uint32 color, int x, int y,
 		right = 0;
 	}
 	if (y < ClipY1) {               // no top
-		f = ClipY1 - y;
+		int f = ClipY1 - y;
 		if (h <= f) {
 			return;                    // entire rectangle above --> not visible
 		}
@@ -1591,7 +1519,7 @@ void DrawRectangleClip(Uint32 color, int x, int y,
 		++y;
 	}
 	if (bottom) {
-		DrawHLine(color, x, y + h - 1, w);
+		DrawHLine(color, x, y + h, w);
 		--h;
 	}
 	if (left) {
@@ -1602,7 +1530,7 @@ void DrawRectangleClip(Uint32 color, int x, int y,
 		++x;
 	}
 	if (right) {
-		DrawVLine(color, x + w - 1, y, h);
+		DrawVLine(color, x + w, y, h);
 	}
 }
 
@@ -1657,7 +1585,8 @@ void FillRectangle(Uint32 color, int x, int y,
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
 	glDisableClientState(GL_VERTEX_ARRAY);
-#else
+#endif
+#ifdef USE_OPENGL
 	glBegin(GL_TRIANGLE_STRIP);
 	glVertex2i(x, y);
 	glVertex2i(x + w, y);
@@ -1734,17 +1663,11 @@ void FillTransRectangleClip(Uint32 color, int x, int y,
 */
 void DrawCircle(Uint32 color, int x, int y, int radius)
 {
-	int cx;
-	int cy;
-	int df;
-	int d_e;
-	int d_se;
-
-	cx = 0;
-	cy = radius;
-	df = 1 - radius;
-	d_e = 3;
-	d_se = -2 * radius + 5;
+	int cx = 0;
+	int cy = radius;
+	int df = 1 - radius;
+	int d_e = 3;
+	int d_se = -2 * radius + 5;
 
 	// FIXME: could be much improved :)
 	do {
@@ -1793,17 +1716,11 @@ void DrawCircle(Uint32 color, int x, int y, int radius)
 */
 void DrawCircleClip(Uint32 color, int x, int y, int radius)
 {
-	int cx;
-	int cy;
-	int df;
-	int d_e;
-	int d_se;
-
-	cx = 0;
-	cy = radius;
-	df = 1 - radius;
-	d_e = 3;
-	d_se = -2 * radius + 5;
+	int cx = 0;
+	int cy = radius;
+	int df = 1 - radius;
+	int d_e = 3;
+	int d_se = -2 * radius + 5;
 
 	// FIXME: could be much improved :)
 	do {
@@ -1890,14 +1807,10 @@ void DrawTransCircleClip(Uint32 color, int x, int y, int radius,
 */
 void FillCircle(Uint32 color, int x, int y, int radius)
 {
-	int p;
-	int px;
-	int py;
+	int p = 1 - radius;
+	int py = radius;
 
-	p = 1 - radius;
-	py = radius;
-
-	for (px = 0; px <= py; ++px) {
+	for (int px = 0; px <= py; ++px) {
 		// Fill up the middle half of the circle
 		DrawVLine(color, x + px, y, py + 1);
 		DrawVLine(color, x + px, y - py, py);
@@ -1951,17 +1864,11 @@ void FillTransCircle(Uint32 color, int x, int y,
 */
 void FillCircleClip(Uint32 color, int x, int y, int radius)
 {
-	int cx;
-	int cy;
-	int df;
-	int d_e;
-	int d_se;
-
-	cx = 0;
-	cy = radius;
-	df = 1 - radius;
-	d_e = 3;
-	d_se = -2 * radius + 5;
+	int cx = 0;
+	int cy = radius;
+	int df = 1 - radius;
+	int d_e = 3;
+	int d_se = -2 * radius + 5;
 
 	// FIXME: could be much improved :)
 	do {
@@ -2014,259 +1921,354 @@ void InitLineDraw()
 
 }
 
+#endif
+
 void CVideo::DrawPixelClip(Uint32 color, int x, int y)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::DrawPixelClip(color, x, y);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::DrawPixelClip(color, x, y);
 	}
 }
 void CVideo::DrawTransPixelClip(Uint32 color, int x, int y, unsigned char alpha)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::DrawTransPixelClip(color, x, y, alpha);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::DrawTransPixelClip(color, x, y, alpha);
 	}
 }
 
 void CVideo::DrawVLine(Uint32 color, int x, int y, int height)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::DrawVLine(color, x, y, height);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::DrawVLine(color, x, y, height);
 	}
 }
 void CVideo::DrawTransVLine(Uint32 color, int x, int y, int height, unsigned char alpha)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::DrawTransVLine(color, x, y, height, alpha);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::DrawTransVLine(color, x, y, height, alpha);
 	}
 }
 void CVideo::DrawVLineClip(Uint32 color, int x, int y, int height)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::DrawVLineClip(color, x, y, height);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::DrawVLineClip(color, x, y, height);
 	}
 }
 void CVideo::DrawTransVLineClip(Uint32 color, int x, int y, int height, unsigned char alpha)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::DrawTransVLineClip(color, x, y, height, alpha);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::DrawTransVLineClip(color, x, y, height, alpha);
 	}
 }
 
 void CVideo::DrawHLine(Uint32 color, int x, int y, int width)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::DrawHLine(color, x, y, width);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::DrawHLine(color, x, y, width);
 	}
 }
 void CVideo::DrawTransHLine(Uint32 color, int x, int y, int width, unsigned char alpha)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::DrawTransHLine(color, x, y, width, alpha);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::DrawTransHLine(color, x, y, width, alpha);
 	}
 }
 void CVideo::DrawHLineClip(Uint32 color, int x, int y, int width)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::DrawHLineClip(color, x, y, width);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::DrawHLineClip(color, x, y, width);
 	}
 }
 void CVideo::DrawTransHLineClip(Uint32 color, int x, int y, int width, unsigned char alpha)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::DrawTransHLineClip(color, x, y, width, alpha);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::DrawTransHLineClip(color, x, y, width, alpha);
 	}
 }
 
 void CVideo::DrawLine(Uint32 color, int sx, int sy, int dx, int dy)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::DrawLine(color, sx, sy, dx, dy);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::DrawLine(color, sx, sy, dx, dy);
 	}
 }
 void CVideo::DrawTransLine(Uint32 color, int sx, int sy, int dx, int dy, unsigned char alpha)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::DrawTransLine(color, sx, sy, dx, dy, alpha);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::DrawTransLine(color, sx, sy, dx, dy, alpha);
 	}
 }
 void CVideo::DrawLineClip(Uint32 color, const PixelPos &pos1, const PixelPos &pos2)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::DrawLineClip(color, pos1.x, pos1.y, pos2.x, pos2.y);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::DrawLineClip(color, pos1.x, pos1.y, pos2.x, pos2.y);
 	}
 }
 void CVideo::DrawTransLineClip(Uint32 color, int sx, int sy, int dx, int dy, unsigned char alpha)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::DrawTransLineClip(color, sx, sy, dx, dy, alpha);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::DrawTransLineClip(color, sx, sy, dx, dy, alpha);
 	}
 }
 
 void CVideo::DrawRectangle(Uint32 color, int x, int y, int w, int h)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::DrawRectangle(color, x, y, w, h);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::DrawRectangle(color, x, y, w, h);
 	}
 }
 void CVideo::DrawTransRectangle(Uint32 color, int x, int y, int w, int h, unsigned char alpha)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::DrawTransRectangle(color, x, y, w, h, alpha);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::DrawTransRectangle(color, x, y, w, h, alpha);
 	}
 }
 void CVideo::DrawRectangleClip(Uint32 color, int x, int y, int w, int h)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::DrawRectangleClip(color, x, y, w, h);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::DrawRectangleClip(color, x, y, w, h);
 	}
 }
 void CVideo::DrawTransRectangleClip(Uint32 color, int x, int y, int w, int h, unsigned char alpha)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::DrawTransRectangleClip(color, x, y, w, h, alpha);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::DrawTransRectangleClip(color, x, y, w, h, alpha);
 	}
 }
 
 void CVideo::FillRectangle(Uint32 color, int x, int y, int w, int h)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::FillRectangle(color, x, y, w, h);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::FillRectangle(color, x, y, w, h);
 	}
 }
 void CVideo::FillTransRectangle(Uint32 color, int x, int y, int w, int h, unsigned char alpha)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::FillTransRectangle(color, x, y, w, h, alpha);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::FillTransRectangle(color, x, y, w, h, alpha);
 	}
 }
 void CVideo::FillRectangleClip(Uint32 color, int x, int y, int w, int h)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::FillRectangleClip(color, x, y, w, h);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::FillRectangleClip(color, x, y, w, h);
 	}
 }
 void CVideo::FillTransRectangleClip(Uint32 color, int x, int y, int w, int h, unsigned char alpha)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::FillTransRectangleClip(color, x, y, w, h, alpha);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::FillTransRectangleClip(color, x, y, w, h, alpha);
 	}
 }
 
 void CVideo::DrawCircle(Uint32 color, int x, int y, int r)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::DrawCircle(color, x, y, r);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::DrawCircle(color, x, y, r);
 	}
 }
 void CVideo::DrawTransCircle(Uint32 color, int x, int y, int r, unsigned char alpha)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::DrawTransCircle(color, x, y, r, alpha);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::DrawTransCircle(color, x, y, r, alpha);
 	}
 }
 void CVideo::DrawCircleClip(Uint32 color, int x, int y, int r)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::DrawCircleClip(color, x, y, r);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::DrawCircleClip(color, x, y, r);
 	}
 }
 void CVideo::DrawTransCircleClip(Uint32 color, int x, int y, int r, unsigned char alpha)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::DrawTransCircleClip(color, x, y, r, alpha);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::DrawTransCircleClip(color, x, y, r, alpha);
 	}
 }
 
 void CVideo::FillCircle(Uint32 color, int x, int y, int r)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::FillCircle(color, x, y, r);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::FillCircle(color, x, y, r);
 	}
 }
 void CVideo::FillTransCircle(Uint32 color, int x, int y, int r, unsigned char alpha)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::FillTransCircle(color, x, y, r, alpha);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::FillTransCircle(color, x, y, r, alpha);
 	}
 }
 void CVideo::FillCircleClip(Uint32 color, const PixelPos &screenPos, int r)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::FillCircleClip(color, screenPos.x, screenPos.y, r);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::FillCircleClip(color, screenPos.x, screenPos.y, r);
 	}
 }
 void CVideo::FillTransCircleClip(Uint32 color, int x, int y, int r, unsigned char alpha)
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::FillTransCircleClip(color, x, y, r, alpha);
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::FillTransCircleClip(color, x, y, r, alpha);
 	}
 }
 
 void InitLineDraw()
 {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		linedraw_gl::InitLineDraw();
-	} else {
+	} else
+#endif
+	{
 		linedraw_sdl::InitLineDraw();
 	}
 }

@@ -10,7 +10,7 @@
 //
 /**@name animation_frame.cpp - The animation Frame. */
 //
-//      (c) Copyright 2012 by Joris Dauphin
+//      (c) Copyright 2012-2015 by Joris Dauphin and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -37,23 +37,32 @@
 
 #include "animation/animation_frame.h"
 
+#include "ui.h"
 #include "unit.h"
 
 /* virtual */ void CAnimation_Frame::Action(CUnit &unit, int &/*move*/, int /*scale*/) const
 {
 	Assert(unit.Anim.Anim == this);
-	unit.Frame = ParseAnimInt(&unit);
+	if (unit.Type->Building && unit.Type->NumDirections == 1 && FancyBuildings && unit.Type->BoolFlag[NORANDOMPLACING_INDEX].value == false && unit.Frame < 0) {
+	} else {
+		unit.Frame = ParseAnimInt(&unit);
+	}
+	
 	UnitUpdateHeading(unit);
 }
 
-/* virtual */ void CAnimation_Frame::Init(const char *s)
+/* virtual */ void CAnimation_Frame::Init(const char *s, lua_State *)
 {
 	this->frame = s;
 }
 
 int CAnimation_Frame::ParseAnimInt(const CUnit *unit) const
 {
-	return ::ParseAnimInt(unit, this->frame.c_str());
+	if (unit == NULL) {
+		return atoi(this->frame.c_str());
+	} else {
+		return ::ParseAnimInt(*unit, this->frame.c_str());
+	}
 }
 
 //@}

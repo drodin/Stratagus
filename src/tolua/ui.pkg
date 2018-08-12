@@ -1,5 +1,14 @@
 $using namespace gcn;
 
+#include "font.h"
+
+enum ViewportModeType {
+	VIEWPORT_SINGLE = 0,
+	VIEWPORT_SPLIT_HORIZ,
+	VIEWPORT_SPLIT_HORIZ3,
+	VIEWPORT_SPLIT_VERT,
+	VIEWPORT_QUAD
+};
 
 class LuaActionListener
 {
@@ -52,7 +61,7 @@ class CFiller
 
 class vector
 {
-	TOLUA_TEMPLATE_BIND(T, CFiller, CUIButton, string)
+	TOLUA_TEMPLATE_BIND(T, CFiller, CUIButton, CUIUserButton, string)
 
 	vector();
 	~vector();
@@ -109,8 +118,17 @@ class CResourceInfo
 
 class CInfoPanel
 {
+	CGraphic *G;
 	int X;
 	int Y;
+};
+
+class CUIUserButton
+{
+	CUIUserButton(); 
+
+	bool Clicked;
+	CUIButton Button;
 };
 
 class CStatusLine
@@ -171,6 +189,8 @@ class CUserInterface
 	CUIButton NetworkMenuButton;
 	CUIButton NetworkDiplomacyButton;
 
+	vector<CUIUserButton> UserButtons;
+
 	CMinimap Minimap;
 	CStatusLine StatusLine;
 	CUITimer Timer;
@@ -184,7 +204,7 @@ class CIcon
 	static CIcon *Get(const std::string ident);
 
 	tolua_readonly tolua_property__s std::string Ident;
-	CGraphic *G;
+	CPlayerColorGraphic *G;
 	int Frame;
 };
 
@@ -338,8 +358,10 @@ class ImageRadioButton : public RadioButton
 
 	void setUncheckedNormalImage(CGraphic *image);
 	void setUncheckedPressedImage(CGraphic *image);
+	void setUncheckedDisabledImage(CGraphic *image);
 	void setCheckedNormalImage(CGraphic *image);
 	void setCheckedPressedImage(CGraphic *image);
+	void setCheckedDisabledImage(CGraphic *image);
 };
 
 class CheckBox : public Widget
@@ -361,8 +383,10 @@ class ImageCheckBox : public CheckBox
 
 	void setUncheckedNormalImage(CGraphic *image);
 	void setUncheckedPressedImage(CGraphic *image);
+	void setUncheckedDisabledImage(CGraphic *image);
 	void setCheckedNormalImage(CGraphic *image);
 	void setCheckedPressedImage(CGraphic *image);
+	void setCheckedDisabledImage(CGraphic *image);
 };
 
 class Slider : public Widget
@@ -392,6 +416,7 @@ class ImageSlider : public Slider
 	ImageSlider(double scaleStart, double scaleEnd);
 	void setMarkerImage(CGraphic *image);
 	void setBackgroundImage(CGraphic *image);
+	void setDisabledBackgroundImage(CGraphic *image);
 };
 
 class Label : public Widget
@@ -442,7 +467,19 @@ class TextField : public Widget
 	virtual std::string &getText();
 };
 
+class ImageTextField : public Widget
+{
+	ImageTextField(const std::string text);
+	virtual void setText(const std::string text);
+	virtual std::string &getText();
+	void setItemImage(CGraphic *image);
+};
+
 class ListBox : public Widget
+{
+};
+
+class ImageListBox : public ListBox
 {
 };
 
@@ -452,6 +489,26 @@ class ListBoxWidget : public ScrollArea
 	void setList(lua_State *lua, lua_Object *lo);
 	void setSelected (int selected);
 	int getSelected();
+};
+
+class ImageListBoxWidget : public ListBoxWidget
+{
+	ImageListBoxWidget(unsigned int width, unsigned int height);
+	void setList(lua_State *lua, lua_Object *lo);
+	void setSelected (int selected);
+	int getSelected();
+	void setItemImage(CGraphic *image);
+	void setUpButtonImage(CGraphic *image);
+	void setUpPressedButtonImage(CGraphic *image);
+	void setDownButtonImage(CGraphic *image);
+	void setDownPressedButtonImage(CGraphic *image);
+	void setLeftButtonImage(CGraphic *image);
+	void setLeftPressedButtonImage(CGraphic *image);
+	void setRightButtonImage(CGraphic *image);
+	void setRightPressedButtonImage(CGraphic *image);
+	void setHBarImage(CGraphic *image);
+	void setVBarImage(CGraphic *image);
+	void setMarkerImage(CGraphic *image);
 };
 
 class Window : public BasicContainer
@@ -510,6 +567,17 @@ class DropDownWidget : public DropDown
 	virtual void setSize(int width, int height);
 };
 
+class ImageDropDownWidget : public DropDown
+{
+	ImageDropDownWidget();
+	void setList(lua_State *lua, lua_Object *lo);
+	virtual ListBox *getListBox();
+	virtual void setSize(int width, int height);
+	void setItemImage(CGraphic *image);
+	void setDownNormalImage(CGraphic *image);
+	void setDownPressedImage(CGraphic *image);
+};
+
 class StatBoxWidget : public Widget
 {
 	StatBoxWidget(int width, int height);
@@ -562,3 +630,12 @@ function MenuScreen()
 end
 $]
 
+void CenterOnMessage();
+void ToggleShowMessages();
+void UiFindIdleWorker();
+void CycleViewportMode(int step);
+void UiToggleTerrain();
+void UiTrackUnit();
+void SetNewViewportMode(ViewportModeType new_mode);
+
+void SetDefaultTextColors(const std::string &normal, const std::string &reverse);

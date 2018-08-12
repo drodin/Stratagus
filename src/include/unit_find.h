@@ -10,7 +10,8 @@
 //
 /**@name unit.h - The unit headerfile. */
 //
-//      (c) Copyright 1998-2012 by Lutz Sammer, Jimmy Salmon and Joris Dauphin
+//      (c) Copyright 1998-2015 by Lutz Sammer, Jimmy Salmon, Joris Dauphin
+//		and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -45,7 +46,19 @@
 //  Some predicates
 //
 
-class HasSameTypeAs
+class CUnitFilter
+{
+public:
+	bool operator()(const CUnit *unit) const { return true; };
+};
+
+class NoFilter : public CUnitFilter
+{
+public:
+	bool operator()(const CUnit *) const { return true; }
+};
+
+class HasSameTypeAs : public CUnitFilter
 {
 public:
 	explicit HasSameTypeAs(const CUnitType &_type) : type(&_type) {}
@@ -54,7 +67,7 @@ private:
 	const CUnitType *type;
 };
 
-class HasSamePlayerAs
+class HasSamePlayerAs : public CUnitFilter
 {
 public:
 	explicit HasSamePlayerAs(const CPlayer &_player) : player(&_player) {}
@@ -63,7 +76,7 @@ private:
 	const CPlayer *player;
 };
 
-class HasNotSamePlayerAs
+class HasNotSamePlayerAs : public CUnitFilter
 {
 public:
 	explicit HasNotSamePlayerAs(const CPlayer &_player) : player(&_player) {}
@@ -72,7 +85,7 @@ private:
 	const CPlayer *player;
 };
 
-class IsAlliedWith
+class IsAlliedWith : public CUnitFilter
 {
 public:
 	explicit IsAlliedWith(const CPlayer &_player) : player(&_player) {}
@@ -81,7 +94,7 @@ private:
 	const CPlayer *player;
 };
 
-class IsEnemyWith
+class IsEnemyWith : public CUnitFilter
 {
 public:
 	explicit IsEnemyWith(const CPlayer &_player) : player(&_player) {}
@@ -90,7 +103,7 @@ private:
 	const CPlayer *player;
 };
 
-class HasSamePlayerAndTypeAs
+class HasSamePlayerAndTypeAs : public CUnitFilter
 {
 public:
 	explicit HasSamePlayerAndTypeAs(const CUnit &unit) :
@@ -100,7 +113,8 @@ public:
 		player(&_player), type(&_type)
 	{}
 
-	bool operator()(const CUnit *unit) const {
+	bool operator()(const CUnit *unit) const
+	{
 		return (unit->Player == player && unit->Type == type);
 	}
 
@@ -109,7 +123,7 @@ private:
 	const CUnitType *type;
 };
 
-class IsNotTheSameUnitAs
+class IsNotTheSameUnitAs : public CUnitFilter
 {
 public:
 	explicit IsNotTheSameUnitAs(const CUnit &unit) : forbidden(&unit) {}
@@ -118,15 +132,31 @@ private:
 	const CUnit *forbidden;
 };
 
-class IsBuildingType
+class IsBuildingType : public CUnitFilter
 {
 public:
 	bool operator()(const CUnit *unit) const { return unit->Type->Building; }
 };
 
+class IsAggresiveUnit : public CUnitFilter
+{
+public:
+	bool operator()(const CUnit *unit) const { return unit->IsAgressive(); }
+};
+
+class OutOfMinRange : public CUnitFilter
+{
+public:
+	explicit OutOfMinRange(const int range, const Vec2i pos) : range(range), pos(pos) {}
+	bool operator()(const CUnit *unit) const { return unit->MapDistanceTo(pos) >= range; }
+private:
+	int range;
+	Vec2i pos;
+};
+
 
 template <typename Pred>
-class NotPredicate
+class NotPredicate : public CUnitFilter
 {
 public:
 	explicit NotPredicate(Pred _pred) : pred(_pred) {}
@@ -139,7 +169,7 @@ template <typename Pred>
 NotPredicate<Pred> MakeNotPredicate(Pred pred) { return NotPredicate<Pred>(pred); }
 
 template <typename Pred1, typename Pred2>
-class AndPredicate
+class AndPredicate : public CUnitFilter
 {
 public:
 	AndPredicate(Pred1 _pred1, Pred2 _pred2) : pred1(_pred1), pred2(_pred2) {}
@@ -158,9 +188,10 @@ class CUnitTypeFinder
 {
 public:
 	explicit CUnitTypeFinder(const UnitTypeType t) : unitTypeType(t) {}
-	bool operator()(const CUnit *const unit) const {
+	bool operator()(const CUnit *const unit) const
+	{
 		const CUnitType &type = *unit->Type;
-		if (type.Vanishes || (unitTypeType != static_cast<UnitTypeType>(-1) && type.UnitType != unitTypeType)) {
+		if (type.BoolFlag[VANISHES_INDEX].value || (unitTypeType != static_cast<UnitTypeType>(-1) && type.UnitType != unitTypeType)) {
 			return false;
 		}
 		return true;
@@ -281,10 +312,10 @@ extern CUnit *FindIdleWorker(const CPlayer &player, const CUnit *last);
 extern bool FindTerrainType(int movemask, int resmask, int range,
 							const CPlayer &player, const Vec2i &startPos, Vec2i *pos);
 
-extern void FindUnitsByType(const CUnitType &type, std::vector<CUnit *> &units);
+extern void FindUnitsByType(const CUnitType &type, std::vector<CUnit *> &units, bool everybody = false);
 
 /// Find all units of this type of the player
-extern void FindPlayerUnitsByType(const CPlayer &player, const CUnitType &type, std::vector<CUnit *> &units);
+extern void FindPlayerUnitsByType(const CPlayer &player, const CUnitType &type, std::vector<CUnit *> &units, bool ai_active = false);
 /// Return any unit on that map tile
 extern CUnit *UnitOnMapTile(const Vec2i &pos, unsigned int type);// = -1);
 /// Return possible attack target on that map area
@@ -295,12 +326,19 @@ extern CUnit *ResourceOnMap(const Vec2i &pos, int resource, bool mine_on_top = t
 /// Return resource deposit, if on map tile
 extern CUnit *ResourceDepositOnMap(const Vec2i &pos, int resource);
 
+/// Check map for obstacles in a line between 2 tiles
+extern bool CheckObstaclesBetweenTiles(const Vec2i &unitPos, const Vec2i &goalPos, unsigned short flags, int *distance = NULL);
 /// Find best enemy in numeric range to attack
-extern CUnit *AttackUnitsInDistance(const CUnit &unit, int range, bool onlyBuildings = false);
+extern CUnit *AttackUnitsInDistance(const CUnit &unit, int range, CUnitFilter pred);
+extern CUnit *AttackUnitsInDistance(const CUnit &unit, int range);
 /// Find best enemy in attack range to attack
+extern CUnit *AttackUnitsInRange(const CUnit &unit, CUnitFilter pred);
 extern CUnit *AttackUnitsInRange(const CUnit &unit);
 /// Find best enemy in reaction range to attack
+extern CUnit *AttackUnitsInReactRange(const CUnit &unit, CUnitFilter pred);
 extern CUnit *AttackUnitsInReactRange(const CUnit &unit);
+
+
 
 //@}
 

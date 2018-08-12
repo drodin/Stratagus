@@ -101,12 +101,13 @@ static void MovieCallbackMouseExit()
 /**
 **  Draw Ogg data to the overlay
 */
-static int OutputTheora(OggData *data, SDL_Overlay *yuv_overlay, SDL_Rect *rect)
+static int OutputTheora(OggData *data, SDL_Texture *yuv_overlay, SDL_Rect *rect)
 {
 	yuv_buffer yuv;
 
 	theora_decode_YUVout(&data->tstate, &yuv);
 
+#if 0
 	if (SDL_MUSTLOCK(TheScreen)) {
 		if (SDL_LockSurface(TheScreen) < 0) {
 			return - 1;
@@ -136,8 +137,11 @@ static int OutputTheora(OggData *data, SDL_Overlay *yuv_overlay, SDL_Rect *rect)
 		SDL_UnlockSurface(TheScreen);
 	}
 	SDL_UnlockYUVOverlay(yuv_overlay);
+#endif
 
-	SDL_DisplayYUVOverlay(yuv_overlay, rect);
+	SDL_UpdateYUVTexture(yuv_overlay, NULL, yuv.y, yuv.y_stride, yuv.u, yuv.uv_stride, yuv.v, yuv.uv_stride);
+	SDL_RenderCopy(TheRenderer, yuv_overlay, NULL, NULL);
+	SDL_RenderPresent(TheRenderer);
 
 	return 0;
 }
@@ -173,13 +177,20 @@ static int TheoraProcessData(OggData *data)
 */
 int PlayMovie(const std::string &name)
 {
-	char buffer[PATH_MAX];
+	int videoWidth, videoHeight;
+#if defined(USE_OPENGL) || defined(USE_GLES)
+	videoWidth  = Video.ViewportWidth;
+	videoHeight = Video.ViewportHeight;
+#else
+	videoWidth  = Video.Width;
+	videoHeight = Video.Height;
+#endif
 
-	LibraryFileName(name.c_str(), buffer, sizeof(buffer));
+	const std::string filename = LibraryFileName(name.c_str());
 
 	CFile f;
-	if (f.open(buffer, CL_OPEN_READ) == -1) {
-		fprintf(stderr, "Can't open file `%s'\n", name.c_str());
+	if (f.open(filename.c_str(), CL_OPEN_READ) == -1) {
+		fprintf(stderr, "Can't open file '%s'\n", name.c_str());
 		return 0;
 	}
 
@@ -195,43 +206,48 @@ int PlayMovie(const std::string &name)
 	SDL_Rect rect;
 
 	if (data.tinfo.frame_width * 300 / 4 > data.tinfo.frame_height * 100) {
-		rect.w = Video.Width;
-		rect.h = Video.Width * data.tinfo.frame_height / data.tinfo.frame_width;
+		rect.w = videoWidth;
+		rect.h = videoWidth * data.tinfo.frame_height / data.tinfo.frame_width;
 		rect.x = 0;
-		rect.y = (Video.Height - rect.h) / 2;
+		rect.y = (videoHeight - rect.h) / 2;
 	} else {
-		rect.w = Video.Height * data.tinfo.frame_width / data.tinfo.frame_height;
-		rect.h = Video.Height;
-		rect.x = (Video.Width - rect.w) / 2;
+		rect.w = videoHeight * data.tinfo.frame_width / data.tinfo.frame_height;
+		rect.h = videoHeight;
+		rect.x = (videoWidth - rect.w) / 2;
 		rect.y = 0;
 	}
 
-#ifndef USE_GLES
+#ifdef USE_OPENGL
 	// When SDL_OPENGL is used, it is not possible to call SDL_CreateYUVOverlay, so turn temporary OpenGL off
 	// With GLES is all ok
 	if (UseOpenGL) {
-		SDL_SetVideoMode(Video.Width, Video.Height, Video.Depth, SDL_GetVideoSurface()->flags & ~SDL_OPENGL);
+		//SDL_SetVideoMode(Video.ViewportWidth, Video.ViewportHeight, Video.Depth, SDL_GetVideoSurface()->flags & ~SDL_OPENGL);
 	}
 #endif
 
-	SDL_FillRect(SDL_GetVideoSurface(), NULL, 0);
+	SDL_RenderClear(TheRenderer);
 	Video.ClearScreen();
-	SDL_Overlay *yuv_overlay = SDL_CreateYUVOverlay(data.tinfo.frame_width, data.tinfo.frame_height, SDL_YV12_OVERLAY, TheScreen);
+	SDL_Texture *yuv_overlay = SDL_CreateTexture(TheRenderer,
+	                                             SDL_PIXELFORMAT_YV12,
+	                                             SDL_TEXTUREACCESS_STREAMING,
+	                                             data.tinfo.frame_width,
+	                                             data.tinfo.frame_height);
 
 	if (yuv_overlay == NULL) {
 		fprintf(stderr, "SDL_CreateYUVOverlay: %s\n", SDL_GetError());
+		fprintf(stderr, "SDL_CreateYUVOverlay: %dx%d\n", data.tinfo.frame_width, data.tinfo.frame_height);
 		OggFree(&data);
 		f.close();
 		return 0;
 	}
 
 	StopMusic();
-	CSample *sample = LoadVorbis(buffer, PlayAudioStream);
+	CSample *sample = LoadVorbis(filename.c_str(), PlayAudioStream);
 	if (sample) {
 		if ((sample->Channels != 1 && sample->Channels != 2) || sample->SampleSize != 16) {
 			fprintf(stderr, "Unsupported sound format in movie\n");
 			delete sample;
-			SDL_FreeYUVOverlay(yuv_overlay);
+			SDL_DestroyTexture(yuv_overlay);
 			OggFree(&data);
 			f.close();
 			return 0;
@@ -284,14 +300,14 @@ int PlayMovie(const std::string &name)
 	}
 
 	StopMusic();
-	SDL_FreeYUVOverlay(yuv_overlay);
+	SDL_DestroyTexture(yuv_overlay);
 
 	OggFree(&data);
 	f.close();
 
-#ifndef USE_GLES
+#ifdef USE_OPENGL
 	if (UseOpenGL) {
-		SDL_SetVideoMode(Video.Width, Video.Height, Video.Depth, SDL_GetVideoSurface()->flags | SDL_OPENGL);
+		//SDL_SetVideoMode(Video.ViewportWidth, Video.ViewportHeight, Video.Depth, SDL_GetVideoSurface()->flags | SDL_OPENGL);
 		ReloadOpenGL();
 	}
 #endif

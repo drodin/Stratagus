@@ -40,6 +40,7 @@
 #include <vector>
 
 #include "script.h"
+#include "translate.h"
 #include "ui.h"
 #include "video.h"
 
@@ -94,7 +95,7 @@ void CConstruction::Load()
 	this->Width = this->File.Width;
 	this->Height = this->File.Height;
 	if (!file.empty()) {
-		ShowLoadProgress("Construction %s", file.c_str());
+		ShowLoadProgress(_("Construction %s"), file.c_str());
 		this->Sprite = CPlayerColorGraphic::New(file, this->Width, this->Height);
 		this->Sprite->Load();
 		this->Sprite->Flip();
@@ -103,7 +104,7 @@ void CConstruction::Load()
 	this->ShadowWidth = this->ShadowFile.Width;
 	this->ShadowHeight = this->ShadowFile.Height;
 	if (!file.empty()) {
-		ShowLoadProgress("Construction %s", file.c_str());
+		ShowLoadProgress(_("Construction %s"), file.c_str());
 		this->ShadowSprite = CGraphic::ForceNew(file, this->ShadowWidth, this->ShadowHeight);
 		this->ShadowSprite->Load();
 		this->ShadowSprite->Flip();
@@ -123,7 +124,7 @@ void InitConstructions()
 **  Load the graphics for the constructions.
 **
 **  HELPME: who make this better terrain depended and extendable
-**  HELPME: filename constuction.
+**  HELPME: filename construction.
 */
 void LoadConstructions()
 {
@@ -215,15 +216,7 @@ static int CclDefineConstruction(lua_State *l)
 				if (!strcmp(value, "File")) {
 					file = LuaToString(l, -1);
 				} else if (!strcmp(value, "Size")) {
-					if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 2) {
-						LuaError(l, "incorrect argument");
-					}
-					lua_rawgeti(l, -1, 1);
-					w = LuaToNumber(l, -1);
-					lua_pop(l, 1);
-					lua_rawgeti(l, -1, 2);
-					h = LuaToNumber(l, -1);
-					lua_pop(l, 1);
+					CclGetPos(l, &w, &h);
 				} else {
 					LuaError(l, "Unsupported tag: %s" _C_ value);
 				}

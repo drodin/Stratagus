@@ -46,12 +46,14 @@ struct LandMineTargetFinder {
 	int CanHitOwner;
 	LandMineTargetFinder(const CUnit *unit, int hit):
 		source(unit), CanHitOwner(hit) {}
-	inline bool operator()(const CUnit *const unit) const {
+	inline bool operator()(const CUnit *const unit) const
+	{
 		return (!(unit == source && !CanHitOwner)
 				&& unit->Type->UnitType != UnitTypeFly
 				&& unit->CurrentAction() != UnitActionDie);
 	}
-	inline CUnit *FindOnTile(const CMapField *const mf) const {
+	inline CUnit *FindOnTile(const CMapField *const mf) const
+	{
 		return mf->UnitCache.find(*this);
 	}
 };
@@ -59,7 +61,7 @@ struct LandMineTargetFinder {
 /**
 **  Land mine controller.
 **  @todo start-finish-start cyclic animation.(anim scripts!)
-**  @todo missile should dissapear for a while.
+**  @todo missile should disappear for a while.
 */
 void MissileLandMine::Action()
 {

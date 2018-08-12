@@ -38,13 +38,13 @@
 #include "map.h"
 
 #include "iolib.h"
-#include "minimap.h"
-#include "player.h"
 #include "script.h"
+#include "tileset.h"
+#include "translate.h"
 #include "ui.h"
 #include "unit.h"
-#include "unittype.h"
 #include "version.h"
+#include "video.h"
 
 /*----------------------------------------------------------------------------
 --  Functions
@@ -57,27 +57,17 @@
 */
 static int CclStratagusMap(lua_State *l)
 {
-	const char *value;
-	int args;
-	int j;
-	int subargs;
-	int k;
-
-	//
-	//  Parse the list: (still everything could be changed!)
-	//
-
-	args = lua_gettop(l);
-	for (j = 0; j < args; ++j) {
-		value = LuaToString(l, j + 1);
+	int args = lua_gettop(l);
+	for (int j = 0; j < args; ++j) {
+		const char *value = LuaToString(l, j + 1);
 		++j;
 
 		if (!strcmp(value, "version")) {
 			char buf[32];
 
-			value = LuaToString(l, j + 1);
-			snprintf(buf, sizeof(buf), StratagusFormatString, StratagusFormatArgs(StratagusVersion));
-			if (strcmp(buf, value)) {
+			const char *version = LuaToString(l, j + 1);
+			strncpy(buf, VERSION, sizeof(buf));
+			if (strcmp(buf, version)) {
 				fprintf(stderr, "Warning not saved with this version.\n");
 			}
 		} else if (!strcmp(value, "uid")) {
@@ -88,24 +78,14 @@ static int CclStratagusMap(lua_State *l)
 			if (!lua_istable(l, j + 1)) {
 				LuaError(l, "incorrect argument");
 			}
-			subargs = lua_rawlen(l, j + 1);
-			for (k = 0; k < subargs; ++k) {
-				lua_rawgeti(l, j + 1, k + 1);
-				value = LuaToString(l, -1);
-				lua_pop(l, 1);
+			int subargs = lua_rawlen(l, j + 1);
+			for (int k = 0; k < subargs; ++k) {
+				const char *value = LuaToString(l, j + 1, k + 1);
 				++k;
 
 				if (!strcmp(value, "size")) {
 					lua_rawgeti(l, j + 1, k + 1);
-					if (!lua_istable(l, -1)) {
-						LuaError(l, "incorrect argument");
-					}
-					lua_rawgeti(l, -1, 1);
-					Map.Info.MapWidth = LuaToNumber(l, -1);
-					lua_pop(l, 1);
-					lua_rawgeti(l, -1, 2);
-					Map.Info.MapHeight = LuaToNumber(l, -1);
-					lua_pop(l, 1);
+					CclGetPos(l, &Map.Info.MapWidth, &Map.Info.MapHeight);
 					lua_pop(l, 1);
 
 					delete[] Map.Fields;
@@ -118,109 +98,33 @@ static int CclStratagusMap(lua_State *l)
 					Map.NoFogOfWar = true;
 					--k;
 				} else if (!strcmp(value, "filename")) {
-					lua_rawgeti(l, j + 1, k + 1);
-					Map.Info.Filename = LuaToString(l, -1);
-					lua_pop(l, 1);
+					Map.Info.Filename = LuaToString(l, j + 1, k + 1);
 				} else if (!strcmp(value, "map-fields")) {
-					int i;
-					int subsubargs;
-					int subk;
-
 					lua_rawgeti(l, j + 1, k + 1);
 					if (!lua_istable(l, -1)) {
 						LuaError(l, "incorrect argument");
 					}
-
-					subsubargs = lua_rawlen(l, -1);
+					const int subsubargs = lua_rawlen(l, -1);
 					if (subsubargs != Map.Info.MapWidth * Map.Info.MapHeight) {
 						fprintf(stderr, "Wrong tile table length: %d\n", subsubargs);
 					}
-					i = 0;
-					for (subk = 0; subk < subsubargs; ++subk) {
-						int args2;
-						int j2;
-
-						lua_rawgeti(l, -1, subk + 1);
+					for (int i = 0; i < subsubargs; ++i) {
+						lua_rawgeti(l, -1, i + 1);
 						if (!lua_istable(l, -1)) {
 							LuaError(l, "incorrect argument");
 						}
-						args2 = lua_rawlen(l, -1);
-						j2 = 0;
-
-						lua_rawgeti(l, -1, j2 + 1);
-						Map.Fields[i].Tile = LuaToNumber(l, -1);
+						Map.Fields[i].parse(l);
 						lua_pop(l, 1);
-						++j2;
-						lua_rawgeti(l, -1, j2 + 1);
-						Map.Fields[i].SeenTile = LuaToNumber(l, -1);
-						lua_pop(l, 1);
-						++j2;
-						lua_rawgeti(l, -1, j2 + 1);
-						Map.Fields[i].Value = LuaToNumber(l, -1);
-						lua_pop(l, 1);
-						++j2;
-						lua_rawgeti(l, -1, j2 + 1);
-						Map.Fields[i].Cost = LuaToNumber(l, -1);
-						lua_pop(l, 1);
-						++j2;
-						for (; j2 < args2; ++j2) {
-							lua_rawgeti(l, -1, j2 + 1);
-							value = LuaToString(l, -1);
-							lua_pop(l, 1);
-							if (!strcmp(value, "explored")) {
-								++j2;
-								lua_rawgeti(l, -1, j2 + 1);
-								Map.Fields[i].Visible[(int)LuaToNumber(l, -1)] = 1;
-								lua_pop(l, 1);
-							} else if (!strcmp(value, "human")) {
-								Map.Fields[i].Flags |= MapFieldHuman;
-
-							} else if (!strcmp(value, "land")) {
-								Map.Fields[i].Flags |= MapFieldLandAllowed;
-							} else if (!strcmp(value, "coast")) {
-								Map.Fields[i].Flags |= MapFieldCoastAllowed;
-							} else if (!strcmp(value, "water")) {
-								Map.Fields[i].Flags |= MapFieldWaterAllowed;
-
-							} else if (!strcmp(value, "mud")) {
-								Map.Fields[i].Flags |= MapFieldNoBuilding;
-							} else if (!strcmp(value, "block")) {
-								Map.Fields[i].Flags |= MapFieldUnpassable;
-
-							} else if (!strcmp(value, "wall")) {
-								Map.Fields[i].Flags |= MapFieldWall;
-							} else if (!strcmp(value, "rock")) {
-								Map.Fields[i].Flags |= MapFieldRocks;
-							} else if (!strcmp(value, "wood")) {
-								Map.Fields[i].Flags |= MapFieldForest;
-
-							} else if (!strcmp(value, "ground")) {
-								Map.Fields[i].Flags |= MapFieldLandUnit;
-							} else if (!strcmp(value, "air")) {
-								Map.Fields[i].Flags |= MapFieldAirUnit;
-							} else if (!strcmp(value, "sea")) {
-								Map.Fields[i].Flags |= MapFieldSeaUnit;
-							} else if (!strcmp(value, "building")) {
-								Map.Fields[i].Flags |= MapFieldBuilding;
-
-							} else {
-								LuaError(l, "Unsupported tag: %s" _C_ value);
-							}
-						}
-						lua_pop(l, 1);
-						++i;
 					}
 					lua_pop(l, 1);
 				} else {
 					LuaError(l, "Unsupported tag: %s" _C_ value);
 				}
 			}
-
 		} else {
 			LuaError(l, "Unsupported tag: %s" _C_ value);
 		}
 	}
-
 	return 0;
 }
 
@@ -237,7 +141,6 @@ static int CclRevealMap(lua_State *l)
 	} else {
 		Map.Reveal();
 	}
-
 	return 0;
 }
 
@@ -345,10 +248,8 @@ static int CclSetMinimapTerrain(lua_State *l)
 */
 static int CclSetFogOfWarOpacity(lua_State *l)
 {
-	int i;
-
 	LuaCheckArgs(l, 1);
-	i = LuaToNumber(l, 1);
+	int i = LuaToNumber(l, 1);
 	if (i < 0 || i > 255) {
 		PrintFunction();
 		fprintf(stdout, "Opacity should be 0 - 256\n");
@@ -359,7 +260,6 @@ static int CclSetFogOfWarOpacity(lua_State *l)
 	if (!CclInConfigFile) {
 		Map.Init();
 	}
-
 	return 0;
 }
 
@@ -372,17 +272,14 @@ static int CclSetFogOfWarOpacity(lua_State *l)
 */
 static int CclSetForestRegeneration(lua_State *l)
 {
-	int i;
-	int old;
-
 	LuaCheckArgs(l, 1);
-	i = LuaToNumber(l, 1);
+	int i = LuaToNumber(l, 1);
 	if (i < 0 || i > 255) {
 		PrintFunction();
 		fprintf(stdout, "Regeneration speed should be 0 - 255\n");
 		i = 100;
 	}
-	old = ForestRegeneration;
+	const int old = ForestRegeneration;
 	ForestRegeneration = i;
 
 	lua_pushnumber(l, old);
@@ -396,22 +293,19 @@ static int CclSetForestRegeneration(lua_State *l)
 */
 static int CclSetFogOfWarColor(lua_State *l)
 {
-	int r, g, b;
-
 	LuaCheckArgs(l, 3);
-	r = LuaToNumber(l, 1);
-	g = LuaToNumber(l, 2);
-	b = LuaToNumber(l, 3);
+	int r = LuaToNumber(l, 1);
+	int g = LuaToNumber(l, 2);
+	int b = LuaToNumber(l, 3);
 
 	if ((r < 0 || r > 255) ||
 		(g < 0 || g > 255) ||
 		(b < 0 || b > 255)) {
 		LuaError(l, "Arguments must be in the range 0-255");
 	}
-
-	FogOfWarColor[0] = r;
-	FogOfWarColor[1] = g;
-	FogOfWarColor[2] = b;
+	FogOfWarColor.R = r;
+	FogOfWarColor.G = g;
+	FogOfWarColor.B = b;
 
 	return 0;
 }
@@ -438,35 +332,29 @@ static int CclSetFogOfWarGraphics(lua_State *l)
 /**
 **  Set a tile
 **
-**  @param tile   Tile number
+**  @param tileIndex   Tile number
 **  @param pos    coordinate
 **  @param value  Value of the tile
 */
-void SetTile(int tile, const Vec2i &pos, int value)
+void SetTile(unsigned int tileIndex, const Vec2i &pos, int value)
 {
 	if (!Map.Info.IsPointOnMap(pos)) {
 		fprintf(stderr, "Invalid map coordonate : (%d, %d)\n", pos.x, pos.y);
 		return;
 	}
-	if (tile < 0 || tile >= Map.Tileset.NumTiles) {
-		fprintf(stderr, "Invalid tile number: %d\n", tile);
+	if (Map.Tileset->getTileCount() <= tileIndex) {
+		fprintf(stderr, "Invalid tile number: %d\n", tileIndex);
 		return;
 	}
 	if (value < 0 || value >= 256) {
-		fprintf(stderr, "Invalid tile number: %d\n", tile);
+		fprintf(stderr, "Invalid tile number: %d\n", tileIndex);
 		return;
 	}
 
 	if (Map.Fields) {
 		CMapField &mf = *Map.Field(pos);
 
-		mf.Tile = Map.Tileset.Table[tile];
-		mf.Value = value;
-		mf.Flags = Map.Tileset.FlagsTable[tile];
-		mf.Cost = 1 << (Map.Tileset.FlagsTable[tile] & MapFieldSpeedMask);
-#ifdef DEBUG
-		mf.TilesetTile = tile;
-#endif
+		mf.setTileIndex(*Map.Tileset, tileIndex, value);
 	}
 }
 
@@ -477,21 +365,17 @@ void SetTile(int tile, const Vec2i &pos, int value)
 */
 static int CclDefinePlayerTypes(lua_State *l)
 {
-	const char *type;
-	int numplayers;
-	int i;
-
-	numplayers = lua_gettop(l); /* Number of players == number of arguments */
+	int numplayers = lua_gettop(l); /* Number of players == number of arguments */
 	if (numplayers < 2) {
 		LuaError(l, "Not enough players");
 	}
 
-	for (i = 0; i < numplayers && i < PlayerMax; ++i) {
+	for (int i = 0; i < numplayers && i < PlayerMax; ++i) {
 		if (lua_isnil(l, i + 1)) {
 			numplayers = i;
 			break;
 		}
-		type = LuaToString(l, i + 1);
+		const char *type = LuaToString(l, i + 1);
 		if (!strcmp(type, "neutral")) {
 			Map.Info.PlayerType[i] = PlayerNeutral;
 		} else if (!strcmp(type, "nobody")) {
@@ -508,7 +392,7 @@ static int CclDefinePlayerTypes(lua_State *l)
 			LuaError(l, "Unsupported tag: %s" _C_ type);
 		}
 	}
-	for (i = numplayers; i < PlayerMax - 1; ++i) {
+	for (int i = numplayers; i < PlayerMax - 1; ++i) {
 		Map.Info.PlayerType[i] = PlayerNobody;
 	}
 	if (numplayers < PlayerMax) {
@@ -524,17 +408,136 @@ static int CclDefinePlayerTypes(lua_State *l)
 */
 static int CclLoadTileModels(lua_State *l)
 {
-	char buf[1024];
-
 	if (lua_gettop(l) != 1) {
 		LuaError(l, "incorrect argument");
 	}
 	Map.TileModelsFileName = LuaToString(l, 1);
-	LibraryFileName(Map.TileModelsFileName.c_str(), buf, sizeof(buf));
-	if (LuaLoadFile(buf) == -1) {
-		DebugPrint("Load failed: %s\n" _C_ LuaToString(l, 1));
+	const std::string filename = LibraryFileName(Map.TileModelsFileName.c_str());
+	if (LuaLoadFile(filename) == -1) {
+		DebugPrint("Load failed: %s\n" _C_ filename.c_str());
 	}
 	return 0;
+}
+
+/**
+**  Define tileset
+**
+**  @param l  Lua state.
+*/
+static int CclDefineTileset(lua_State *l)
+{
+	Map.Tileset->parse(l);
+
+	//  Load and prepare the tileset
+	PixelTileSize = Map.Tileset->getPixelTileSize();
+
+	ShowLoadProgress(_("Tileset '%s'"), Map.Tileset->ImageFile.c_str());
+	Map.TileGraphic = CGraphic::New(Map.Tileset->ImageFile, PixelTileSize.x, PixelTileSize.y);
+	Map.TileGraphic->Load();
+	return 0;
+}
+/**
+** Build tileset tables like humanWallTable or mixedLookupTable
+**
+** Called after DefineTileset and only for tilesets that have wall,
+** trees and rocks. This function will be deleted when removing
+** support of walls and alike in the tileset.
+*/
+static int CclBuildTilesetTables(lua_State *l)
+{
+	LuaCheckArgs(l, 0);
+
+	Map.Tileset->buildTable(l);
+	return 0;
+}
+/**
+**  Set the flags like "water" for a tile of a tileset
+**
+**  @param l  Lua state.
+*/
+static int CclSetTileFlags(lua_State *l)
+{
+	if (lua_gettop(l) < 2) {
+		LuaError(l, "No flags defined");
+	}
+	const unsigned int tilenumber = LuaToNumber(l, 1);
+
+	if (tilenumber >= Map.Tileset->tiles.size()) {
+		LuaError(l, "Accessed a tile that's not defined");
+	}
+	int j = 0;
+	int flags = 0;
+
+	ParseTilesetTileFlags(l, &flags, &j);
+	Map.Tileset->tiles[tilenumber].flag = flags;
+	return 0;
+}
+
+/**
+**  Get the name of the terrain of the tile.
+**
+**  @param l  Lua state.
+**
+**  @return   The name of the terrain of the tile.
+*/
+static int CclGetTileTerrainName(lua_State *l)
+{
+	LuaCheckArgs(l, 2);
+
+	const Vec2i pos(LuaToNumber(l, 1), LuaToNumber(l, 2));
+
+	const CMapField &mf = *Map.Field(pos);
+	const CTileset &tileset = *Map.Tileset;
+	const int index = tileset.findTileIndexByTile(mf.getGraphicTile());
+	Assert(index != -1);
+	const int baseTerrainIdx = tileset.tiles[index].tileinfo.BaseTerrain;
+
+	lua_pushstring(l, tileset.getTerrainName(baseTerrainIdx).c_str());
+	return 1;
+}
+
+/**
+**  Check if the tile's terrain has a particular flag.
+**
+**  @param l  Lua state.
+**
+**  @return   True if has the flag, false if not.
+*/
+static int CclGetTileTerrainHasFlag(lua_State *l)
+{
+	LuaCheckArgs(l, 3);
+
+	const Vec2i pos(LuaToNumber(l, 1), LuaToNumber(l, 2));
+
+	unsigned short flag = 0;
+	const char *flag_name = LuaToString(l, 3);
+	if (!strcmp(flag_name, "water")) {
+		flag = MapFieldWaterAllowed;
+	} else if (!strcmp(flag_name, "land")) {
+		flag = MapFieldLandAllowed;
+	} else if (!strcmp(flag_name, "coast")) {
+		flag = MapFieldCoastAllowed;
+	} else if (!strcmp(flag_name, "no-building")) {
+		flag = MapFieldNoBuilding;
+	} else if (!strcmp(flag_name, "unpassable")) {
+		flag = MapFieldUnpassable;
+	} else if (!strcmp(flag_name, "wall")) {
+		flag = MapFieldWall;
+	} else if (!strcmp(flag_name, "rock")) {
+		flag = MapFieldRocks;
+	} else if (!strcmp(flag_name, "forest")) {
+		flag = MapFieldForest;
+	}
+
+	const CMapField &mf = *Map.Field(pos);
+
+	if (mf.getFlag() & flag) {
+		lua_pushboolean(l, 1);
+	} else {
+		lua_pushboolean(l, 0);
+	}
+
+	return 1;
 }
 
 /**
@@ -560,6 +563,13 @@ void MapCclRegister()
 
 	lua_register(Lua, "LoadTileModels", CclLoadTileModels);
 	lua_register(Lua, "DefinePlayerTypes", CclDefinePlayerTypes);
+
+	lua_register(Lua, "DefineTileset", CclDefineTileset);
+	lua_register(Lua, "SetTileFlags", CclSetTileFlags);
+	lua_register(Lua, "BuildTilesetTables", CclBuildTilesetTables);
+
+	lua_register(Lua, "GetTileTerrainName", CclGetTileTerrainName);
+	lua_register(Lua, "GetTileTerrainHasFlag", CclGetTileTerrainHasFlag);
 }
 
 //@}

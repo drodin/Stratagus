@@ -10,7 +10,7 @@
 //
 /**@name mouse.cpp - The mouse handling. */
 //
-//      (c) Copyright 1998-2007 by Lutz Sammer and Jimmy Salmon
+//      (c) Copyright 1998-2015 by Lutz Sammer, Jimmy Salmon and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -37,11 +37,13 @@
 ----------------------------------------------------------------------------*/
 
 #include <ctype.h>
+#include <stdexcept>
 
 #include "stratagus.h"
 
 #include "ui.h"
 
+#include "action/action_build.h"
 #include "action/action_train.h"
 #include "actions.h"
 #include "commands.h"
@@ -56,7 +58,6 @@
 #include "player.h"
 #include "sound.h"
 #include "spells.h"
-#include "tileset.h"
 #include "translate.h"
 #include "unit.h"
 #include "unit_find.h"
@@ -76,6 +77,7 @@ int KeyModifiers;                            /// Current keyboard modifiers
 CUnit *UnitUnderCursor;                      /// Unit under cursor
 int ButtonAreaUnderCursor = -1;              /// Button area under cursor
 int ButtonUnderCursor = -1;                  /// Button under cursor
+int OldButtonUnderCursor = -1;               /// Button under cursor
 bool GameMenuButtonClicked;                  /// Menu button was clicked
 bool GameDiplomacyButtonClicked;             /// Diplomacy button was clicked
 bool LeaveStops;                             /// Mouse leaves windows stops scroll
@@ -99,9 +101,22 @@ void CancelBuildingMode()
 {
 	CursorBuilding = NULL;
 	UI.StatusLine.Clear();
-	ClearCosts();
+	UI.StatusLine.ClearCosts();
 	CurrentButtonLevel = 0;
 	UI.ButtonPanel.Update();
+}
+
+static bool CanBuildOnArea(const CUnit &unit, const Vec2i &pos)
+{
+	for (int j = 0; j < unit.Type->TileHeight; ++j) {
+		for (int i = 0; i < unit.Type->TileWidth; ++i) {
+			const Vec2i tempPos(i, j);
+			if (!Map.Field(pos + tempPos)->playerInfo.IsExplored(*ThisPlayer)) {
+				return false;
+			}
+		}
+	}
+	return true;
 }
 
 static void DoRightButton_ForForeignUnit(CUnit *dest)
@@ -116,10 +131,10 @@ static void DoRightButton_ForForeignUnit(CUnit *dest)
 	const int res = unit.Type->GivesResource;
 
 	if (res
-		&& dest->Type->Harvester
+		&& dest->Type->BoolFlag[HARVESTER_INDEX].value
 		&& dest->Type->ResInfo[res]
 		&& dest->ResourcesHeld < dest->Type->ResInfo[res]->ResourceCapacity
-		&& unit.Type->CanHarvest) {
+		&& unit.Type->BoolFlag[CANHARVEST_INDEX].value) {
 		unit.Blink = 4;
 		//  Right mouse with SHIFT appends command to old commands.
 		const int flush = !(KeyModifiers & ModifierShift);
@@ -185,7 +200,75 @@ static bool DoRightButton_Transporter(CUnit &unit, CUnit *dest, int flush, int &
 	return false;
 }
 
-static bool DoRightButton_Harvest(CUnit &unit, CUnit *dest, const Vec2i &pos, int flush, int &acknowledged)
+static bool DoRightButton_Harvest_Unit(CUnit &unit, CUnit &dest, int flush, int &acknowledged)
+{
+	// Return a loaded harvester to deposit
+	if (unit.ResourcesHeld > 0
+		&& dest.Type->CanStore[unit.CurrentResource]
+		&& (dest.Player == unit.Player
+			|| (dest.Player->IsAllied(*unit.Player) && unit.Player->IsAllied(*dest.Player)))) {
+		dest.Blink = 4;
+		if (!acknowledged) {
+			PlayUnitSound(unit, VoiceAcknowledging);
+			acknowledged = 1;
+		}
+		SendCommandReturnGoods(unit, &dest, flush);
+		return true;
+	}
+	// Go and harvest from a unit
+	const int res = dest.Type->GivesResource;
+	const CUnitType &type = *unit.Type;
+	if (res && type.ResInfo[res] && dest.Type->BoolFlag[CANHARVEST_INDEX].value
+		&& (dest.Player == unit.Player || dest.Player->Index == PlayerNumNeutral)) {
+			if (unit.ResourcesHeld < type.ResInfo[res]->ResourceCapacity) {
+				dest.Blink = 4;
+				SendCommandResource(unit, dest, flush);
+				if (!acknowledged) {
+					PlayUnitSound(unit, VoiceHarvesting);
+					acknowledged = 1;
+				}
+				return true;
+			} else {
+				CUnit *depot = FindDeposit(unit, 1000, unit.CurrentResource);
+				if (depot) {
+					dest.Blink = 4;
+					if (!acknowledged) {
+						PlayUnitSound(unit, VoiceAcknowledging);
+						acknowledged = 1;
+					}
+					SendCommandReturnGoods(unit, depot, flush);
+					return true;
+				}
+			}
+	}
+	return false;
+}
+
+static bool DoRightButton_Harvest_Pos(CUnit &unit, const Vec2i &pos, int flush, int &acknowledged)
+{
+	if (!Map.Field(pos)->playerInfo.IsExplored(*unit.Player)) {
+		return false;
+	}
+	const CUnitType &type = *unit.Type;
+	// FIXME: support harvesting more types of terrain.
+	for (int res = 0; res < MaxCosts; ++res) {
+		if (type.ResInfo[res]
+			&& type.ResInfo[res]->TerrainHarvester
+			&& Map.Field(pos)->IsTerrainResourceOnMap(res)
+			&& ((unit.CurrentResource != res)
+				|| (unit.ResourcesHeld < type.ResInfo[res]->ResourceCapacity))) {
+			SendCommandResourceLoc(unit, pos, flush);
+			if (!acknowledged) {
+				PlayUnitSound(unit, VoiceHarvesting);
+				acknowledged = 1;
+			}
+			return true;
+		}
+	}
+	return false;
+}
+
+static bool DoRightButton_Worker(CUnit &unit, CUnit *dest, const Vec2i &pos, int flush, int &acknowledged)
 {
 	const CUnitType &type = *unit.Type;
 
@@ -196,71 +279,37 @@ static bool DoRightButton_Harvest(CUnit &unit, CUnit *dest, const Vec2i &pos, in
 		&& (dest->Player == unit.Player || unit.IsAllied(*dest))) {
 		dest->Blink = 4;
 		if (!acknowledged) {
-			PlayUnitSound(unit, VoiceAcknowledging);
+			PlayUnitSound(unit, VoiceRepairing);
 			acknowledged = 1;
 		}
 		SendCommandRepair(unit, pos, dest, flush);
 		return true;
 	}
 	// Harvest
-	if (type.Harvester) {
+	if (type.BoolFlag[HARVESTER_INDEX].value) {
 		if (dest != NULL) {
-			// Return a loaded harvester to deposit
-			if (unit.ResourcesHeld > 0
-				&& dest->Type->CanStore[unit.CurrentResource]
-				&& dest->Player == unit.Player) {
-				dest->Blink = 4;
-				if (!acknowledged) {
-					PlayUnitSound(unit, VoiceAcknowledging);
-					acknowledged = 1;
-				}
-				SendCommandReturnGoods(unit, dest, flush);
-				return true;
-			}
-			// Go and harvest from a unit
-			const int res = dest->Type->GivesResource;
-			if (res
-				&& type.ResInfo[res]
-				&& unit.ResourcesHeld < type.ResInfo[res]->ResourceCapacity
-				&& dest->Type->CanHarvest
-				&& (dest->Player == unit.Player || dest->Player->Index == PlayerNumNeutral)) {
-				dest->Blink = 4;
-				if (!acknowledged) {
-					PlayUnitSound(unit, VoiceAcknowledging);
-					acknowledged = 1;
-				}
-				SendCommandResource(unit, *dest, flush);
+			if (DoRightButton_Harvest_Unit(unit, *dest, flush, acknowledged)) {
 				return true;
 			}
 		} else {
-			if (Map.IsFieldExplored(*unit.Player, pos)) {
-				// FIXME: support harvesting more types of terrain.
-				for (int res = 0; res < MaxCosts; ++res) {
-					if (type.ResInfo[res]
-						&& type.ResInfo[res]->TerrainHarvester
-						&& Map.IsTerrainResourceOnMap(pos, res)
-						&& ((unit.CurrentResource != res)
-							|| (unit.ResourcesHeld < type.ResInfo[res]->ResourceCapacity))) {
-						if (!acknowledged) {
-							PlayUnitSound(unit, VoiceAcknowledging);
-							acknowledged = 1;
-						}
-						SendCommandResourceLoc(unit, pos, flush);
-						return true;
-					}
-				}
+			if (DoRightButton_Harvest_Pos(unit, pos, flush, acknowledged)) {
+				return true;
 			}
 		}
 	}
 	// Follow another unit
 	if (UnitUnderCursor != NULL && dest != NULL && dest != &unit
-		&& (dest->Player == unit.Player || unit.IsAllied(*dest))) {
+		&& (dest->Player == unit.Player || unit.IsAllied(*dest) || dest->Player->Index == PlayerNumNeutral)) {
 		dest->Blink = 4;
 		if (!acknowledged) {
 			PlayUnitSound(unit, VoiceAcknowledging);
 			acknowledged = 1;
 		}
-		SendCommandFollow(unit, *dest, flush);
+		if (dest->Type->CanMove() == false && !dest->Type->BoolFlag[TELEPORTER_INDEX].value) {
+			SendCommandMove(unit, pos, flush);
+		} else {
+			SendCommandFollow(unit, *dest, flush);
+		}
 		return true;
 	}
 	// Move
@@ -272,41 +321,53 @@ static bool DoRightButton_Harvest(CUnit &unit, CUnit *dest, const Vec2i &pos, in
 	return true;
 }
 
-static void DoRightButton_Attack(CUnit &unit, CUnit *dest, const Vec2i &pos, int flush, int &acknowledged)
+static bool DoRightButton_AttackUnit(CUnit &unit, CUnit &dest, const Vec2i &pos, int flush, int &acknowledged)
 {
 	const CUnitType &type = *unit.Type;
 	const int action = type.MouseAction;
 
-	if (dest != NULL && unit.CurrentAction() != UnitActionBuilt) {
-		if (action == MouseActionSpellCast || unit.IsEnemy(*dest)) {
-			dest->Blink = 4;
-			if (!acknowledged) {
-				PlayUnitSound(unit, VoiceAttack);
-				acknowledged = 1;
-			}
-			if (action == MouseActionSpellCast) {
-				// This is for demolition squads and such
-				Assert(unit.Type->CanCastSpell);
-				size_t spellnum;
-				for (spellnum = 0; !type.CanCastSpell[spellnum] && spellnum < SpellTypeTable.size() ; spellnum++) {
-				}
-				SendCommandSpellCast(unit, pos, dest, spellnum, flush);
-			} else {
-				if (CanTarget(&type, dest->Type)) {
-					SendCommandAttack(unit, pos, dest, flush);
-				} else { // No valid target
-					SendCommandAttack(unit, pos, NoUnitP, flush);
-				}
-			}
-			return;
+	if (action == MouseActionSpellCast || unit.IsEnemy(dest)) {
+		dest.Blink = 4;
+		if (!acknowledged) {
+			PlayUnitSound(unit, VoiceAttack);
+			acknowledged = 1;
 		}
-		if ((dest->Player == unit.Player || unit.IsAllied(*dest)) && dest != &unit) {
-			dest->Blink = 4;
-			if (!acknowledged) {
-				PlayUnitSound(unit, VoiceAcknowledging);
-				acknowledged = 1;
+		if (action == MouseActionSpellCast) {
+			// This is for demolition squads and such
+			Assert(unit.Type->CanCastSpell);
+			size_t spellnum;
+			for (spellnum = 0; !type.CanCastSpell[spellnum] && spellnum < SpellTypeTable.size() ; spellnum++) {
 			}
-			SendCommandFollow(unit, *dest, flush);
+			SendCommandSpellCast(unit, pos, &dest, spellnum, flush);
+		} else {
+			if (CanTarget(type, *dest.Type)) {
+				SendCommandAttack(unit, pos, &dest, flush);
+			} else { // No valid target
+				SendCommandAttack(unit, pos, NoUnitP, flush);
+			}
+		}
+		return true;
+	}
+	if ((dest.Player == unit.Player || unit.IsAllied(dest) || dest.Player->Index == PlayerNumNeutral) && &dest != &unit) {
+		dest.Blink = 4;
+		if (!acknowledged) {
+			PlayUnitSound(unit, VoiceAcknowledging);
+			acknowledged = 1;
+		}
+		if (!dest.Type->CanMove() && !dest.Type->BoolFlag[TELEPORTER_INDEX].value) {
+			SendCommandMove(unit, pos, flush);
+		} else {
+			SendCommandFollow(unit, dest, flush);
+		}
+		return true;
+	}
+	return false;
+}
+
+static void DoRightButton_Attack(CUnit &unit, CUnit *dest, const Vec2i &pos, int flush, int &acknowledged)
+{
+	if (dest != NULL && unit.CurrentAction() != UnitActionBuilt) {
+		if (DoRightButton_AttackUnit(unit, *dest, pos, flush, acknowledged)) {
 			return;
 		}
 	}
@@ -356,13 +417,17 @@ static void DoRightButton_Attack(CUnit &unit, CUnit *dest, const Vec2i &pos, int
 
 static bool DoRightButton_Follow(CUnit &unit, CUnit &dest, int flush, int &acknowledged)
 {
-	if (dest.Player == unit.Player || unit.IsAllied(dest)) {
+	if (dest.Player == unit.Player || unit.IsAllied(dest) || dest.Player->Index == PlayerNumNeutral) {
 		dest.Blink = 4;
 		if (!acknowledged) {
 			PlayUnitSound(unit, VoiceAcknowledging);
 			acknowledged = 1;
 		}
-		SendCommandFollow(unit, dest, flush);
+		if (dest.Type->CanMove() == false && !dest.Type->BoolFlag[TELEPORTER_INDEX].value) {
+			SendCommandMove(unit, dest.tilePos, flush);
+		} else {
+			SendCommandFollow(unit, dest, flush);
+		}
 		return true;
 	}
 	return false;
@@ -389,7 +454,7 @@ static bool DoRightButton_Harvest_Reverse(CUnit &unit, CUnit &dest, int flush, i
 	if (res
 		&& dest.Type->ResInfo[res]
 		&& dest.ResourcesHeld < dest.Type->ResInfo[res]->ResourceCapacity
-		&& type.CanHarvest
+		&& type.BoolFlag[CANHARVEST_INDEX].value
 		&& dest.Player == unit.Player) {
 		unit.Blink = 4;
 		SendCommandResource(dest, unit, flush);
@@ -401,7 +466,7 @@ static bool DoRightButton_Harvest_Reverse(CUnit &unit, CUnit &dest, int flush, i
 static bool DoRightButton_NewOrder(CUnit &unit, CUnit *dest, const Vec2i &pos, int flush, int &acknowledged)
 {
 	// Go and harvest from a unit
-	if (dest != NULL && dest->Type->GivesResource && dest->Type->CanHarvest
+	if (dest != NULL && dest->Type->GivesResource && dest->Type->BoolFlag[CANHARVEST_INDEX].value
 		&& (dest->Player == unit.Player || dest->Player->Index == PlayerNumNeutral)) {
 		dest->Blink = 4;
 		if (!acknowledged) {
@@ -412,7 +477,8 @@ static bool DoRightButton_NewOrder(CUnit &unit, CUnit *dest, const Vec2i &pos, i
 		return true;
 	}
 	// FIXME: support harvesting more types of terrain.
-	if (Map.IsFieldExplored(*unit.Player, pos) && Map.IsTerrainResourceOnMap(pos)) {
+	const CMapField &mf = *Map.Field(pos);
+	if (mf.playerInfo.IsExplored(*unit.Player) && mf.IsTerrainResourceOnMap()) {
 		if (!acknowledged) {
 			PlayUnitSound(unit, VoiceAcknowledging);
 			acknowledged = 1;
@@ -425,8 +491,11 @@ static bool DoRightButton_NewOrder(CUnit &unit, CUnit *dest, const Vec2i &pos, i
 
 static void DoRightButton_ForSelectedUnit(CUnit &unit, CUnit *dest, const Vec2i &pos, int &acknowledged)
 {
-	// don't self targetting.
+	// don't self targeting.
 	if (dest == &unit) {
+		return;
+	}
+	if (unit.Removed) {
 		return;
 	}
 	const CUnitType &type = *unit.Type;
@@ -434,6 +503,17 @@ static void DoRightButton_ForSelectedUnit(CUnit &unit, CUnit *dest, const Vec2i 
 	//  Right mouse with SHIFT appends command to old commands.
 	const int flush = !(KeyModifiers & ModifierShift);
 
+	//  Control + alt click - ground attack
+	if ((KeyModifiers & ModifierControl) && (KeyModifiers & ModifierAlt)) {
+		if (unit.Type->BoolFlag[GROUNDATTACK_INDEX].value) {
+			if (!acknowledged) {
+				PlayUnitSound(unit, VoiceAttack);
+				acknowledged = 1;
+			}
+			SendCommandAttackGround(unit, pos, flush);
+			return;
+		}
+	}
 	//  Control + right click on unit is follow anything.
 	if ((KeyModifiers & ModifierControl) && dest) {
 		dest->Blink = 4;
@@ -445,13 +525,24 @@ static void DoRightButton_ForSelectedUnit(CUnit &unit, CUnit *dest, const Vec2i 
 		return;
 	}
 
+	//  Alt + right click on unit is defend anything.
+	if ((KeyModifiers & ModifierAlt) && dest) {
+		dest->Blink = 4;
+		if (!acknowledged) {
+			PlayUnitSound(unit, VoiceAcknowledging);
+			acknowledged = 1;
+		}
+		SendCommandDefend(unit, *dest, flush);
+		return;
+	}
+
 	if (DoRightButton_Transporter(unit, dest, flush, acknowledged)) {
 		return;
 	}
 
 	//  Handle resource workers.
 	if (action == MouseActionHarvest) {
-		DoRightButton_Harvest(unit, dest, pos, flush, acknowledged);
+		DoRightButton_Worker(unit, dest, pos, flush, acknowledged);
 		return;
 	}
 
@@ -469,7 +560,7 @@ static void DoRightButton_ForSelectedUnit(CUnit &unit, CUnit *dest, const Vec2i 
 	}
 
 	// Manage harvester from the destination side.
-	if (dest != NULL && dest->Type->Harvester) {
+	if (dest != NULL && dest->Type->BoolFlag[HARVESTER_INDEX].value) {
 		if (DoRightButton_Harvest_Reverse(unit, *dest, flush, acknowledged)) {
 			return;
 		}
@@ -496,13 +587,13 @@ static void DoRightButton_ForSelectedUnit(CUnit &unit, CUnit *dest, const Vec2i 
 void DoRightButton(const PixelPos &mapPixelPos)
 {
 	// No unit selected
-	if (!NumSelected) {
+	if (Selected.empty()) {
 		return;
 	}
 	const Vec2i pos = Map.MapPixelPosToTilePos(mapPixelPos);
 	CUnit *dest;            // unit under the cursor if any.
 
-	if (UnitUnderCursor != NULL && !UnitUnderCursor->Type->Decoration) {
+	if (UnitUnderCursor != NULL && !UnitUnderCursor->Type->BoolFlag[DECORATION_INDEX].value) {
 		dest = UnitUnderCursor;
 	} else {
 		dest = NULL;
@@ -517,7 +608,7 @@ void DoRightButton(const PixelPos &mapPixelPos)
 	}
 
 	if (dest != NULL && dest->Type->CanTransport()) {
-		for (int i = 0; i < NumSelected; i++) {
+		for (size_t i = 0; i != Selected.size(); ++i) {
 			if (CanTransport(*dest, *Selected[i])) {
 				// We are clicking on a transporter. We have to:
 				// 1) Flush the transporters orders.
@@ -533,7 +624,7 @@ void DoRightButton(const PixelPos &mapPixelPos)
 	}
 
 	int acknowledged = 0; // to play sound
-	for (int i = 0; i < NumSelected; ++i) {
+	for (size_t i = 0; i != Selected.size(); ++i) {
 		Assert(Selected[i]);
 		CUnit &unit = *Selected[i];
 
@@ -545,10 +636,9 @@ void DoRightButton(const PixelPos &mapPixelPos)
 /**
 **  Check if the mouse is on a button
 **
-**  @param x       X screen coordinate.
-**  @param y       Y screen coordinate.
+**  @param screenPos  screen coordinate.
 **
-**  @return        True if mouse is on the button, False otherwise.
+**  @return True if mouse is on the button, False otherwise.
 */
 bool CUIButton::Contains(const PixelPos &screenPos) const
 {
@@ -605,19 +695,32 @@ static void HandleMouseOn(const PixelPos screenPos)
 			}
 		}
 	}
+	for (size_t i = 0; i < UI.UserButtons.size(); ++i) {
+		const CUIUserButton &button = UI.UserButtons[i];
+
+		if (button.Button.X != -1) {
+			if (button.Button.Contains(screenPos)) {
+				ButtonAreaUnderCursor = ButtonAreaUser;
+				ButtonUnderCursor = i;
+				CursorOn = CursorOnButton;
+				return;
+			}
+		}
+
+	}
 	const size_t buttonCount = UI.ButtonPanel.Buttons.size();
 	for (unsigned int j = 0; j < buttonCount; ++j) {
 		if (UI.ButtonPanel.Buttons[j].Contains(screenPos)) {
 			ButtonAreaUnderCursor = ButtonAreaButton;
-			if (CurrentButtons.IsValid() && CurrentButtons[j].Pos != -1) {
+			if (!CurrentButtons.empty() && CurrentButtons[j].Pos != -1) {
 				ButtonUnderCursor = j;
 				CursorOn = CursorOnButton;
 				return;
 			}
 		}
 	}
-	if (NumSelected > 0) {
-		if (NumSelected == 1 && Selected[0]->Type->CanTransport() && Selected[0]->BoardCount) {
+	if (!Selected.empty()) {
+		if (Selected.size() == 1 && Selected[0]->Type->CanTransport() && Selected[0]->BoardCount) {
 			const size_t size = UI.TransportingButtons.size();
 
 			for (size_t i = std::min<size_t>(Selected[0]->BoardCount, size); i != 0;) {
@@ -630,7 +733,7 @@ static void HandleMouseOn(const PixelPos screenPos)
 				}
 			}
 		}
-		if (NumSelected == 1) {
+		if (Selected.size() == 1) {
 			if (Selected[0]->CurrentAction() == UnitActionTrain) {
 				if (Selected[0]->Orders.size() == 1) {
 					if (UI.SingleTrainingButton->Contains(screenPos)) {
@@ -669,7 +772,7 @@ static void HandleMouseOn(const PixelPos screenPos)
 				}
 			}
 		}
-		if (NumSelected == 1) {
+		if (Selected.size() == 1) {
 			if (UI.SingleSelectedButton && UI.SingleSelectedButton->Contains(screenPos)) {
 				ButtonAreaUnderCursor = ButtonAreaSelected;
 				ButtonUnderCursor = 0;
@@ -679,7 +782,7 @@ static void HandleMouseOn(const PixelPos screenPos)
 		} else {
 			const size_t size = UI.SelectedButtons.size();
 
-			for (size_t i = std::min<size_t>(NumSelected, size); i != 0;) {
+			for (size_t i = std::min(Selected.size(), size); i != 0;) {
 				--i;
 				if (UI.SelectedButtons[i].Contains(screenPos)) {
 					ButtonAreaUnderCursor = ButtonAreaSelected;
@@ -778,24 +881,12 @@ void RestrictCursorToMinimap()
 /**
 **  Use the mouse to scroll the map
 **
-**  @param x  Screen X position.
-**  @param y  Screen Y position.
+**  @param pos  Screen position.
 */
-void MouseScrollMap(int x, int y)
+static void MouseScrollMap(const PixelPos &pos)
 {
-	int speed;
-
-	if (KeyModifiers & ModifierControl) {
-		speed = UI.MouseScrollSpeedControl;
-	} else {
-		speed = UI.MouseScrollSpeedDefault;
-	}
-
-#ifdef ANDROID
-	speed = 1;
-#endif
-
-	const PixelDiff diff(x - CursorStartScreenPos.x, y - CursorStartScreenPos.y);
+	const int speed = (KeyModifiers & ModifierControl) ? UI.MouseScrollSpeedControl : UI.MouseScrollSpeedDefault;
+	const PixelDiff diff(pos - CursorStartScreenPos);
 
 	UI.MouseViewport->Set(UI.MouseViewport->MapPos, UI.MouseViewport->Offset + speed * diff);
 	UI.MouseWarpPos = CursorStartScreenPos;
@@ -804,16 +895,14 @@ void MouseScrollMap(int x, int y)
 /**
 **  Handle movement of the cursor.
 **
-**  @param mousePos  Screen X position.
+**  @param cursorPos  Screen X position.
 */
 void UIHandleMouseMove(const PixelPos &cursorPos)
 {
 	enum _cursor_on_ OldCursorOn;
 
 	OldCursorOn = CursorOn;
-	//
 	//  Selecting units.
-	//
 	if (CursorState == CursorStateRectangle) {
 		// Restrict cursor to viewport.
 		UI.SelectedViewport->Restrict(CursorScreenPos.x, CursorScreenPos.y);
@@ -821,11 +910,9 @@ void UIHandleMouseMove(const PixelPos &cursorPos)
 		return;
 	}
 
-	//
 	//  Move map.
-	//
 	if (GameCursor == UI.Scroll.Cursor) {
-		MouseScrollMap(cursorPos.x, cursorPos.y);
+		MouseScrollMap(cursorPos);
 		return;
 	}
 
@@ -833,9 +920,7 @@ void UIHandleMouseMove(const PixelPos &cursorPos)
 	GameCursor = UI.Point.Cursor;  // Reset
 	HandleMouseOn(cursorPos);
 
-	//
 	//  Make the piemenu "follow" the mouse
-	//
 	if (CursorState == CursorStatePieMenu && CursorOn == CursorOnMap) {
 		clamp(&CursorStartScreenPos.x, CursorScreenPos.x - UI.PieMenu.X[2], CursorScreenPos.x + UI.PieMenu.X[2]);
 		clamp(&CursorStartScreenPos.y, CursorScreenPos.y - UI.PieMenu.Y[4], CursorScreenPos.y + UI.PieMenu.Y[4]);
@@ -851,11 +936,17 @@ void UIHandleMouseMove(const PixelPos &cursorPos)
 		return;
 	}
 
-	//
 	//  User may be draging with button pressed.
-	//
 	if (GameMenuButtonClicked || GameDiplomacyButtonClicked) {
 		return;
+	} else {
+		for (size_t i = 0; i < UI.UserButtons.size(); ++i) {
+			const CUIUserButton &button = UI.UserButtons[i];
+
+			if (button.Clicked) {
+				return;
+			}
+		}
 	}
 
 	// This is forbidden for unexplored and not visible space
@@ -864,6 +955,44 @@ void UIHandleMouseMove(const PixelPos &cursorPos)
 		const CViewport &vp = *UI.MouseViewport;
 		const Vec2i tilePos = vp.ScreenToTilePos(cursorPos);
 
+		try {
+			if (CursorBuilding && (MouseButtons & LeftButton) && Selected.at(0)
+				&& (KeyModifiers & (ModifierAlt | ModifierShift))) {
+				const CUnit &unit = *Selected[0];
+				const Vec2i tilePos = UI.MouseViewport->ScreenToTilePos(CursorScreenPos);
+				bool explored = CanBuildOnArea(*Selected[0], tilePos);
+
+				// We now need to check if there are another build commands on this build spot
+				bool buildable = true;
+				for (std::vector<COrderPtr>::const_iterator it = unit.Orders.begin();
+					 it != unit.Orders.end(); ++it) {
+					COrder &order = **it;
+					if (order.Action == UnitActionBuild) {
+						COrder_Build &build = dynamic_cast<COrder_Build &>(order);
+						if (tilePos.x >= build.GetGoalPos().x
+							&& tilePos.x < build.GetGoalPos().x + build.GetUnitType().TileWidth
+							&& tilePos.y >= build.GetGoalPos().y
+							&& tilePos.y < build.GetGoalPos().y + build.GetUnitType().TileHeight) {
+							buildable = false;
+							break;
+						}
+					}
+				}
+
+				// 0 Test build, don't really build
+				if (CanBuildUnitType(Selected[0], *CursorBuilding, tilePos, 0) && buildable && (explored || ReplayRevealMap)) {
+					const int flush = !(KeyModifiers & ModifierShift);
+					for (size_t i = 0; i != Selected.size(); ++i) {
+						SendCommandBuildBuilding(*Selected[i], tilePos, *CursorBuilding, flush);
+					}
+					if (!(KeyModifiers & (ModifierAlt | ModifierShift))) {
+						CancelBuildingMode();
+					}
+				}
+			}
+		} catch (const std::out_of_range &oor) {
+			DebugPrint("Selected is empty: %s\n" _C_ oor.what());
+		}
 		if (Preference.ShowNameDelay) {
 			ShowNameDelay = GameCycle + Preference.ShowNameDelay;
 			ShowNameTime = GameCycle + Preference.ShowNameDelay + Preference.ShowNameTime;
@@ -871,8 +1000,9 @@ void UIHandleMouseMove(const PixelPos &cursorPos)
 
 		bool show = ReplayRevealMap ? true : false;
 		if (show == false) {
+			CMapField &mf = *Map.Field(tilePos);
 			for (int i = 0; i < PlayerMax; ++i) {
-				if (Map.IsFieldExplored(Players[i], tilePos)
+				if (mf.playerInfo.IsExplored(Players[i])
 					&& (i == ThisPlayer->Index || Players[i].IsBothSharedVision(*ThisPlayer))) {
 					show = true;
 					break;
@@ -882,12 +1012,12 @@ void UIHandleMouseMove(const PixelPos &cursorPos)
 
 		if (show) {
 			const PixelPos mapPixelPos = vp.ScreenToMapPixelPos(cursorPos);
-			UnitUnderCursor = UnitOnScreen(NULL, mapPixelPos.x, mapPixelPos.y);
+			UnitUnderCursor = UnitOnScreen(mapPixelPos.x, mapPixelPos.y);
 		}
 	} else if (CursorOn == CursorOnMinimap) {
 		const Vec2i tilePos = UI.Minimap.ScreenToTilePos(cursorPos);
 
-		if (Map.IsFieldExplored(*ThisPlayer, tilePos) || ReplayRevealMap) {
+		if (Map.Field(tilePos)->playerInfo.IsExplored(*ThisPlayer) || ReplayRevealMap) {
 			UnitUnderCursor = UnitOnMapTile(tilePos, -1);
 		}
 	}
@@ -898,9 +1028,7 @@ void UIHandleMouseMove(const PixelPos &cursorPos)
 		UnitUnderCursor = NULL;
 	}
 
-	//
 	//  Selecting target.
-	//
 	if (CursorState == CursorStateSelect) {
 		if (CursorOn == CursorOnMap || CursorOn == CursorOnMinimap) {
 			if (CustomCursor.length() && CursorByIdent(CustomCursor)) {
@@ -908,7 +1036,7 @@ void UIHandleMouseMove(const PixelPos &cursorPos)
 			} else {
 				GameCursor = UI.YellowHair.Cursor;
 			}
-			if (UnitUnderCursor != NULL && !UnitUnderCursor->Type->Decoration) {
+			if (UnitUnderCursor != NULL && !UnitUnderCursor->Type->BoolFlag[DECORATION_INDEX].value) {
 				if (UnitUnderCursor->Player == ThisPlayer ||
 					ThisPlayer->IsAllied(*UnitUnderCursor)) {
 					if (CustomCursor.length() && CursorByIdent(CustomCursor)) {
@@ -926,9 +1054,7 @@ void UIHandleMouseMove(const PixelPos &cursorPos)
 			}
 			if (CursorOn == CursorOnMinimap && (MouseButtons & RightButton)) {
 				const Vec2i cursorPos = UI.Minimap.ScreenToTilePos(CursorScreenPos);
-				//
 				//  Minimap move viewpoint
-				//
 				UI.SelectedViewport->Center(Map.TilePosToMapPixelPos_Center(cursorPos));
 			}
 		}
@@ -936,14 +1062,10 @@ void UIHandleMouseMove(const PixelPos &cursorPos)
 		return;
 	}
 
-	//
 	//  Cursor pointing.
-	//
 	if (CursorOn == CursorOnMap) {
-		//
 		//  Map
-		//
-		if (UnitUnderCursor != NULL && !UnitUnderCursor->Type->Decoration
+		if (UnitUnderCursor != NULL && !UnitUnderCursor->Type->BoolFlag[DECORATION_INDEX].value
 			&& (UnitUnderCursor->IsVisible(*ThisPlayer) || ReplayRevealMap)) {
 			GameCursor = UI.Glass.Cursor;
 		}
@@ -951,9 +1073,7 @@ void UIHandleMouseMove(const PixelPos &cursorPos)
 	}
 
 	if (CursorOn == CursorOnMinimap && (MouseButtons & LeftButton)) {
-		//
 		//  Minimap move viewpoint
-		//
 		const Vec2i cursorPos = UI.Minimap.ScreenToTilePos(CursorScreenPos);
 
 		UI.SelectedViewport->Center(Map.TilePosToMapPixelPos_Center(cursorPos));
@@ -978,7 +1098,7 @@ static int SendRepair(const Vec2i &tilePos)
 	if (dest && dest->Variable[HP_INDEX].Value < dest->Variable[HP_INDEX].Max
 		&& dest->Type->RepairHP
 		&& (dest->Player == ThisPlayer || ThisPlayer->IsAllied(*dest))) {
-		for (int i = 0; i < NumSelected; ++i) {
+		for (size_t i = 0; i != Selected.size(); ++i) {
 			CUnit *unit = Selected[i];
 
 			if (unit->Type->RepairRange) {
@@ -1004,39 +1124,49 @@ static int SendRepair(const Vec2i &tilePos)
 */
 static int SendMove(const Vec2i &tilePos)
 {
-	CUnit *transporter = UnitUnderCursor;
+	CUnit *goal = UnitUnderCursor;
 	int ret = 0;
-
-	// Move to a transporter.
-	if (transporter && transporter->Type->CanTransport()) {
-		int i;
-		for (i = 0; i < NumSelected; ++i) {
-			if (CanTransport(*transporter, *Selected[i])) {
-				SendCommandStopUnit(*transporter);
-				ret = 1;
-				break;
-			}
-		}
-		if (i == NumSelected) {
-			transporter = NULL;
-		}
-	} else {
-		transporter = NULL;
-	}
-
 	const int flush = !(KeyModifiers & ModifierShift);
 
-	for (int i = 0; i < NumSelected; ++i) {
-		CUnit *unit = Selected[i];
+	// Alt makes unit to defend goal
+	if (goal && (KeyModifiers & ModifierAlt)) {
+		for (size_t i = 0; i != Selected.size(); ++i) {
+			CUnit *unit = Selected[i];
 
-		if (transporter && CanTransport(*transporter, *unit)) {
-			transporter->Blink = 4;
-			SendCommandFollow(*transporter, *unit, 0);
-			SendCommandBoard(*unit, *transporter, flush);
+			goal->Blink = 4;
+			SendCommandDefend(*unit, *goal, flush);
 			ret = 1;
+		}
+	} else {
+		// Move to a transporter.
+		if (goal && goal->Type->CanTransport()) {
+			size_t i;
+			for (i = 0; i != Selected.size(); ++i) {
+				if (CanTransport(*goal, *Selected[i])) {
+					SendCommandStopUnit(*goal);
+					ret = 1;
+					break;
+				}
+			}
+			if (i == Selected.size()) {
+				goal = NULL;
+			}
 		} else {
-			SendCommandMove(*unit, tilePos, flush);
-			ret = 1;
+			goal = NULL;
+		}
+
+		for (size_t i = 0; i != Selected.size(); ++i) {
+			CUnit *unit = Selected[i];
+
+			if (goal && CanTransport(*goal, *unit)) {
+				goal->Blink = 4;
+				SendCommandFollow(*goal, *unit, 0);
+				SendCommandBoard(*unit, *goal, flush);
+				ret = 1;
+			} else {
+				SendCommandMove(*unit, tilePos, flush);
+				ret = 1;
+			}
 		}
 	}
 	return ret;
@@ -1055,7 +1185,7 @@ static int SendMove(const Vec2i &tilePos)
 **
 **  @return 1 if any unit have a new order, 0 else.
 **
-**  @see Selected, @see NumSelected
+**  @see Selected
 */
 static int SendAttack(const Vec2i &tilePos)
 {
@@ -1063,14 +1193,14 @@ static int SendAttack(const Vec2i &tilePos)
 	CUnit *dest = UnitUnderCursor;
 	int ret = 0;
 
-	if (dest && dest->Type->Decoration) {
+	if (dest && dest->Type->BoolFlag[DECORATION_INDEX].value) {
 		dest = NULL;
 	}
-	for (int i = 0; i < NumSelected; ++i) {
+	for (size_t i = 0; i != Selected.size(); ++i) {
 		CUnit &unit = *Selected[i];
 
 		if (unit.Type->CanAttack) {
-			if (!dest || (dest != &unit && CanTarget(unit.Type, dest->Type))) {
+			if (!dest || (dest != &unit && CanTarget(*unit.Type, *dest->Type))) {
 				if (dest) {
 					dest->Blink = 4;
 				}
@@ -1097,7 +1227,7 @@ static int SendAttackGround(const Vec2i &tilePos)
 	const int flush = !(KeyModifiers & ModifierShift);
 	int ret = 0;
 
-	for (int i = 0; i < NumSelected; ++i) {
+	for (size_t i = 0; i != Selected.size(); ++i) {
 		CUnit &unit = *Selected[i];
 		if (unit.Type->CanAttack) {
 			SendCommandAttackGround(unit, tilePos, flush);
@@ -1119,11 +1249,11 @@ static int SendPatrol(const Vec2i &tilePos)
 {
 	const int flush = !(KeyModifiers & ModifierShift);
 
-	for (int i = 0; i < NumSelected; ++i) {
+	for (size_t i = 0; i != Selected.size(); ++i) {
 		CUnit &unit = *Selected[i];
 		SendCommandPatrol(unit, tilePos, flush);
 	}
-	return NumSelected != 0 ? 1 : 0;
+	return Selected.empty() ? 0 : 1;
 }
 
 /**
@@ -1139,16 +1269,17 @@ static int SendResource(const Vec2i &pos)
 	CUnit *dest = UnitUnderCursor;
 	int ret = 0;
 	const int flush = !(KeyModifiers & ModifierShift);
+	const CMapField &mf = *Map.Field(pos);
 
-	for (int i = 0; i < NumSelected; ++i) {
+	for (size_t i = 0; i != Selected.size(); ++i) {
 		CUnit &unit = *Selected[i];
 
-		if (unit.Type->Harvester) {
+		if (unit.Type->BoolFlag[HARVESTER_INDEX].value) {
 			if (dest
 				&& (res = dest->Type->GivesResource) != 0
 				&& unit.Type->ResInfo[res]
 				&& unit.ResourcesHeld < unit.Type->ResInfo[res]->ResourceCapacity
-				&& dest->Type->CanHarvest
+				&& dest->Type->BoolFlag[CANHARVEST_INDEX].value
 				&& (dest->Player == unit.Player || dest->Player->Index == PlayerMax - 1)) {
 				dest->Blink = 4;
 				SendCommandResource(unit, *dest, flush);
@@ -1158,8 +1289,8 @@ static int SendResource(const Vec2i &pos)
 				for (res = 0; res < MaxCosts; ++res) {
 					if (unit.Type->ResInfo[res]
 						&& unit.Type->ResInfo[res]->TerrainHarvester
-						&& Map.IsFieldExplored(*unit.Player, pos)
-						&& Map.IsTerrainResourceOnMap(pos, res)
+						&& mf.playerInfo.IsExplored(*unit.Player)
+						&& mf.IsTerrainResourceOnMap(res)
 						&& unit.ResourcesHeld < unit.Type->ResInfo[res]->ResourceCapacity
 						&& (unit.CurrentResource != res || unit.ResourcesHeld < unit.Type->ResInfo[res]->ResourceCapacity)) {
 						SendCommandResourceLoc(unit, pos, flush);
@@ -1173,13 +1304,13 @@ static int SendResource(const Vec2i &pos)
 			}
 		}
 		if (!unit.CanMove()) {
-			if (dest && dest->Type->GivesResource && dest->Type->CanHarvest) {
+			if (dest && dest->Type->GivesResource && dest->Type->BoolFlag[CANHARVEST_INDEX].value) {
 				dest->Blink = 4;
 				SendCommandResource(unit, *dest, flush);
 				ret = 1;
 				continue;
 			}
-			if (Map.IsFieldExplored(*unit.Player, pos) && Map.IsTerrainResourceOnMap(pos)) {
+			if (mf.playerInfo.IsExplored(*unit.Player) && mf.IsTerrainResourceOnMap()) {
 				SendCommandResourceLoc(unit, pos, flush);
 				ret = 1;
 				continue;
@@ -1201,11 +1332,11 @@ static int SendUnload(const Vec2i &tilePos)
 {
 	const int flush = !(KeyModifiers & ModifierShift);
 
-	for (int i = 0; i < NumSelected; ++i) {
+	for (size_t i = 0; i != Selected.size(); ++i) {
 		// FIXME: not only transporter selected?
 		SendCommandUnload(*Selected[i], tilePos, NoUnitP, flush);
 	}
-	return NumSelected != 0 ? 1 : 0;
+	return Selected.empty() ? 0 : 1;
 }
 
 /**
@@ -1217,7 +1348,7 @@ static int SendUnload(const Vec2i &tilePos)
 **
 **  @param tilePos  tile map position.
 **
-**  @see Selected, @see NumSelected
+**  @see Selected
 */
 static int SendSpellCast(const Vec2i &tilePos)
 {
@@ -1230,7 +1361,7 @@ static int SendSpellCast(const Vec2i &tilePos)
 	   (if exists). All checks are performed at spell cast handle
 	   function which will cancel function if cannot be executed
 	 */
-	for (int i = 0; i < NumSelected; ++i) {
+	for (size_t i = 0; i != Selected.size(); ++i) {
 		CUnit &unit = *Selected[i];
 		if (!unit.Type->CanCastSpell) {
 			DebugPrint("but unit %d(%s) can't cast spells?\n" _C_
@@ -1244,7 +1375,12 @@ static int SendSpellCast(const Vec2i &tilePos)
 			continue;
 		}
 		// CursorValue here holds the spell type id
-		SendCommandSpellCast(unit, tilePos, dest, CursorValue, flush);
+		const SpellType *spell = SpellTypeTable[CursorValue];
+		if (!spell) {
+			fprintf(stderr, "unknown spell-id: %d\n", CursorValue);
+			ExitFatal(1);
+		}
+		SendCommandSpellCast(unit, tilePos, spell->Target == TargetPosition ? NULL : dest , CursorValue, flush);
 		ret = 1;
 	}
 	return ret;
@@ -1292,19 +1428,22 @@ static void SendCommand(const Vec2i &tilePos)
 	}
 	if (ret) {
 		// Acknowledge the command with first selected unit.
-		for (int i = 0; i < NumSelected; ++i) {
-			if (ret == ButtonAttack || ret == ButtonAttackGround || ret == ButtonSpellCast) {
-				if (Selected[i]->Type->Sound.Attack.Sound) {
+		for (size_t i = 0; i != Selected.size(); ++i) {
+			if (CursorAction == ButtonAttack || CursorAction == ButtonAttackGround || CursorAction == ButtonSpellCast) {
+				if (Selected[i]->Type->MapSound.Attack.Sound) {
 					PlayUnitSound(*Selected[i], VoiceAttack);
 					break;
-				} else if (Selected[i]->Type->Sound.Acknowledgement.Sound) {
+				} else if (Selected[i]->Type->MapSound.Acknowledgement.Sound) {
 					PlayUnitSound(*Selected[i], VoiceAcknowledging);
 					break;
 				}
-			} else if (ret == ButtonRepair && Selected[i]->Type->Sound.Repair.Sound) {
+			} else if (CursorAction == ButtonRepair && Selected[i]->Type->MapSound.Repair.Sound) {
 				PlayUnitSound(*Selected[i], VoiceRepairing);
 				break;
-			} else if (Selected[i]->Type->Sound.Acknowledgement.Sound) {
+			} else if (CursorAction == ButtonBuild && Selected[i]->Type->MapSound.Build.Sound) {
+				PlayUnitSound(*Selected[i], VoiceBuild);
+				break;
+			} else if (Selected[i]->Type->MapSound.Acknowledgement.Sound) {
 				PlayUnitSound(*Selected[i], VoiceAcknowledging);
 				break;
 			}
@@ -1323,11 +1462,11 @@ static void SendCommand(const Vec2i &tilePos)
 */
 static void DoSelectionButtons(int num, unsigned)
 {
-	if (GameObserve || GamePaused) {
+	if (GameObserve || GamePaused || GameEstablishing) {
 		return;
 	}
 
-	if (num >= NumSelected || !(MouseButtons & LeftButton)) {
+	if (static_cast<size_t>(num) >= Selected.size() || !(MouseButtons & LeftButton)) {
 		return;
 	}
 
@@ -1352,7 +1491,7 @@ static void DoSelectionButtons(int num, unsigned)
 	}
 
 	UI.StatusLine.Clear();
-	ClearCosts();
+	UI.StatusLine.ClearCosts();
 	CurrentButtonLevel = 0;
 	SelectionChanged();
 }
@@ -1368,7 +1507,7 @@ static void DoSelectionButtons(int num, unsigned)
 */
 static void UISelectStateButtonDown(unsigned)
 {
-	if (GameObserve || GamePaused) {
+	if (GameObserve || GamePaused || GameEstablishing) {
 		return;
 	}
 
@@ -1377,7 +1516,7 @@ static void UISelectStateButtonDown(unsigned)
 	//
 	if (CursorOn == CursorOnMap && UI.MouseViewport->IsInsideMapArea(CursorScreenPos)) {
 		UI.StatusLine.Clear();
-		ClearCosts();
+		UI.StatusLine.ClearCosts();
 		CursorState = CursorStatePoint;
 		GameCursor = UI.Point.Cursor;
 		CustomCursor.clear();
@@ -1406,7 +1545,7 @@ static void UISelectStateButtonDown(unsigned)
 			const PixelPos mapPixelPos = Map.TilePosToMapPixelPos_Center(cursorTilePos);
 
 			UI.StatusLine.Clear();
-			ClearCosts();
+			UI.StatusLine.ClearCosts();
 			CursorState = CursorStatePoint;
 			GameCursor = UI.Point.Cursor;
 			CustomCursor.clear();
@@ -1425,13 +1564,13 @@ static void UISelectStateButtonDown(unsigned)
 	if (CursorOn == CursorOnButton) {
 		// FIXME: other buttons?
 		if (ButtonAreaUnderCursor == ButtonAreaButton) {
-			UI.ButtonPanel.DoClicked(ButtonUnderCursor);
+			OldButtonUnderCursor = ButtonUnderCursor;
 			return;
 		}
 	}
 
 	UI.StatusLine.Clear();
-	ClearCosts();
+	UI.StatusLine.ClearCosts();
 	CursorState = CursorStatePoint;
 	if (CustomCursor.length() && CursorByIdent(CustomCursor)) {
 		GameCursor = CursorByIdent(CustomCursor);
@@ -1443,6 +1582,216 @@ static void UISelectStateButtonDown(unsigned)
 }
 
 
+static void UIHandleButtonDown_OnMap(unsigned button)
+{
+	Assert(UI.MouseViewport);
+#ifdef USE_TOUCHSCREEN
+	// Detect double left click
+	const bool doubleLeftButton = MouseButtons & (LeftButton << MouseDoubleShift);
+#endif
+	if ((MouseButtons & LeftButton) && UI.SelectedViewport != UI.MouseViewport) {
+		UI.SelectedViewport = UI.MouseViewport;
+		DebugPrint("selected viewport changed to %ld.\n" _C_
+				   static_cast<long int>(UI.SelectedViewport - UI.Viewports));
+	}
+
+	// to redraw the cursor immediately (and avoid up to 1 sec delay
+	if (CursorBuilding) {
+#ifdef USE_TOUCHSCREEN
+		// On touch screen is building started with double left click
+		if (!doubleLeftButton) {
+			return;
+		}
+#endif
+		// Possible Selected[0] was removed from map
+		// need to make sure there is a unit to build
+		if (Selected[0] && (MouseButtons & LeftButton)
+			&& UI.MouseViewport->IsInsideMapArea(CursorScreenPos)) {// enter select mode
+			const Vec2i tilePos = UI.MouseViewport->ScreenToTilePos(CursorScreenPos);
+			bool explored = CanBuildOnArea(*Selected[0], tilePos);
+
+			// 0 Test build, don't really build
+			if (CanBuildUnitType(Selected[0], *CursorBuilding, tilePos, 0) && (explored || ReplayRevealMap)) {
+				const int flush = !(KeyModifiers & ModifierShift);
+				PlayGameSound(GameSounds.PlacementSuccess[ThisPlayer->Race].Sound, MaxSampleVolume);
+				PlayUnitSound(*Selected[0], VoiceBuild);
+				for (size_t i = 0; i != Selected.size(); ++i) {
+					SendCommandBuildBuilding(*Selected[i], tilePos, *CursorBuilding, flush);
+				}
+				if (!(KeyModifiers & (ModifierAlt | ModifierShift))) {
+					CancelBuildingMode();
+				}
+			} else {
+				PlayGameSound(GameSounds.PlacementError[ThisPlayer->Race].Sound, MaxSampleVolume);
+			}
+		} else {
+			CancelBuildingMode();
+		}
+		return;
+	}
+
+	if (MouseButtons & UI.PieMenu.MouseButton) { // enter pie menu
+		UnitUnderCursor = NULL;
+		GameCursor = UI.Point.Cursor;  // Reset
+		CursorStartScreenPos = CursorScreenPos;
+		if (!Selected.empty() && Selected[0]->Player == ThisPlayer && CursorState == CursorStatePoint) {
+			CursorState = CursorStatePieMenu;
+		}
+#ifdef USE_TOUCHSCREEN
+	} else if (doubleLeftButton) {
+#else
+	} else if (MouseButtons & RightButton) {
+#endif
+		if (!GameObserve && !GamePaused && !GameEstablishing && UI.MouseViewport->IsInsideMapArea(CursorScreenPos)) {
+			CUnit *unit;
+			// FIXME: Rethink the complete chaos of coordinates here
+			// FIXME: Johns: Perhaps we should use a pixel map coordinates
+			const Vec2i tilePos = UI.MouseViewport->ScreenToTilePos(CursorScreenPos);
+
+			if (UnitUnderCursor != NULL && (unit = UnitOnMapTile(tilePos, -1))
+				&& !UnitUnderCursor->Type->BoolFlag[DECORATION_INDEX].value) {
+				unit->Blink = 4;                // if right click on building -- blink
+			} else { // if not not click on building -- green cross
+				if (!ClickMissile.empty()) {
+					const PixelPos mapPixelPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
+
+					MakeLocalMissile(*MissileTypeByIdent(ClickMissile), mapPixelPos, mapPixelPos);
+				}
+			}
+			const PixelPos mapPixelPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
+			DoRightButton(mapPixelPos);
+		}
+	} else if (MouseButtons & LeftButton) { // enter select mode
+		CursorStartScreenPos = CursorScreenPos;
+		CursorStartMapPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
+		GameCursor = UI.Cross.Cursor;
+		CursorState = CursorStateRectangle;
+	} else if (MouseButtons & MiddleButton) {// enter move map mode
+		CursorStartScreenPos = CursorScreenPos;
+		GameCursor = UI.Scroll.Cursor;
+	}
+}
+
+static void UIHandleButtonDown_OnMinimap(unsigned button)
+{
+	const Vec2i cursorTilePos = UI.Minimap.ScreenToTilePos(CursorScreenPos);
+
+	if (MouseButtons & LeftButton) { // enter move mini-mode
+		UI.SelectedViewport->Center(Map.TilePosToMapPixelPos_Center(cursorTilePos));
+	} else if (MouseButtons & RightButton) {
+		if (!GameObserve && !GamePaused && !GameEstablishing) {
+			const PixelPos mapPixelPos = Map.TilePosToMapPixelPos_Center(cursorTilePos);
+			if (!ClickMissile.empty()) {
+				MakeLocalMissile(*MissileTypeByIdent(ClickMissile), mapPixelPos, mapPixelPos);
+			}
+			DoRightButton(mapPixelPos);
+		}
+	}
+}
+
+static void UIHandleButtonDown_OnButton(unsigned button)
+{
+	// clicked on info panel - selection shown
+	if (Selected.size() > 1 && ButtonAreaUnderCursor == ButtonAreaSelected) {
+		DoSelectionButtons(ButtonUnderCursor, button);
+	} else if ((MouseButtons & LeftButton)) {
+		//  clicked on menu button
+		if (ButtonAreaUnderCursor == ButtonAreaMenu) {
+			if ((ButtonUnderCursor == ButtonUnderMenu || ButtonUnderCursor == ButtonUnderNetworkMenu)
+				&& !GameMenuButtonClicked) {
+				PlayGameSound(GameSounds.Click.Sound, MaxSampleVolume);
+				GameMenuButtonClicked = true;
+			} else if (ButtonUnderCursor == ButtonUnderNetworkDiplomacy && !GameDiplomacyButtonClicked) {
+				PlayGameSound(GameSounds.Click.Sound, MaxSampleVolume);
+				GameDiplomacyButtonClicked = true;
+			}
+			//  clicked on user buttons
+		} else if (ButtonAreaUnderCursor == ButtonAreaUser) {
+			for (size_t i = 0; i < UI.UserButtons.size(); ++i) {
+				CUIUserButton &button = UI.UserButtons[i];
+
+				if (i == size_t(ButtonUnderCursor) && !button.Clicked) {
+					PlayGameSound(GameSounds.Click.Sound, MaxSampleVolume);
+					button.Clicked = true;
+				}
+			}
+			//  clicked on selected button
+		} else if (ButtonAreaUnderCursor == ButtonAreaSelected) {
+			//  clicked on single unit shown
+			if (ButtonUnderCursor == 0 && Selected.size() == 1) {
+				PlayGameSound(GameSounds.Click.Sound, MaxSampleVolume);
+				UI.SelectedViewport->Center(Selected[0]->GetMapPixelPosCenter());
+			}
+			//  clicked on training button
+		} else if (ButtonAreaUnderCursor == ButtonAreaTraining) {
+			if (!GameObserve && !GamePaused && !GameEstablishing && ThisPlayer->IsTeamed(*Selected[0])) {
+				if (static_cast<size_t>(ButtonUnderCursor) < Selected[0]->Orders.size()
+					&& Selected[0]->Orders[ButtonUnderCursor]->Action == UnitActionTrain) {
+					const COrder_Train &order = *static_cast<COrder_Train *>(Selected[0]->Orders[ButtonUnderCursor]);
+
+					DebugPrint("Cancel slot %d %s\n" _C_ ButtonUnderCursor _C_ order.GetUnitType().Ident.c_str());
+					SendCommandCancelTraining(*Selected[0], ButtonUnderCursor, &order.GetUnitType());
+				}
+			}
+			//  clicked on upgrading button
+		} else if (ButtonAreaUnderCursor == ButtonAreaUpgrading) {
+			if (!GameObserve && !GamePaused && !GameEstablishing && ThisPlayer->IsTeamed(*Selected[0])) {
+				if (ButtonUnderCursor == 0 && Selected.size() == 1) {
+					DebugPrint("Cancel upgrade %s\n" _C_ Selected[0]->Type->Ident.c_str());
+					SendCommandCancelUpgradeTo(*Selected[0]);
+				}
+			}
+			//  clicked on researching button
+		} else if (ButtonAreaUnderCursor == ButtonAreaResearching) {
+			if (!GameObserve && !GamePaused && !GameEstablishing && ThisPlayer->IsTeamed(*Selected[0])) {
+				if (ButtonUnderCursor == 0 && Selected.size() == 1) {
+					DebugPrint("Cancel research %s\n" _C_ Selected[0]->Type->Ident.c_str());
+					SendCommandCancelResearch(*Selected[0]);
+				}
+			}
+			//  clicked on button panel
+		} else if (ButtonAreaUnderCursor == ButtonAreaTransporting) {
+			//  for transporter
+			if (!GameObserve && !GamePaused && !GameEstablishing && ThisPlayer->IsTeamed(*Selected[0])) {
+				if (Selected[0]->BoardCount >= ButtonUnderCursor) {
+					CUnit *uins = Selected[0]->UnitInside;
+					size_t j = 0;
+
+					for (int i = 0; i < Selected[0]->InsideCount; ++i, uins = uins->NextContained) {
+						if (!uins->Boarded || j >= UI.TransportingButtons.size() || (Selected[0]->Player != ThisPlayer && uins->Player != ThisPlayer)) {
+							continue;
+						}
+					if (ButtonAreaUnderCursor == ButtonAreaTransporting
+						&& static_cast<size_t>(ButtonUnderCursor) == j) {
+							Assert(uins->Boarded);
+							const int flush = !(KeyModifiers & ModifierShift);
+							if (ThisPlayer->IsTeamed(*Selected[0]) || uins->Player == ThisPlayer) {
+								SendCommandUnload(*Selected[0], Selected[0]->tilePos, uins, flush);
+							}
+						}
+						++j;
+					}
+				}
+			}
+		} else if (ButtonAreaUnderCursor == ButtonAreaButton) {
+			if (!GameObserve && !GamePaused && !GameEstablishing && ThisPlayer->IsTeamed(*Selected[0])) {
+				OldButtonUnderCursor = ButtonUnderCursor;
+			}
+		}
+	} else if ((MouseButtons & MiddleButton)) {
+		//  clicked on info panel - single unit shown
+		if (ButtonAreaUnderCursor == ButtonAreaSelected && ButtonUnderCursor == 0 && Selected.size() == 1) {
+			PlayGameSound(GameSounds.Click.Sound, MaxSampleVolume);
+			if (UI.SelectedViewport->Unit == Selected[0]) {
+				UI.SelectedViewport->Unit = NULL;
+			} else {
+				UI.SelectedViewport->Unit = Selected[0];
+			}
+		}
+	} else if ((MouseButtons & RightButton)) {
+	}
+}
+
 /**
 **  Called if mouse button pressed down.
 **
@@ -1450,21 +1799,14 @@ static void UISelectStateButtonDown(unsigned)
 */
 void UIHandleButtonDown(unsigned button)
 {
-
-	/**
-	 * Detect long left selection click
-	 **/
-#define LongLeftButton (MouseButtons & ((LeftButton << MouseHoldShift)))
-
-	/**
-	 * Detect double left click
-	 **/
-#define DoubleLeftButton (MouseButtons & (LeftButton << MouseDoubleShift))
+	// Detect long left selection click
+	const bool longLeftButton = (MouseButtons & ((LeftButton << MouseHoldShift))) != 0;
 
 #ifdef USE_TOUCHSCREEN
-	// If we are moving with stylus/finger, left button on touch screen devices is still clicked
+	// If we are moving with stylus/finger,
+	// left button on touch screen devices is still clicked
 	// Ignore handle if left button is long cliked
-	if (LongLeftButton) {
+	if (longLeftButton) {
 		return;
 	}
 #endif
@@ -1473,13 +1815,12 @@ void UIHandleButtonDown(unsigned button)
 	static bool OldShowReactionRange;
 	static bool OldShowAttackRange;
 	static bool OldValid = false;
-	CUnit *uins;
-	int i;
+	OldButtonUnderCursor = -1;
 
 	// Reset the ShowNameDelay counters
 	ShowNameDelay = ShowNameTime = GameCycle;
 
-	if (LongLeftButton) {
+	if (longLeftButton) {
 		if (!OldValid) {
 			OldShowSightRange = Preference.ShowSightRange;
 			OldShowAttackRange = Preference.ShowAttackRange;
@@ -1503,9 +1844,7 @@ void UIHandleButtonDown(unsigned button)
 	}
 	// CursorOn should have changed with BigMapMode, so recompute it.
 	HandleMouseOn(CursorScreenPos);
-	//
 	//  Selecting target. (Move,Attack,Patrol,... commands);
-	//
 	if (CursorState == CursorStateSelect) {
 		UISelectStateButtonDown(button);
 		return;
@@ -1522,226 +1861,15 @@ void UIHandleButtonDown(unsigned button)
 		}
 	}
 
-	//
 	//  Cursor is on the map area
-	//
 	if (CursorOn == CursorOnMap) {
-		Assert(UI.MouseViewport);
-
-		if ((MouseButtons & LeftButton) && UI.SelectedViewport != UI.MouseViewport) {
-			UI.SelectedViewport = UI.MouseViewport;
-			DebugPrint("selected viewport changed to %ld.\n" _C_
-					   static_cast<long int>(UI.SelectedViewport - UI.Viewports));
-		}
-
-		// to redraw the cursor immediately (and avoid up to 1 sec delay
-		if (CursorBuilding) {
-#ifdef USE_TOUCHSCREEN
-			// On touch screen is building started with double left click
-			if (!DoubleLeftButton) {
-				return;
-			}
-#endif
-			// Possible Selected[0] was removed from map
-			// need to make sure there is a unit to build
-			if (Selected[0] && (MouseButtons & LeftButton)
-				&& UI.MouseViewport->IsInsideMapArea(CursorScreenPos)) {// enter select mode
-				int explored = 1;
-				const Vec2i tilePos = UI.MouseViewport->ScreenToTilePos(CursorScreenPos);
-				// FIXME: error messages
-
-				for (int j = 0; explored && j < Selected[0]->Type->TileHeight; ++j) {
-					for (int i = 0; i < Selected[0]->Type->TileWidth; ++i) {
-						const Vec2i tempPos(i, j);
-						if (!Map.IsFieldExplored(*ThisPlayer, tilePos + tempPos)) {
-							explored = 0;
-							break;
-						}
-					}
-				}
-				// 0 Test build, don't really build
-				if (CanBuildUnitType(Selected[0], *CursorBuilding, tilePos, 0) && (explored || ReplayRevealMap)) {
-					const int flush = !(KeyModifiers & ModifierShift);
-					PlayGameSound(GameSounds.PlacementSuccess[ThisPlayer->Race].Sound, MaxSampleVolume);
-					for (int i = 0; i < NumSelected; ++i) {
-						SendCommandBuildBuilding(*Selected[i], tilePos, *CursorBuilding, flush);
-					}
-					if (!(KeyModifiers & (ModifierAlt | ModifierShift))) {
-						CancelBuildingMode();
-					}
-				} else {
-					PlayGameSound(GameSounds.PlacementError[ThisPlayer->Race].Sound, MaxSampleVolume);
-				}
-			} else {
-				CancelBuildingMode();
-			}
-			return;
-		}
-
-		if (MouseButtons & UI.PieMenu.MouseButton) { // enter pie menu
-			UnitUnderCursor = NULL;
-			GameCursor = UI.Point.Cursor;  // Reset
-			CursorStartScreenPos = CursorScreenPos;
-			if (NumSelected && Selected[0]->Player == ThisPlayer && CursorState == CursorStatePoint) {
-				CursorState = CursorStatePieMenu;
-			}
-#ifdef USE_TOUCHSCREEN
-		} else if (DoubleLeftButton) {
-#else
-		} else if (MouseButtons & RightButton) {
-#endif
-			if (!GameObserve && !GamePaused && UI.MouseViewport->IsInsideMapArea(CursorScreenPos)) {
-				CUnit *unit;
-				// FIXME: Rethink the complete chaos of coordinates here
-				// FIXME: Johns: Perhaps we should use a pixel map coordinates
-				const Vec2i tilePos = UI.MouseViewport->ScreenToTilePos(CursorScreenPos);
-
-				if (UnitUnderCursor != NULL && (unit = UnitOnMapTile(tilePos, -1))
-					&& !UnitUnderCursor->Type->Decoration) {
-					unit->Blink = 4;                // if right click on building -- blink
-				} else { // if not not click on building -- green cross
-					if (!ClickMissile.empty()) {
-						const PixelPos mapPixelPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
-
-						MakeLocalMissile(*MissileTypeByIdent(ClickMissile), mapPixelPos, mapPixelPos);
-					}
-				}
-				const PixelPos mapPixelPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
-				DoRightButton(mapPixelPos);
-			}
-		} else if (MouseButtons & LeftButton) { // enter select mode
-			CursorStartScreenPos = CursorScreenPos;
-			CursorStartMapPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
-			GameCursor = UI.Cross.Cursor;
-			CursorState = CursorStateRectangle;
-		} else if (MouseButtons & MiddleButton) {// enter move map mode
-			CursorStartScreenPos = CursorScreenPos;
-			GameCursor = UI.Scroll.Cursor;
-		}
-		//
-		//  Cursor is on the minimap area
-		//
+		UIHandleButtonDown_OnMap(button);
 	} else if (CursorOn == CursorOnMinimap) {
-		const Vec2i cursorTilePos = UI.Minimap.ScreenToTilePos(CursorScreenPos);
-
-		if (MouseButtons & LeftButton) { // enter move mini-mode
-			UI.SelectedViewport->Center(Map.TilePosToMapPixelPos_Center(cursorTilePos));
-		} else if (MouseButtons & RightButton) {
-			if (!GameObserve && !GamePaused) {
-				const PixelPos mapPixelPos = Map.TilePosToMapPixelPos_Center(cursorTilePos);
-				if (!ClickMissile.empty()) {
-					MakeLocalMissile(*MissileTypeByIdent(ClickMissile), mapPixelPos, mapPixelPos);
-				}
-				DoRightButton(mapPixelPos);
-			}
-		}
-		//
-		//  Cursor is on the buttons: group or command
-		//
+		//  Cursor is on the minimap area
+		UIHandleButtonDown_OnMinimap(button);
 	} else if (CursorOn == CursorOnButton) {
-		//
-		// clicked on info panel - selection shown
-		//
-		if (NumSelected > 1 && ButtonAreaUnderCursor == ButtonAreaSelected) {
-			DoSelectionButtons(ButtonUnderCursor, button);
-		} else if ((MouseButtons & LeftButton)) {
-			//
-			//  clicked on menu button
-			//
-			if (ButtonAreaUnderCursor == ButtonAreaMenu) {
-				if ((ButtonUnderCursor == ButtonUnderMenu || ButtonUnderCursor == ButtonUnderNetworkMenu)
-					&& !GameMenuButtonClicked) {
-					PlayGameSound(GameSounds.Click.Sound, MaxSampleVolume);
-					GameMenuButtonClicked = true;
-				} else if (ButtonUnderCursor == ButtonUnderNetworkDiplomacy && !GameDiplomacyButtonClicked) {
-					PlayGameSound(GameSounds.Click.Sound, MaxSampleVolume);
-					GameDiplomacyButtonClicked = true;
-				}
-				//
-				//  clicked on selected button
-				//
-			} else if (ButtonAreaUnderCursor == ButtonAreaSelected) {
-				//
-				//  clicked on single unit shown
-				//
-				if (ButtonUnderCursor == 0 && NumSelected == 1) {
-					PlayGameSound(GameSounds.Click.Sound, MaxSampleVolume);
-					UI.SelectedViewport->Center(Selected[0]->GetMapPixelPosCenter());
-				}
-				//
-				//  clicked on training button
-				//
-			} else if (ButtonAreaUnderCursor == ButtonAreaTraining) {
-				if (!GameObserve && !GamePaused &&
-					ThisPlayer->IsTeamed(*Selected[0])) {
-					if (static_cast<size_t>(ButtonUnderCursor) < Selected[0]->Orders.size()
-						&& Selected[0]->Orders[ButtonUnderCursor]->Action == UnitActionTrain) {
-						const COrder_Train &order = *static_cast<COrder_Train *>(Selected[0]->Orders[ButtonUnderCursor]);
-
-						DebugPrint("Cancel slot %d %s\n" _C_ ButtonUnderCursor _C_ order.GetUnitType().Ident.c_str());
-						SendCommandCancelTraining(*Selected[0], ButtonUnderCursor, &order.GetUnitType());
-					}
-				}
-				//
-				//  clicked on upgrading button
-				//
-			} else if (ButtonAreaUnderCursor == ButtonAreaUpgrading) {
-				if (!GameObserve && !GamePaused && ThisPlayer->IsTeamed(*Selected[0])) {
-					if (ButtonUnderCursor == 0 && NumSelected == 1) {
-						DebugPrint("Cancel upgrade %s\n" _C_ Selected[0]->Type->Ident.c_str());
-						SendCommandCancelUpgradeTo(*Selected[0]);
-					}
-				}
-				//
-				//  clicked on researching button
-				//
-			} else if (ButtonAreaUnderCursor == ButtonAreaResearching) {
-				if (!GameObserve && !GamePaused && ThisPlayer->IsTeamed(*Selected[0])) {
-					if (ButtonUnderCursor == 0 && NumSelected == 1) {
-						DebugPrint("Cancel research %s\n" _C_ Selected[0]->Type->Ident.c_str());
-						SendCommandCancelResearch(*Selected[0]);
-					}
-				}
-				//
-				//  clicked on button panel
-				//
-			} else if (ButtonAreaUnderCursor == ButtonAreaTransporting) {
-				//
-				//  for transporter
-				//
-				if (!GameObserve && !GamePaused && ThisPlayer->IsTeamed(*Selected[0])) {
-					if (Selected[0]->BoardCount >= ButtonUnderCursor) {
-						uins = Selected[0]->UnitInside;
-						for (i = ButtonUnderCursor; i; uins = uins->NextContained) {
-							if (uins->Boarded) {
-								--i;
-							}
-						}
-						Assert(uins->Boarded);
-						const int flush = !(KeyModifiers & ModifierShift);
-						SendCommandUnload(*Selected[0], Selected[0]->tilePos, uins, flush);
-					}
-				}
-			} else if (ButtonAreaUnderCursor == ButtonAreaButton) {
-				if (!GameObserve && !GamePaused &&
-					ThisPlayer->IsTeamed(*Selected[0])) {
-					UI.ButtonPanel.DoClicked(ButtonUnderCursor);
-				}
-			}
-		} else if ((MouseButtons & MiddleButton)) {
-			//
-			//  clicked on info panel - single unit shown
-			//
-			if (ButtonAreaUnderCursor == ButtonAreaSelected && ButtonUnderCursor == 0 && NumSelected == 1) {
-				PlayGameSound(GameSounds.Click.Sound, MaxSampleVolume);
-				if (UI.SelectedViewport->Unit == Selected[0]) {
-					UI.SelectedViewport->Unit = NULL;
-				} else {
-					UI.SelectedViewport->Unit = Selected[0];
-				}
-			}
-		} else if ((MouseButtons & RightButton)) {
-		}
+		//  Cursor is on the buttons: group or command
+		UIHandleButtonDown_OnButton(button);
 	}
 }
 
@@ -1765,49 +1893,82 @@ void UIHandleButtonUp(unsigned button)
 	//
 	if (CursorState == CursorStatePieMenu) {
 		// Little threshold
-		if (CursorStartScreenPos.x < CursorScreenPos.x - 1 || CursorScreenPos.x + 1 < CursorStartScreenPos.x
-			|| CursorStartScreenPos.y < CursorScreenPos.y - 1 || CursorScreenPos.y + 1 < CursorStartScreenPos.y) {
+		if (1 < abs(CursorStartScreenPos.x - CursorScreenPos.x)
+			|| 1 < abs(CursorStartScreenPos.y - CursorScreenPos.y)) {
 			// there was a move, handle the selected button/pie
 			HandlePieMenuMouseSelection();
 		}
 	}
 
-	//
-	//  Menu (F10) button
-	//
-	if ((1 << button) == LeftButton && GameMenuButtonClicked) {
-		GameMenuButtonClicked = false;
-		if (ButtonAreaUnderCursor == ButtonAreaMenu) {
-			if (ButtonUnderCursor == ButtonUnderMenu || ButtonUnderCursor == ButtonUnderNetworkMenu) {
-				// FIXME: Not if, in input mode.
-				if (!IsNetworkGame()) {
-					GamePaused = true;
-					UI.StatusLine.Set(_("Game Paused"));
+	if ((1 << button) == LeftButton) {
+		//
+		//  Menu (F10) button
+		//
+		if (GameMenuButtonClicked) {
+			GameMenuButtonClicked = false;
+			if (ButtonAreaUnderCursor == ButtonAreaMenu) {
+				if (ButtonUnderCursor == ButtonUnderMenu || ButtonUnderCursor == ButtonUnderNetworkMenu) {
+					// FIXME: Not if, in input mode.
+					if (!IsNetworkGame()) {
+						GamePaused = true;
+						UI.StatusLine.Set(_("Game Paused"));
+					}
+					if (ButtonUnderCursor == ButtonUnderMenu) {
+						if (UI.MenuButton.Callback) {
+							UI.MenuButton.Callback->action("");
+						}
+					} else {
+						if (UI.NetworkMenuButton.Callback) {
+							UI.NetworkMenuButton.Callback->action("");
+						}
+					}
+					return;
 				}
-				if (ButtonUnderCursor == ButtonUnderMenu) {
-					if (UI.MenuButton.Callback) {
-						UI.MenuButton.Callback->action("");
-					}
-				} else {
-					if (UI.NetworkMenuButton.Callback) {
-						UI.NetworkMenuButton.Callback->action("");
-					}
+			}
+		}
+
+		//
+		//  Diplomacy button
+		//
+		if (GameDiplomacyButtonClicked) {
+			GameDiplomacyButtonClicked = false;
+			if (ButtonAreaUnderCursor == ButtonAreaMenu && ButtonUnderCursor == ButtonUnderNetworkDiplomacy) {
+				if (UI.NetworkDiplomacyButton.Callback) {
+					UI.NetworkDiplomacyButton.Callback->action("");
 				}
 				return;
 			}
 		}
-	}
 
-	//
-	//  Diplomacy button
-	//
-	if ((1 << button) == LeftButton && GameDiplomacyButtonClicked) {
-		GameDiplomacyButtonClicked = false;
-		if (ButtonAreaUnderCursor == ButtonAreaMenu && ButtonUnderCursor == ButtonUnderNetworkDiplomacy) {
-			if (UI.NetworkDiplomacyButton.Callback) {
-				UI.NetworkDiplomacyButton.Callback->action("");
+		//
+		//  User buttons
+		//
+		for (size_t i = 0; i < UI.UserButtons.size(); ++i) {
+			CUIUserButton &button = UI.UserButtons[i];
+
+			if (button.Clicked) {
+				button.Clicked = false;
+				if (ButtonAreaUnderCursor == ButtonAreaUser) {
+					if (button.Button.Callback) {
+						button.Button.Callback->action("");
+					}
+					return;
+				}
 			}
-			return;
+		}
+		if (!GameObserve && !GamePaused && !GameEstablishing && Selected.empty() == false && ThisPlayer->IsTeamed(*Selected[0])) {
+			if (OldButtonUnderCursor != -1 && OldButtonUnderCursor == ButtonUnderCursor) {
+				UI.ButtonPanel.DoClicked(ButtonUnderCursor);
+				OldButtonUnderCursor = -1;
+				return;
+			}
+		}
+		if (CursorOn == CursorOnButton) {
+			// FIXME: other buttons?
+			if (ButtonAreaUnderCursor == ButtonAreaButton && OldButtonUnderCursor != -1 && OldButtonUnderCursor == ButtonUnderCursor) {
+				UI.ButtonPanel.DoClicked(ButtonUnderCursor);
+				return;
+			}
 		}
 	}
 
@@ -1819,7 +1980,6 @@ void UIHandleButtonUp(unsigned button)
 	// ALT takes group of unit
 	// CTRL takes all units of same type (st*rcr*ft)
 	if (CursorState == CursorStateRectangle && !(MouseButtons & LeftButton)) { // leave select mode
-		CUnit *unit = NULL;
 		int num = 0;
 		//
 		//  Little threshold
@@ -1866,11 +2026,11 @@ void UIHandleButtonUp(unsigned button)
 			// cade: cannot select unit on invisible space
 			// FIXME: johns: only complete invisibile units
 			const Vec2i cursorTilePos = UI.MouseViewport->ScreenToTilePos(CursorScreenPos);
-
-			if (Map.IsFieldVisible(*ThisPlayer, cursorTilePos) || ReplayRevealMap) {
+			CUnit *unit = NULL;
+			if (ReplayRevealMap || Map.Field(cursorTilePos)->playerInfo.IsTeamVisible(*ThisPlayer)) {
 				const PixelPos cursorMapPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
 
-				unit = UnitOnScreen(unit, cursorMapPos.x, cursorMapPos.y);
+				unit = UnitOnScreen(cursorMapPos.x, cursorMapPos.y);
 			}
 			if (unit) {
 				// FIXME: Not nice coded, button number hardcoded!
@@ -1893,8 +2053,8 @@ void UIHandleButtonUp(unsigned button)
 				} else if (KeyModifiers & ModifierShift
 						   && (unit->Player == ThisPlayer || ThisPlayer->IsTeamed(*unit))
 						   && !unit->Type->Building
-						   && (NumSelected != 1 || !Selected[0]->Type->Building)
-						   && (NumSelected != 1 || Selected[0]->Player == ThisPlayer || ThisPlayer->IsTeamed(*Selected[0]))) {
+						   && (Selected.size() != 1 || !Selected[0]->Type->Building)
+						   && (Selected.size() != 1 || Selected[0]->Player == ThisPlayer || ThisPlayer->IsTeamed(*Selected[0]))) {
 					num = ToggleSelectUnit(*unit);
 					if (!num) {
 						SelectionChanged();
@@ -1910,7 +2070,7 @@ void UIHandleButtonUp(unsigned button)
 
 		if (num) {
 			UI.StatusLine.Clear();
-			ClearCosts();
+			UI.StatusLine.ClearCosts();
 			CurrentButtonLevel = 0;
 			SelectionChanged();
 
@@ -1920,8 +2080,8 @@ void UIHandleButtonUp(unsigned button)
 			//    This player, or neutral unit (goldmine,critter)
 			//    Other clicks.
 			//
-			if (NumSelected == 1) {
-				if (Selected[0]->CurrentAction() == UnitActionBuilt) {
+			if (Selected.size() == 1) {
+				if (Selected[0]->CurrentAction() == UnitActionBuilt && Selected[0]->Player->Index == ThisPlayer->Index) {
 					PlayUnitSound(*Selected[0], VoiceBuilding);
 				} else if (Selected[0]->Burning) {
 					// FIXME: use GameSounds.Burning
@@ -1964,7 +2124,7 @@ static int GetPieUnderCursor()
 {
 	int x = CursorScreenPos.x - (CursorStartScreenPos.x - ICON_SIZE_X / 2);
 	int y = CursorScreenPos.y - (CursorStartScreenPos.y - ICON_SIZE_Y / 2);
-	for (int i = 0; i < 8; ++i) {
+	for (int i = 0; i < 9; ++i) {
 		if (x > UI.PieMenu.X[i] && x < UI.PieMenu.X[i] + ICON_SIZE_X
 			&& y > UI.PieMenu.Y[i] && y < UI.PieMenu.Y[i] + ICON_SIZE_Y) {
 			return i;
@@ -1984,11 +2144,11 @@ void DrawPieMenu()
 		return;
 	}
 
-	if (!CurrentButtons.IsValid()) { // no buttons
+	if (CurrentButtons.empty()) { // no buttons
 		CursorState = CursorStatePoint;
 		return;
 	}
-	ButtonActionProxy buttons(CurrentButtons);
+	std::vector<ButtonAction> &buttons(CurrentButtons);
 	CLabel label(GetGameFont());
 	CViewport *vp = UI.SelectedViewport;
 	PushClipping();
@@ -2000,15 +2160,25 @@ void DrawPieMenu()
 									CursorStartScreenPos.x - UI.PieMenu.G->Width / 2,
 									CursorStartScreenPos.y - UI.PieMenu.G->Height / 2);
 	}
-	CPlayer &player = *Selected[0]->Player;
-
-	for (int i = 0; i < (int)UI.ButtonPanel.Buttons.size() && i < 8; ++i) {
+	for (int i = 0; i < (int)UI.ButtonPanel.Buttons.size() && i < 9; ++i) {
 		if (buttons[i].Pos != -1) {
 			int x = CursorStartScreenPos.x - ICON_SIZE_X / 2 + UI.PieMenu.X[i];
 			int y = CursorStartScreenPos.y - ICON_SIZE_Y / 2 + UI.PieMenu.Y[i];
 			const PixelPos pos(x, y);
+
+			bool gray = false;
+			for (size_t j = 0; j != Selected.size(); ++j) {
+				if (!IsButtonAllowed(*Selected[j], buttons[i])) {
+					gray = true;
+					break;
+				}
+			}
 			// Draw icon
-			buttons[i].Icon.Icon->DrawIcon(player, pos);
+			if (gray) {
+				buttons[i].Icon.Icon->DrawGrayscaleIcon(pos);
+			} else {
+				buttons[i].Icon.Icon->DrawIcon(pos, ThisPlayer->Index);
+			}
 
 			// Tutorial show command key in icons
 			if (UI.ButtonPanel.ShowCommandKey) {
@@ -2029,7 +2199,11 @@ void DrawPieMenu()
 
 	int i = GetPieUnderCursor();
 	if (i != -1 && KeyState != KeyStateInput && buttons[i].Pos != -1) {
-		UpdateStatusLineForButton(buttons[i]);
+		if (!Preference.NoStatusLineTooltips) {
+			UpdateStatusLineForButton(buttons[i]);
+		}
+		DrawPopup(buttons[i], UI.ButtonPanel.Buttons[i],
+				  CursorStartScreenPos.x + UI.PieMenu.X[i], CursorStartScreenPos.y + UI.PieMenu.Y[i]);
 	}
 }
 
@@ -2038,14 +2212,15 @@ void DrawPieMenu()
 */
 static void HandlePieMenuMouseSelection()
 {
-	if (!CurrentButtons.IsValid()) {  // no buttons
+	if (CurrentButtons.empty()) {  // no buttons
 		return;
 	}
 
 	int pie = GetPieUnderCursor();
 	if (pie != -1) {
+		const ButtonCmd action = CurrentButtons[pie].Action;
 		UI.ButtonPanel.DoClicked(pie);
-		if (CurrentButtons[pie].Action == ButtonButton) {
+		if (action == ButtonButton) {
 			// there is a submenu => stay in piemenu mode
 			// and recenter the piemenu around the cursor
 			CursorStartScreenPos = CursorScreenPos;

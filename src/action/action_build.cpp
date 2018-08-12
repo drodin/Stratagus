@@ -10,8 +10,8 @@
 //
 /**@name action_build.cpp - The build building action. */
 //
-//      (c) Copyright 1998-2005 by Lutz Sammer, Jimmy Salmon, and
-//                                 Russell Smith
+//      (c) Copyright 1998-2015 by Lutz Sammer, Jimmy Salmon,
+//      Russell Smith and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -46,11 +46,11 @@
 #include "pathfinder.h"
 #include "player.h"
 #include "script.h"
-#include "tileset.h"
 #include "translate.h"
 #include "ui.h"
 #include "unit.h"
 #include "unittype.h"
+#include "video.h"
 
 extern void AiReduceMadeInBuilt(PlayerAi &pai, const CUnitType &type);
 
@@ -76,11 +76,11 @@ enum {
 	COrder_Build *order = new COrder_Build;
 
 	order->goalPos = pos;
-	if (building.BuilderOutside) {
+	if (building.BoolFlag[BUILDEROUTSIDE_INDEX].value) {
 		order->Range = builder.Type->RepairRange;
 	} else {
 		// If building inside, but be next to stop
-		if (building.ShoreBuilding && builder.Type->UnitType == UnitTypeLand) {
+		if (building.BoolFlag[SHOREBUILDING_INDEX].value && builder.Type->UnitType == UnitTypeLand) {
 			// Peon won't dive :-)
 			order->Range = 1;
 		}
@@ -117,14 +117,10 @@ enum {
 		lua_pop(l, 1);
 	} else if (!strcmp(value, "range")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Range = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->Range = LuaToNumber(l, -1, j + 1);
 	} else if (!strcmp(value, "state")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->State = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->State = LuaToNumber(l, -1, j + 1);
 	} else if (!strcmp(value, "tile")) {
 		++j;
 		lua_rawgeti(l, -1, j + 1);
@@ -132,9 +128,7 @@ enum {
 		lua_pop(l, 1);
 	} else if (!strcmp(value, "type")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Type = UnitTypeByIdent(LuaToString(l, -1));
-		lua_pop(l, 1);
+		this->Type = UnitTypeByIdent(LuaToString(l, -1, j + 1));
 	} else {
 		return false;
 	}
@@ -148,7 +142,7 @@ enum {
 
 /* virtual */ PixelPos COrder_Build::Show(const CViewport &vp, const PixelPos &lastScreenPos) const
 {
-	PixelPos targetPos = vp.TilePosToScreen_TopLeft(this->goalPos);
+	PixelPos targetPos = vp.TilePosToScreen_Center(this->goalPos);
 	targetPos.x += (this->GetUnitType().TileWidth - 1) * PixelTileSize.x / 2;
 	targetPos.y += (this->GetUnitType().TileHeight - 1) * PixelTileSize.y / 2;
 
@@ -163,7 +157,7 @@ enum {
 
 /* virtual */ void COrder_Build::UpdatePathFinderData(PathFinderInput &input)
 {
-	input.SetMinRange(this->Type->BuilderOutside ? 1 : 0);
+	input.SetMinRange(this->Type->BoolFlag[BUILDEROUTSIDE_INDEX].value ? 1 : 0);
 	input.SetMaxRange(this->Range);
 
 	const Vec2i tileSize(this->Type->TileWidth, this->Type->TileHeight);
@@ -254,11 +248,13 @@ class AlreadyBuildingFinder
 public:
 	AlreadyBuildingFinder(const CUnit &unit, const CUnitType &t) :
 		worker(&unit), type(&t) {}
-	bool operator()(const CUnit *const unit) const {
+	bool operator()(const CUnit *const unit) const
+	{
 		return (!unit->Destroyed && unit->Type == type
 				&& (worker->Player == unit->Player || worker->IsAllied(*unit)));
 	}
-	CUnit *Find(const CMapField *const mf) const {
+	CUnit *Find(const CMapField *const mf) const
+	{
 		return mf->UnitCache.find(*this);
 	}
 private:
@@ -340,6 +336,9 @@ bool COrder_Build::StartBuilding(CUnit &unit, CUnit &ontop)
 		Assert(b);
 		if (b->ReplaceOnBuild) {
 			build->ResourcesHeld = ontop.ResourcesHeld; // We capture the value of what is beneath.
+			build->Variable[GIVERESOURCE_INDEX].Value = ontop.Variable[GIVERESOURCE_INDEX].Value;
+			build->Variable[GIVERESOURCE_INDEX].Max = ontop.Variable[GIVERESOURCE_INDEX].Max;
+			build->Variable[GIVERESOURCE_INDEX].Enable = ontop.Variable[GIVERESOURCE_INDEX].Enable;
 			ontop.Remove(NULL); // Destroy building beneath
 			UnitLost(ontop);
 			UnitClearOrders(ontop);
@@ -357,9 +356,12 @@ bool COrder_Build::StartBuilding(CUnit &unit, CUnit &ontop)
 
 	// HACK: the building is not ready yet
 	build->Player->UnitTypesCount[type.Slot]--;
+	if (build->Active) {
+		build->Player->UnitTypesAiActiveCount[type.Slot]--;
+	}
 
 	// We need somebody to work on it.
-	if (!type.BuilderOutside) {
+	if (!type.BoolFlag[BUILDEROUTSIDE_INDEX].value) {
 		UnitShowAnimation(unit, unit.Type->Animations->Still);
 		unit.Remove(build);
 		this->State = State_BuildFromInside;
@@ -420,8 +422,17 @@ bool COrder_Build::BuildFromOutside(CUnit &unit) const
 /* virtual */ void COrder_Build::Execute(CUnit &unit)
 {
 	if (unit.Wait) {
+		if (!unit.Waiting) {
+			unit.Waiting = 1;
+			unit.WaitBackup = unit.Anim;
+		}
+		UnitShowAnimation(unit, unit.Type->Animations->Still);
 		unit.Wait--;
-		return ;
+		return;
+	}
+	if (unit.Waiting) {
+		unit.Anim = unit.WaitBackup;
+		unit.Waiting = 0;
 	}
 	if (this->State <= State_MoveToLocationMax) {
 		if (this->MoveToLocation(unit)) {
@@ -452,7 +463,9 @@ bool COrder_Build::BuildFromOutside(CUnit &unit) const
 		return ;
 	}
 	if (this->State == State_BuildFromOutside) {
-		this->BuildFromOutside(unit);
+		if (this->BuildFromOutside(unit)) {
+			this->Finished = true;
+		}
 	}
 }
 

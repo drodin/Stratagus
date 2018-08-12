@@ -35,12 +35,19 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 
 #ifdef WIN32
 #include <windows.h>
 #endif
 
-#ifdef HAVE_X
+#ifdef USE_STACKTRACE
+#include <stdexcept>
+#include <stacktrace/call_stack.hpp>
+#include <stacktrace/stack_exception.hpp>
+#endif
+
+#ifdef USE_X11
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #endif
@@ -50,6 +57,7 @@
 ----------------------------------------------------------------------------*/
 
 unsigned SyncRandSeed;               /// sync random seed value.
+uint32_t FileChecksums = 0;              /// checksums of all loaded lua files
 
 /**
 **  Inititalize sync rand seed.
@@ -120,7 +128,7 @@ long isqrt(long num)
 	//
 	//  Load the binary constant 01 00 00 ... 00, where the number
 	//  of zero bits to the right of the single one bit
-	//  is even, and the one bit is as far left as is consistant
+	//  is even, and the one bit is as far left as is consistent
 	//  with that condition.)
 	//
 	//  This portable load replaces the loop that used to be
@@ -145,13 +153,36 @@ long isqrt(long num)
 	return root;
 }
 
+// from wikipedia, simple checksumming of our lua files
+uint32_t fletcher32(const std::string &content)
+{
+	const uint16_t *data = (const uint16_t*)content.c_str();
+	size_t shorts = content.size() / 2;
+	uint32_t sum1 = 0xffff, sum2 = 0xffff;
+	size_t tlen;
+
+	while (shorts) {
+		tlen = ((shorts >= 359) ? 359 : shorts);
+		shorts -= tlen;
+		do {
+			sum2 += sum1 += *data++;
+			tlen--;
+		} while (tlen);
+		sum1 = (sum1 & 0xffff) + (sum1 >> 16);
+		sum2 = (sum2 & 0xffff) + (sum2 >> 16);
+	}
+	/* Second reduction step to reduce sums to 16 bits */
+	sum1 = (sum1 & 0xffff) + (sum1 >> 16);
+	sum2 = (sum2 & 0xffff) + (sum2 >> 16);
+	return (sum2 << 16) | sum1;
+}
 
 /*----------------------------------------------------------------------------
 --  Strings
 ----------------------------------------------------------------------------*/
 
-#if !defined(_MSC_VER) || _MSC_VER < 1400
-unsigned int strcpy_s(char *dst, size_t dstsize, const char *src)
+#ifndef HAVE_STRCPYS
+errno_t strcpy_s(char *dst, size_t dstsize, const char *src)
 {
 	if (dst == NULL || src == NULL) {
 		return EINVAL;
@@ -162,6 +193,7 @@ unsigned int strcpy_s(char *dst, size_t dstsize, const char *src)
 	strcpy(dst, src);
 	return 0;
 }
+#endif
 
 #ifndef HAVE_STRNLEN
 size_t strnlen(const char *str, size_t strsize)
@@ -178,7 +210,8 @@ size_t strnlen(const char *str, size_t strsize)
 }
 #endif
 
-unsigned int strncpy_s(char *dst, size_t dstsize, const char *src, size_t count)
+#ifndef HAVE_STRNCPYS
+errno_t strncpy_s(char *dst, size_t dstsize, const char *src, size_t count)
 {
 	if (dst == NULL || src == NULL || dstsize == 0) {
 		return EINVAL;
@@ -204,8 +237,10 @@ unsigned int strncpy_s(char *dst, size_t dstsize, const char *src, size_t count)
 	*dst = '\0';
 	return 0;
 }
+#endif
 
-unsigned int strcat_s(char *dst, size_t dstsize, const char *src)
+#ifndef HAVE_STRCATS
+errno_t strcat_s(char *dst, size_t dstsize, const char *src)
 {
 	if (dst == NULL || src == NULL) {
 		return EINVAL;
@@ -234,7 +269,7 @@ unsigned int strcat_s(char *dst, size_t dstsize, const char *src)
 **  @param a  String to search in
 **  @param b  Substring to search for
 **
-**  @return   Pointer to first occurence of b or NULL if not found.
+**  @return   Pointer to first occurrence of b or NULL if not found.
 */
 char *strcasestr(const char *a, const char *b)
 {
@@ -265,6 +300,8 @@ char *strcasestr(const char *a, const char *b)
 --  Getopt
 ----------------------------------------------------------------------------*/
 
+#ifndef HAVE_GETOPT
+
 /**
 **  Standard implementation of getopt(3).
 **
@@ -274,9 +311,6 @@ char *strcasestr(const char *a, const char *b)
 **  an 'argument required' error.
 */
 
-#if defined(_MSC_VER)
-
-#include <io.h>
 #include <string.h>
 
 int opterr = 1;
@@ -284,22 +318,16 @@ int optind = 1;
 int optopt;
 char *optarg;
 
-static void getopt_err(char *argv0, char *str, char opt)
+static void getopt_err(const char *argv0, const char *str, char opt)
 {
 	if (opterr) {
-		char errbuf[2];
-		char *x;
-
-		errbuf[0] = opt;
-		errbuf[1] = '\n';
+		const char *x;
 
 		while ((x = strchr(argv0, '/'))) {
 			argv0 = x + 1;
 		}
 
-		write(2, argv0, strlen(argv0));
-		write(2, str, strlen(str));
-		write(2, errbuf, 2);
+		fprintf(stderr, "%s%s%c\n", argv0, str, opt);
 	}
 }
 
@@ -342,7 +370,7 @@ int getopt(int argc, char *const *argv, const char *opts)
 	return c;
 }
 
-#endif /* _MSC_VER */
+#endif
 
 
 /*----------------------------------------------------------------------------
@@ -354,12 +382,12 @@ int getopt(int argc, char *const *argv, const char *opts)
 */
 int GetClipboard(std::string &str)
 {
-#if defined(USE_WIN32) || defined(HAVE_X)
+#if defined(USE_WIN32) || defined(USE_X11)
 	int i;
 	unsigned char *clipboard;
 #ifdef USE_WIN32
 	HGLOBAL handle;
-#elif defined(HAVE_X)
+#elif defined(USE_X11)
 	Display *display;
 	Window window;
 	Atom rettype;
@@ -383,7 +411,7 @@ int GetClipboard(std::string &str)
 		CloseClipboard();
 		return -1;
 	}
-#elif defined(HAVE_X)
+#elif defined(USE_X11)
 	if (!(display = XOpenDisplay(NULL))) {
 		return -1;
 	}
@@ -431,7 +459,7 @@ int GetClipboard(std::string &str)
 #ifdef USE_WIN32
 	GlobalUnlock(handle);
 	CloseClipboard();
-#elif defined(HAVE_X)
+#elif defined(USE_X11)
 	if (clipboard != NULL) {
 		XFree(clipboard);
 	}
@@ -484,3 +512,35 @@ int UTF8GetNext(const std::string &text, int curpos)
 	return text.size();
 }
 
+
+/*----------------------------------------------------------------------------
+--  others
+----------------------------------------------------------------------------*/
+
+void PrintLocation(const char *file, int line, const char *funcName)
+{
+	fprintf(stdout, "%s:%d: %s: ", file, line, funcName);
+}
+
+void AbortAt(const char *file, int line, const char *funcName, const char *conditionStr)
+{
+	char buf[1024];
+	snprintf(buf, 1024, "Assertion failed at %s:%d: %s: %s\n", file, line, funcName, conditionStr);
+#ifdef USE_STACKTRACE
+	throw stacktrace::stack_runtime_error((const char*)buf);
+#else
+	fprintf(stderr, "%s\n", buf);
+#endif
+	fflush(stdout);
+	fflush(stderr);
+	abort();
+}
+
+void PrintOnStdOut(const char *format, ...)
+{
+	va_list valist;
+	va_start(valist, format);
+	vprintf(format, valist);
+	va_end(valist);
+	fflush(stdout);
+}

@@ -57,6 +57,7 @@
 #include "unit_manager.h"
 #include "unittype.h"
 #include "upgrade.h"
+#include "video.h"
 
 /*----------------------------------------------------------------------------
 --  Variables
@@ -85,7 +86,7 @@ void CleanModules()
 	CleanFonts();
 	CleanTriggers();
 	FreeAi();
-	CleanRaces();
+	PlayerRaces.Clean();
 	CleanConstructions();
 	CleanDecorations();
 	CleanMissiles();
@@ -98,7 +99,6 @@ void CleanModules()
 	CleanDependencies();
 	CleanButtons();
 	CleanMissileTypes();
-	CleanTilesets();
 	Map.Clean();
 	Map.CleanFogOfWar();
 	CParticleManager::exit();
@@ -133,8 +133,6 @@ void InitModules()
 	InitUnitTypes(0);
 
 	InitUnits();
-	InitSelections();
-	InitGroups();
 	InitSpells();
 	InitUpgrades();
 	InitDependencies();
@@ -197,10 +195,6 @@ static void PlaceUnits()
 */
 void LoadGame(const std::string &filename)
 {
-	unsigned long game_cycle;
-	unsigned syncrand;
-	unsigned synchash;
-
 	// log will be enabled if found in the save game
 	CommandLogDisabled = true;
 	SaveGameLoading = true;
@@ -208,16 +202,16 @@ void LoadGame(const std::string &filename)
 	SetDefaultTextColors(FontYellow, FontWhite);
 	LoadFonts();
 
-	CclGarbageCollect(0);
+	LuaGarbageCollect();
 	InitUnitTypes(1);
 	LuaLoadFile(filename);
-	CclGarbageCollect(0);
+	LuaGarbageCollect();
 
 	PlaceUnits();
 
-	game_cycle = GameCycle;
-	syncrand = SyncRandSeed;
-	synchash = SyncHash;
+	const unsigned long game_cycle = GameCycle;
+	const unsigned syncrand = SyncRandSeed;
+	const unsigned synchash = SyncHash;
 
 	InitModules();
 	LoadModules();

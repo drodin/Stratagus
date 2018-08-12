@@ -10,7 +10,8 @@
 //
 /**@name button_checks.cpp - The button checks. */
 //
-//      (c) Copyright 1999-2006 by Lutz Sammer, Vladi Belperchinov-Shabanski
+//      (c) Copyright 1999-2015 by Lutz Sammer, Vladi Belperchinov-Shabanski
+//      and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -44,6 +45,7 @@
 #include "unittype.h"
 #include "upgrade.h"
 
+#include <stdio.h>
 /*----------------------------------------------------------------------------
 --  Functions
 ----------------------------------------------------------------------------*/
@@ -90,6 +92,85 @@ bool ButtonCheckUpgrade(const CUnit &unit, const ButtonAction &button)
 }
 
 /**
+**  Check for button enabled, if unit has an individual upgrade.
+**
+**  @param unit    Pointer to unit for button.
+**  @param button  Pointer to button to check/enable.
+**
+**  @return        True if enabled.
+*/
+bool ButtonCheckIndividualUpgrade(const CUnit &unit, const ButtonAction &button)
+{
+	return unit.IndividualUpgrades[UpgradeIdByIdent(button.AllowStr)];
+}
+
+/**
+**  Check for button enabled, if unit's variables pass the condition check.
+**
+**  @param unit    Pointer to unit for button.
+**  @param button  Pointer to button to check/enable.
+**
+**  @return        True if enabled.
+*/
+bool ButtonCheckUnitVariable(const CUnit &unit, const ButtonAction &button)
+{
+	char *buf = new_strdup(button.AllowStr.c_str());
+
+	for (const char *var = strtok(buf, ","); var; var = strtok(NULL, ",")) {
+		const char *type = strtok(NULL, ",");
+		const char *binop = strtok(NULL, ",");
+		const char *value = strtok(NULL, ",");
+		const int index = UnitTypeVar.VariableNameLookup[var];// User variables
+		if (index == -1) {
+			fprintf(stderr, "Bad variable name '%s'\n", var);
+			Exit(1);
+			return false;
+		}
+		int varValue;
+		if (!strcmp(type, "Value")) {
+			varValue = unit.Variable[index].Value;
+		} else if (!strcmp(type, "Max")) {
+			varValue = unit.Variable[index].Max;
+		} else if (!strcmp(type, "Increase")) {
+			varValue = unit.Variable[index].Increase;
+		} else if (!strcmp(type, "Enable")) {
+			varValue = unit.Variable[index].Enable;
+		} else if (!strcmp(type, "Percent")) {
+			varValue = unit.Variable[index].Value * 100 / unit.Variable[index].Max;
+		} else {
+			fprintf(stderr, "Bad variable type '%s'\n", type);
+			Exit(1);
+			return false;
+		}
+		const int cmpValue = atoi(value);
+		bool cmpResult = false;
+		if (!strcmp(binop, ">")) {
+			cmpResult = varValue > cmpValue;
+		} else if (!strcmp(binop, ">=")) {
+			cmpResult = varValue >= cmpValue;
+		} else if (!strcmp(binop, "<")) {
+			cmpResult = varValue < cmpValue;
+		} else if (!strcmp(binop, "<=")) {
+			cmpResult = varValue <= cmpValue;
+		} else if (!strcmp(binop, "==")) {
+			cmpResult = varValue == cmpValue;
+		} else if (!strcmp(binop, "!=")) {
+			cmpResult = varValue != cmpValue;
+		} else {
+			fprintf(stderr, "Bad compare type '%s'\n", binop);
+			Exit(1);
+			return false;
+		}
+		if (cmpResult == false) {
+			delete[] buf;
+			return false;
+		}
+	}
+	delete[] buf;
+	return true;
+}
+
+/**
 **  Check for button enabled, if any unit is available.
 **
 **  @param unit    Pointer to unit for button.
@@ -133,6 +214,19 @@ bool ButtonCheckUnitsAnd(const CUnit &unit, const ButtonAction &button)
 	}
 	delete[] buf;
 	return true;
+}
+
+/**
+**  Check for button enabled, if no unit is available.
+**
+**  @param unit    Pointer to unit for button.
+**  @param button  Pointer to button to check/enable.
+**
+**  @return        True if enabled.
+*/
+bool ButtonCheckUnitsNot(const CUnit &unit, const ButtonAction &button)
+{
+	return !ButtonCheckUnitsAnd(unit, button);
 }
 
 /**

@@ -42,14 +42,10 @@
 /* virtual */ void Spell_Polymorph::Parse(lua_State *l, int startIndex, int endIndex)
 {
 	for (int j = startIndex; j < endIndex; ++j) {
-		lua_rawgeti(l, -1, j + 1);
-		const char *value = LuaToString(l, -1);
-		lua_pop(l, 1);
+		const char *value = LuaToString(l, -1, j + 1);
 		++j;
 		if (!strcmp(value, "new-form")) {
-			lua_rawgeti(l, -1, j + 1);
-			value = LuaToString(l, -1);
-			lua_pop(l, 1);
+			value = LuaToString(l, -1, j + 1);
 			this->NewForm = UnitTypeByIdent(value);
 			if (!this->NewForm) {
 				this->NewForm = 0;
@@ -111,21 +107,15 @@
 	// as said somewhere else -- no corpses :)
 	target->Remove(NULL);
 	Vec2i offset;
-	for (offset.x = 0; offset.x < type.TileWidth; ++offset.x) {
-		for (offset.y = 0; offset.y < type.TileHeight; ++offset.y) {
-			if (!UnitTypeCanBeAt(type, pos + offset)) {
-				target->Place(target->tilePos);
-				return 0;
-			}
-		}
-	}
 	caster.Variable[MANA_INDEX].Value -= spell.ManaCost;
+	Vec2i resPos;
+	FindNearestDrop(type, pos, resPos, LookingW);
 	if (this->PlayerNeutral == 1) {
-		MakeUnitAndPlace(pos, type, Players + PlayerNumNeutral);
+		MakeUnitAndPlace(resPos, type, Players + PlayerNumNeutral);
 	} else if (this->PlayerNeutral == 2) {
-		MakeUnitAndPlace(pos, type, caster.Player);
+		MakeUnitAndPlace(resPos, type, caster.Player);
 	} else {
-		MakeUnitAndPlace(pos, type, target->Player);
+		MakeUnitAndPlace(resPos, type, target->Player);
 	}
 	UnitLost(*target);
 	UnitClearOrders(*target);

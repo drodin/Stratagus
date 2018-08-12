@@ -42,6 +42,35 @@
 **
 **  \#include "tile.h"
 **
+**  CMapFieldPlayerInfo::SeenTile
+**
+**    This is the tile number, that the player sitting on the computer
+**    currently knows. Idea: Can be uses for illusions.
+**
+**  CMapFieldPlayerInfo::Visible[]
+**
+**    Counter how many units of the player can see this field. 0 the
+**    field is not explored, 1 explored, n-1 unit see it. Currently
+**    no more than 253 units can see a field.
+**
+**  CMapFieldPlayerInfo::VisCloak[]
+**
+**    Visiblity for cloaking.
+**
+**  CMapFieldPlayerInfo::Radar[]
+**
+**    Visiblity for radar.
+**
+**  CMapFieldPlayerInfo::RadarJammer[]
+**
+**    Jamming capabilities.
+*/
+
+/**
+**  @class CMapField tile.h
+**
+**  \#include "tile.h"
+**
 **  This class contains all information about a field on map.
 **  It contains its look, properties and content.
 **
@@ -54,11 +83,6 @@
 **    currently 32x32 pixels. In the future is planned to support
 **    animated tiles.
 **
-**  CMapField::SeenTile
-**
-**    This is the tile number, that the player sitting on the computer
-**    currently knows. Idea: Can be uses for illusions.
-**
 **  CMapField::Flags
 **
 **    Contains special information of that tile. What units are
@@ -68,11 +92,9 @@
 **
 **    ::MapFieldVisible field is visible.
 **    ::MapFieldExplored field is explored.
-**    ::MapFieldHuman human player is the owner of the field used for
-**      walls.
+**    ::MapFieldHuman human player is the owner of the field used for walls.
 **    ::MapFieldLandAllowed land units are allowed.
-**    ::MapFieldCoastAllowed coast units (transporter) and coast
-**      buildings (shipyard) are allowed.
+**    ::MapFieldCoastAllowed coast units (transporter) and coast buildings (shipyard) are allowed.
 **    ::MapFieldWaterAllowed water units allowed.
 **    ::MapFieldNoBuilding no buildings allowed.
 **    ::MapFieldUnpassable field is movement blocked.
@@ -97,24 +119,6 @@
 **    walls, contains the remaining hit points of the wall and
 **    for forest, contains the frames until they grow.
 **
-**  CMapField::Visible[]
-**
-**    Counter how many units of the player can see this field. 0 the
-**    field is not explored, 1 explored, n-1 unit see it. Currently
-**    no more than 253 units can see a field.
-**
-**  CMapField::VisCloak[]
-**
-**    Visiblity for cloaking.
-**
-**  CMapField::Radar[]
-**
-**    Visiblity for radar.
-**
-**  CMapField::RadarJammer[]
-**
-**    Jamming capabilities.
-**
 **  CMapField::UnitCache
 **
 **    Contains a vector of all units currently on this field.
@@ -128,28 +132,25 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-//#include <string>
-//#include <vector>
-//#include <algorithm>
-
 #ifndef __UNIT_CACHE_H__
 #include "unit_cache.h"
 #endif
 
+#include <vec2i.h>
+
+class CFile;
+class CPlayer;
+class CTileset;
+struct lua_State;
 
 /*----------------------------------------------------------------------------
 --  Map - field
 ----------------------------------------------------------------------------*/
 
-/// Describes a field of the map
-class CMapField
+class CMapFieldPlayerInfo
 {
 public:
-
-	CMapField() : Tile(0), SeenTile(0), Flags(0), Cost(0), Value(0), UnitCache()
-#ifdef DEBUG
-		, TilesetTile(0)
-#endif
+	CMapFieldPlayerInfo() : SeenTile(0)
 	{
 		memset(Visible, 0, sizeof(Visible));
 		memset(VisCloak, 0, sizeof(VisCloak));
@@ -157,29 +158,87 @@ public:
 		memset(RadarJammer, 0, sizeof(RadarJammer));
 	}
 
-	unsigned short Tile;      /// graphic tile number
-	unsigned short SeenTile;  /// last seen tile (FOW)
-	unsigned short Flags;     /// field flags
-	unsigned char Cost;       /// unit cost to move in this tile
-	// FIXME: Value can be removed, walls and regeneration can be handled
-	//        different.
-	unsigned char Value;                  /// HP for walls/ Wood Regeneration
+	/// Check if a field for the user is explored.
+	bool IsExplored(const CPlayer &player) const;
+
+	/// @note Manage Map.NoFogOfWar
+	bool IsVisible(const CPlayer &player) const;
+	bool IsTeamVisible(const CPlayer &player) const;
+	/**
+	**  Find out how a field is seen (By player, or by shared vision)
+	**
+	**  @param player   Player to check for.
+	**  @note manage fogOfWar (using Map.NoFogOfWar)
+	**
+	**  @return        0 unexplored, 1 explored, 2 visible.
+	*/
+	unsigned char TeamVisibilityState(const CPlayer &player) const;
+
+public:
+	unsigned short SeenTile;              /// last seen tile (FOW)
 	unsigned short Visible[PlayerMax];    /// Seen counter 0 unexplored
 	unsigned char VisCloak[PlayerMax];    /// Visiblity for cloaking.
 	unsigned char Radar[PlayerMax];       /// Visiblity for radar.
 	unsigned char RadarJammer[PlayerMax]; /// Jamming capabilities.
-	CUnitCache		UnitCache;			/// A unit on the map field.
-#ifdef DEBUG
-	unsigned int TilesetTile;      /// tileset tile number
-#endif
-
-	/// Check if a field for the user is explored.
-	bool IsExplored(const unsigned int player_index) const {
-		return !!Visible[player_index];
-	};
-
 };
 
+/// Describes a field of the map
+class CMapField
+{
+public:
+	CMapField();
+
+	void Save(CFile &file) const;
+	void parse(lua_State *l);
+
+	void setTileIndex(const CTileset &tileset, unsigned int tileIndex, int value);
+
+	unsigned int getGraphicTile() const { return tile; }
+
+	/// Check if a field flags.
+	bool CheckMask(int mask) const;
+
+	/// Returns true, if water on the map tile field
+	bool WaterOnMap() const;
+
+	/// Returns true, if coast on the map tile field
+	bool CoastOnMap() const;
+
+	/// Returns true, if water on the map tile field
+	bool ForestOnMap() const;
+
+	/// Returns true, if coast on the map tile field
+	bool RockOnMap() const;
+
+	bool isAWall() const;
+	bool isHuman() const;
+	bool isAHumanWall() const;
+	bool isAOrcWall() const;
+
+	bool IsTerrainResourceOnMap(int resource) const;
+	bool IsTerrainResourceOnMap() const;
+
+	unsigned char getCost() const { return cost; }
+	unsigned int getFlag() const { return Flags; }
+	void setGraphicTile(unsigned int tile) { this->tile = tile; }
+private:
+#ifdef DEBUG
+	unsigned int tilesetTile;  /// tileset tile number
+#endif
+	unsigned short tile;       /// graphic tile number
+public:
+	unsigned short Flags;      /// field flags
+private:
+	unsigned char cost;        /// unit cost to move in this tile
+public:
+	// FIXME: Value should be removed, walls and regeneration can be handled differently.
+	unsigned char Value;       /// HP for walls/ Wood Regeneration
+	CUnitCache UnitCache;      /// A unit on the map field.
+
+	CMapFieldPlayerInfo playerInfo; /// stuff related to player
+};
+
+extern PixelSize PixelTileSize; /// Size of a tile in pixels
 
 //@}
 

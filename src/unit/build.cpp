@@ -10,7 +10,8 @@
 //
 /**@name build.cpp - The units. */
 //
-//      (c) Copyright 1998-2008 by Lutz Sammer, Jimmy Salmon and Rafal Bursig
+//      (c) Copyright 1998-2015 by Lutz Sammer, Jimmy Salmon, Rafal Bursig
+//		and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -114,6 +115,7 @@ bool CBuildRestrictionDistance::Check(const CUnit *builder, const CUnitType &typ
 	Vec2i pos1(0, 0);
 	Vec2i pos2(0, 0);
 	int distance = 0;
+	CPlayer* player = builder != NULL ? builder->Player : ThisPlayer;
 
 	if (this->DistanceType == LessThanEqual
 		|| this->DistanceType == GreaterThan
@@ -134,43 +136,162 @@ bool CBuildRestrictionDistance::Check(const CUnit *builder, const CUnitType &typ
 	std::vector<CUnit *> table;
 	Select(pos1, pos2, table);
 
-	switch (this->DistanceType) {
-		case GreaterThan :
-		case GreaterThanEqual :
-			for (size_t i = 0; i != table.size(); ++i) {
-				if (builder != table[i] && this->RestrictType == table[i]->Type &&
-					MapDistanceBetweenTypes(type, pos, *table[i]->Type, table[i]->tilePos) <= distance) {
-					return false;
-				}
+	for (size_t i = 0; i != table.size(); ++i) {
+		if ((builder != table[i] || this->CheckBuilder) &&
+			// unit has RestrictType or no RestrictType was set, but a RestrictTypeOwner
+			(this->RestrictType == table[i]->Type || (!this->RestrictType && this->RestrictTypeOwner.size() > 0)) &&
+			// RestrictTypeOwner is not set or unit belongs to a suitable player
+			(this->RestrictTypeOwner.size() == 0 ||
+			 (!this->RestrictTypeOwner.compare("self") && player == table[i]->Player) ||
+			 (!this->RestrictTypeOwner.compare("allied") && (player == table[i]->Player || player->IsAllied(*table[i]->Player))) ||
+			 (!this->RestrictTypeOwner.compare("enemy") && player->IsEnemy(*table[i]->Player)))) {
+
+			switch (this->DistanceType) {
+				case GreaterThan :
+				case GreaterThanEqual :
+					if (MapDistanceBetweenTypes(type, pos, *table[i]->Type, table[i]->tilePos) <= distance) {
+						return Diagonal ? false : !(pos.x != table[i]->tilePos.x || pos.y != table[i]->tilePos.y);
+					}
+					break;
+				case LessThan :
+				case LessThanEqual :
+					if (MapDistanceBetweenTypes(type, pos, *table[i]->Type, table[i]->tilePos) <= distance) {
+						return Diagonal || pos.x == table[i]->tilePos.x || pos.y == table[i]->tilePos.y;
+					}
+					break;
+				case Equal :
+					if (MapDistanceBetweenTypes(type, pos, *table[i]->Type, table[i]->tilePos) == distance) {
+						return Diagonal || pos.x == table[i]->tilePos.x || pos.y == table[i]->tilePos.y;
+					}
+					break;
+				case NotEqual :
+					if (MapDistanceBetweenTypes(type, pos, *table[i]->Type, table[i]->tilePos) == distance) {
+						return Diagonal ? false : !(pos.x != table[i]->tilePos.x || pos.y != table[i]->tilePos.y);
+					}
+					break;
 			}
-			return true;
-		case LessThan :
-		case LessThanEqual :
-			for (size_t i = 0; i != table.size(); ++i) {
-				if (builder != table[i] && this->RestrictType == table[i]->Type &&
-					MapDistanceBetweenTypes(type, pos, *table[i]->Type, table[i]->tilePos) <= distance) {
-					return true;
-				}
-			}
-			return false;
-		case Equal :
-			for (size_t i = 0; i != table.size(); ++i) {
-				if (builder != table[i] && this->RestrictType == table[i]->Type &&
-					MapDistanceBetweenTypes(type, pos, *table[i]->Type, table[i]->tilePos) == distance) {
-					return true;
-				}
-			}
-			return false;
-		case NotEqual :
-			for (size_t i = 0; i != table.size(); ++i) {
-				if (builder != table[i] && this->RestrictType == table[i]->Type &&
-					MapDistanceBetweenTypes(type, pos, *table[i]->Type, table[i]->tilePos) == distance) {
-					return false;
-				}
-			}
-			return true;
+		}
 	}
-	return false;
+	return (this->DistanceType == GreaterThan ||
+			this->DistanceType == GreaterThanEqual ||
+			this->DistanceType == NotEqual);
+}
+
+/**
+**  Check HasUnit Restriction
+*/
+bool CBuildRestrictionHasUnit::Check(const CUnit *builder, const CUnitType &type, const Vec2i &pos, CUnit *&) const
+{
+	Vec2i pos1(0, 0);
+	Vec2i pos2(0, 0);
+	CPlayer* player = builder != NULL ? builder->Player : ThisPlayer;
+	int count = 0;
+	if (this->RestrictTypeOwner.size() == 0 || !this->RestrictTypeOwner.compare("self")) {
+		count = player->GetUnitTotalCount(*this->RestrictType);
+	} else if (!this->RestrictTypeOwner.compare("allied")) {
+		count = player->GetUnitTotalCount(*this->RestrictType);
+		for (int i = 0; i < NumPlayers; i++) {
+			if (player->IsAllied(Players[i])) {
+				count += Players[i].GetUnitTotalCount(*this->RestrictType);
+			}
+		}
+	} else if (!this->RestrictTypeOwner.compare("enemy")) {
+		for (int i = 0; i < NumPlayers; i++) {
+			if (player->IsEnemy(Players[i])) {
+				count += Players[i].GetUnitTotalCount(*this->RestrictType);
+			}
+		}
+	} else if (!this->RestrictTypeOwner.compare("any")) {
+		for (int i = 0; i < NumPlayers; i++) {
+			count += Players[i].GetUnitTotalCount(*this->RestrictType);
+		}
+	}
+	switch (this->CountType)
+	{
+	case LessThan: return count < this->Count;
+	case LessThanEqual: return count <= this->Count;
+	case Equal: return count == this->Count;
+	case NotEqual: return count != this->Count;
+	case GreaterThanEqual: return count >= this->Count;
+	case GreaterThan: return count > this->Count;
+	default: return false;
+	}
+}
+
+/**
+**  Check Surrounded By Restriction
+*/
+bool CBuildRestrictionSurroundedBy::Check(const CUnit *builder, const CUnitType &type, const Vec2i &pos, CUnit *&) const
+{
+	Vec2i pos1(0, 0);
+	Vec2i pos2(0, 0);
+	int distance = 0;
+	int count = 0;
+
+	if (this->DistanceType == LessThanEqual
+		|| this->DistanceType == GreaterThan
+		|| this->DistanceType == Equal
+		|| this->DistanceType == NotEqual) {
+		pos1.x = std::max<int>(pos.x - this->Distance, 0);
+		pos1.y = std::max<int>(pos.y - this->Distance, 0);
+		pos2.x = std::min<int>(pos.x + type.TileWidth + this->Distance, Map.Info.MapWidth);
+		pos2.y = std::min<int>(pos.y + type.TileHeight + this->Distance, Map.Info.MapHeight);
+		distance = this->Distance;
+	}
+	else if (this->DistanceType == LessThan || this->DistanceType == GreaterThanEqual) {
+		pos1.x = std::max<int>(pos.x - this->Distance - 1, 0);
+		pos1.y = std::max<int>(pos.y - this->Distance - 1, 0);
+		pos2.x = std::min<int>(pos.x + type.TileWidth + this->Distance + 1, Map.Info.MapWidth);
+		pos2.y = std::min<int>(pos.y + type.TileHeight + this->Distance + 1, Map.Info.MapHeight);
+		distance = this->Distance - 1;
+	}
+	std::vector<CUnit *> table;
+	Select(pos1, pos2, table);
+
+	for (size_t i = 0; i != table.size(); ++i) {
+		if ((builder != table[i] || this->CheckBuilder) &&
+			// unit has RestrictType or no RestrictType was set, but a RestrictTypeOwner
+			(this->RestrictType == table[i]->Type || (!this->RestrictType && this->RestrictTypeOwner.size() > 0)) &&
+			// RestrictTypeOwner is not set or unit belongs to a suitable player
+			(this->RestrictTypeOwner.size() == 0 ||
+				(!this->RestrictTypeOwner.compare("self") && builder->Player == table[i]->Player) ||
+				(!this->RestrictTypeOwner.compare("allied") && (builder->Player == table[i]->Player || builder->Player->IsAllied(*table[i]->Player))) ||
+				(!this->RestrictTypeOwner.compare("enemy") && builder->Player->IsEnemy(*table[i]->Player)))) {
+
+			switch (this->DistanceType) {
+			case GreaterThan:
+			case GreaterThanEqual:
+				break;
+			case LessThan:
+			case LessThanEqual:
+				if (MapDistanceBetweenTypes(type, pos, *table[i]->Type, table[i]->tilePos) <= distance) {
+					count++;
+				}
+				break;
+			case Equal:
+				if (MapDistanceBetweenTypes(type, pos, *table[i]->Type, table[i]->tilePos) == distance) {
+					count++;
+				}
+				break;
+			case NotEqual:
+				if (MapDistanceBetweenTypes(type, pos, *table[i]->Type, table[i]->tilePos) == distance) {
+					count++;
+				}
+				break;
+			}
+		}
+	}
+
+	switch (this->CountType)
+	{
+	case LessThan: return count < this->Count;
+	case LessThanEqual: return count <= this->Count;
+	case Equal: return count == this->Count;
+	case NotEqual: return count != this->Count;
+	case GreaterThanEqual: return count >= this->Count;
+	case GreaterThan: return count > this->Count;
+	default: return false;
+	}
 }
 
 inline bool CBuildRestrictionAddOn::functor::operator()(const CUnit *const unit) const
@@ -215,7 +336,8 @@ class AliveConstructedAndSameTypeAs
 {
 public:
 	explicit AliveConstructedAndSameTypeAs(const CUnitType &unitType) : type(&unitType) {}
-	bool operator()(const CUnit *unit) const {
+	bool operator()(const CUnit *unit) const
+	{
 		return unit->IsAlive() && unit->Type == type && unit->CurrentAction() != UnitActionBuilt;
 	}
 private:
@@ -223,7 +345,7 @@ private:
 };
 
 
-bool CBuildRestrictionOnTop::Check(const CUnit *, const CUnitType &, const Vec2i &pos, CUnit *&ontoptarget) const
+bool CBuildRestrictionOnTop::Check(const CUnit *builder, const CUnitType &, const Vec2i &pos, CUnit *&ontoptarget) const
 {
 	Assert(Map.Info.IsPointOnMap(pos));
 
@@ -233,6 +355,21 @@ bool CBuildRestrictionOnTop::Check(const CUnit *, const CUnitType &, const Vec2i
 	CUnitCache::iterator it = std::find_if(cache.begin(), cache.end(), AliveConstructedAndSameTypeAs(*this->Parent));
 
 	if (it != cache.end() && (*it)->tilePos == pos) {
+		CUnit &found = **it;
+		std::vector<CUnit *> table;
+		Vec2i endPos(found.tilePos.x + found.Type->TileWidth - 1, found.tilePos.y + found.Type->TileHeight - 1);
+		Select(found.tilePos, endPos, table);
+		for (std::vector<CUnit *>::iterator it2 = table.begin(); it2 != table.end(); ++it2) {
+			if (*it == *it2) {
+				continue;
+			}
+			if (builder == *it2) {
+				continue;
+			}
+			if (found.Type->UnitType == (*it2)->Type->UnitType) {
+				return false;
+			}
+		}
 		ontoptarget = *it;
 		return true;
 	}
@@ -262,7 +399,7 @@ CUnit *CanBuildHere(const CUnit *unit, const CUnitType &type, const Vec2i &pos)
 	}
 
 	// Must be checked before oil!
-	if (type.ShoreBuilding) {
+	if (type.BoolFlag[SHOREBUILDING_INDEX].value) {
 		const int width = type.TileWidth;
 		int h = type.TileHeight;
 		bool success = false;
@@ -270,11 +407,10 @@ CUnit *CanBuildHere(const CUnit *unit, const CUnitType &type, const Vec2i &pos)
 		// Need at least one coast tile
 		unsigned int index = Map.getIndex(pos);
 		do {
-			CMapField *mf = Map.Field(index);
+			const CMapField *mf = Map.Field(index);
 			int w = width;
 			do {
-				//if (Map.CoastOnMap(pos)) {
-				if ((mf->Flags & MapFieldCoastAllowed) == MapFieldCoastAllowed) {
+				if (mf->CoastOnMap()) {
 					success = true;
 				}
 				++mf;
@@ -286,13 +422,36 @@ CUnit *CanBuildHere(const CUnit *unit, const CUnitType &type, const Vec2i &pos)
 		}
 	}
 
+	// Check special rules for AI players
+	if (unit && unit->Player->AiEnabled) {
+		bool aiChecked = true;
+		size_t count = type.AiBuildingRules.size();
+		if (count > 0) {
+			CUnit *ontoptarget = NULL;
+			for (unsigned int i = 0; i < count; ++i) {
+				CBuildRestriction *rule = type.AiBuildingRules[i];
+				// All checks processed, did we really have success
+				if (rule->Check(unit, type, pos, ontoptarget)) {
+					// We passed a full ruleset
+					aiChecked = true;
+					break;
+				} else {
+					aiChecked = false;
+				}
+			}
+		}
+		if (aiChecked == false) {
+			return NULL;
+		}
+	}
+
 	size_t count = type.BuildingRules.size();
 	if (count > 0) {
 		for (unsigned int i = 0; i < count; ++i) {
 			CBuildRestriction *rule = type.BuildingRules[i];
 			CUnit *ontoptarget = NULL;
 			// All checks processed, did we really have success
-			if (rule->Check(NoUnitP, type, pos, ontoptarget)) {
+			if (rule->Check(unit, type, pos, ontoptarget)) {
 				// We passed a full ruleset return
 				if (unit == NULL) {
 					return ontoptarget ? ontoptarget : (CUnit *)1;
@@ -304,26 +463,6 @@ CUnit *CanBuildHere(const CUnit *unit, const CUnitType &type, const Vec2i &pos)
 		return NULL;
 	}
 
-	// Check special rules for AI players
-	if (unit && unit->Player->AiEnabled) {
-		size_t count = type.AiBuildingRules.size();
-		if (count > 0) {
-			CUnit *ontoptarget = NULL;
-			for (unsigned int i = 0; i < count; ++i) {
-				CBuildRestriction *rule = type.AiBuildingRules[i];
-				// All checks processed, did we really have success
-				if (rule->Check(unit, type, pos, ontoptarget)) {
-					// We passed a full ruleset return
-					if (unit == NULL) {
-						return ontoptarget ? ontoptarget : (CUnit *)1;
-					} else {
-						return ontoptarget ? ontoptarget : const_cast<CUnit *>(unit);
-					}
-				}
-			}
-			return NULL;
-		}
-	}
 	return (unit == NULL) ? (CUnit *)1 : const_cast<CUnit *>(unit);
 }
 
@@ -337,7 +476,7 @@ CUnit *CanBuildHere(const CUnit *unit, const CUnitType &type, const Vec2i &pos)
 */
 bool CanBuildOn(const Vec2i &pos, int mask)
 {
-	return (Map.Info.IsPointOnMap(pos) && !Map.CheckMask(pos, mask));
+	return (Map.Info.IsPointOnMap(pos) && !Map.Field(pos)->CheckMask(mask));
 }
 
 /**
@@ -390,12 +529,13 @@ CUnit *CanBuildUnitType(const CUnit *unit, const CUnitType &type, const Vec2i &p
 				testmask = type.MovementMask;
 			}
 			/*secound part of if (!CanBuildOn(x + w, y + h, testmask)) */
-			if (Map.CheckMask(index + pos.x + w, testmask)) {
+			const CMapField &mf = *Map.Field(index + pos.x + w);
+			if (mf.CheckMask(testmask)) {
 				h = type.TileHeight;
 				ontop = NULL;
 				break;
 			}
-			if (player && !Map.IsFieldExplored(*player, index + pos.x + w)) {
+			if (player && !mf.playerInfo.IsExplored(*player)) {
 				h = type.TileHeight;
 				ontop = NULL;
 				break;

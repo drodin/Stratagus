@@ -1,61 +1,27 @@
-Getting everything built
-========================
+    ________________________________README_________________________________
+         _________ __                 __                               
+        /   _____//  |_____________ _/  |______     ____  __ __  ______
+        \_____  \\   __\_  __ \__  \\   __\__  \   / ___\|  |  \/  ___/
+        /        \|  |  |  | \// __ \|  |  / __ \_/ /_/  >  |  /\___ | 
+       /_______  /|__|  |__|  (____  /__| (____  /\___  /|____//____  >
+               \/                  \/          \//_____/            \/ 
+    ______________________                           ______________________
+                          T H E   W A R   B E G I N S
+           Stratagus - A free fantasy real time strategy game engine
 
+Windows: <a href="https://ci.appveyor.com/project/timfel/stratagus"><img width="100" src="https://ci.appveyor.com/api/projects/status/github/Wargus/stratagus?branch=master&svg=true"></a>
 
-Requirements
-------------
-1. [Android SDK](http://developer.android.com/sdk/index.html)
-2. [Android NDK](http://developer.android.com/tools/sdk/ndk/index.html) (revision 8b)
-3. [Apache Ant](http://ant.apache.org)
-4. [SCons](http://www.scons.org)
+Linux & OSX: [![Build Status](https://travis-ci.org/Wargus/stratagus.svg?branch=master)](https://travis-ci.org/Wargus/stratagus)
 
+Nightly builds are available:
+  - Windows Installer: https://github.com/Wargus/stratagus/releases/tag/master-builds
+  - Ubuntu/Debian Packages: https://launchpad.net/~stratagus/+archive/ubuntu/ppa
 
-Dependencies
-------------
-SDL (1.2.15), libpng (1.2.50), lua (5.1.5), tolua++ (trunk)
+For Mac OS X, Stratagus comes bundled in the app bundles for Wargus, Stargus, and War1gus:
+  - Wargus: https://github.com/Wargus/stratagus/wiki/osx/Wargus.app.tar.gz
+  - War1gus: https://github.com/Wargus/stratagus/wiki/osx/War1gus.app.tar.gz
+  - Stargus: https://github.com/Wargus/stratagus/wiki/osx/Stargus.app.tar.gz
 
-
-Cloning
--------
-Make a directory and clone Stratagus and libs repos to it:
-
-	mkdir _some_dir_
-	cd _some_dir_
-	git clone https://github.com/drodin/Stratagus.git
-	git clone https://github.com/drodin/SDL.git
-	git clone https://github.com/drodin/libpng.git
-	git clone https://github.com/drodin/lua.git
-	git clone https://github.com/drodin/toluapp.git
-
-
-Building Lua
-------------
-
-	cd lua
-	make _platform_
-
-You need to specify the _platform_ to build for. Run make without params to see the list of supported platforms.
-
-
-Building tolua++
-----------------
-
-	cd ../toluapp
-	scons
-
-
-Generating tolua.cpp
---------------------
-
-	cd ../Stratagus/src/tolua
-	./runtolua.sh
-
-
-Building Stratagus apk
-----------------------
-
-	cd ../../android
-	ndk-build
-	ant debug
-
-Grab your .apk in the _bin_ directory ;)
+Read 'doc/index.html' for general information and license information.
+Read 'doc/install.html' for Stratagus installation instructions.
+Read 'doc/changelog.html' for the Stratagus changelog.

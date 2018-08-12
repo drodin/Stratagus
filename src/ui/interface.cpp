@@ -47,7 +47,6 @@
 #include "replay.h"
 #include "sound.h"
 #include "sound_server.h"
-#include "tileset.h"
 #include "translate.h"
 #include "ui.h"
 #include "unit.h"
@@ -82,11 +81,13 @@ std::string UiGroupKeys = DefaultGroupKeys;/// Up to 11 keys, last unselect. Def
 bool GameRunning;                    /// Current running state
 bool GamePaused;                     /// Current pause state
 bool GameObserve;                    /// Observe mode
+bool GameEstablishing;               /// Game establishing mode
 char SkipGameCycle;                  /// Skip the next game cycle
 char BigMapMode;                     /// Show only the map
 enum _iface_state_ InterfaceState;   /// Current interface state
 bool GodMode;                        /// Invincibility cheat
 enum _key_state_ KeyState;           /// current key state
+CUnit *LastIdleWorker;               /// Last called idle worker
 
 /*----------------------------------------------------------------------------
 --  Functions
@@ -97,10 +98,8 @@ enum _key_state_ KeyState;           /// current key state
 */
 static void ShowInput()
 {
-	char *input;
-
 	snprintf(InputStatusLine, sizeof(InputStatusLine), _("MESSAGE:%s~!_"), Input);
-	input = InputStatusLine;
+	char *input = InputStatusLine;
 	// FIXME: This is slow!
 	while (UI.StatusLine.Font->Width(input) > UI.StatusLine.Width) {
 		++input;
@@ -119,7 +118,7 @@ static void UiBeginInput()
 	KeyState = KeyStateInput;
 	Input[0] = '\0';
 	InputIndex = 0;
-	ClearCosts();
+	UI.StatusLine.ClearCosts();
 	ShowInput();
 }
 
@@ -147,28 +146,21 @@ static void UiUnselectAll()
 */
 static void UiCenterOnGroup(unsigned group, GroupSelectionMode mode = SELECTABLE_BY_RECTANGLE_ONLY)
 {
-	int n = GetNumberUnitsOfGroup(group, SELECT_ALL);
+	const std::vector<CUnit *> &units = GetUnitsOfGroup(group);
+	PixelPos pos(-1, -1);
 
-	if (n--) {
-		CUnit **units = GetUnitsOfGroup(group);
-		PixelPos pos(-1, -1);
-
-		// FIXME: what should we do with the removed units? ignore?
-		if (units[n]->Type && units[n]->Type->CanSelect(mode)) {
-			pos = units[n]->GetMapPixelPosCenter();
-		}
-		while (n--) {
-			if (units[n]->Type && units[n]->Type->CanSelect(mode)) {
-				if (pos.x != -1) {
-					pos += (units[n]->GetMapPixelPosCenter() - pos) / 2;
-				} else {
-					pos = units[n]->GetMapPixelPosCenter();
-				}
+	// FIXME: what should we do with the removed units? ignore?
+	for (size_t i = 0; i != units.size(); ++i) {
+		if (units[i]->Type && units[i]->Type->CanSelect(mode)) {
+			if (pos.x != -1) {
+				pos += (units[i]->GetMapPixelPosCenter() - pos) / 2;
+			} else {
+				pos = units[i]->GetMapPixelPosCenter();
 			}
 		}
-		if (pos.x != -1) {
-			UI.SelectedViewport->Center(pos);
-		}
+	}
+	if (pos.x != -1) {
+		UI.SelectedViewport->Center(pos);
 	}
 }
 
@@ -190,28 +182,22 @@ static void UiSelectGroup(unsigned group, GroupSelectionMode mode = SELECTABLE_B
 */
 static void UiAddGroupToSelection(unsigned group)
 {
-	CUnit **units;
-	int n;
+	const std::vector<CUnit *> &units = GetUnitsOfGroup(group);
 
-	if (!(n = GetNumberUnitsOfGroup(group, SELECT_ALL))) {
+	if (units.empty()) {
 		return;
 	}
 
-	//
 	//  Don't allow to mix units and buildings
-	//
-	if (NumSelected && Selected[0]->Type->Building) {
+	if (!Selected.empty() && Selected[0]->Type->Building) {
 		return;
 	}
 
-	units = GetUnitsOfGroup(group);
-
-	while (n--) {
-		if (!(units[n]->Removed || units[n]->Type->Building)) {
-			SelectUnit(*units[n]);
+	for (size_t i = 0; i != units.size(); ++i) {
+		if (!(units[i]->Removed || units[i]->Type->Building)) {
+			SelectUnit(*units[i]);
 		}
 	}
-
 	SelectionChanged();
 }
 
@@ -222,12 +208,12 @@ static void UiAddGroupToSelection(unsigned group)
 */
 static void UiDefineGroup(unsigned group)
 {
-	for (int i = 0; i < NumSelected; ++i) {
-		if (Selected[i]->GroupId) {
+	for (size_t i = 0; i != Selected.size(); ++i) {
+		if (Selected[i]->Player == ThisPlayer && Selected[i]->GroupId) {
 			RemoveUnitFromGroups(*Selected[i]);
 		}
 	}
-	SetGroup(Selected, NumSelected, group);
+	SetGroup(&Selected[0], Selected.size(), group);
 }
 
 /**
@@ -237,7 +223,7 @@ static void UiDefineGroup(unsigned group)
 */
 static void UiAddToGroup(unsigned group)
 {
-	AddToGroup(Selected, NumSelected, group);
+	AddToGroup(&Selected[0], Selected.size(), group);
 }
 
 /**
@@ -319,8 +305,8 @@ void UiToggleBigMap()
 
 		UI.MapArea.X = 0;
 		UI.MapArea.Y = 0;
-		UI.MapArea.EndX = Video.Width - 1;
-		UI.MapArea.EndY = Video.Height - 1;
+		UI.MapArea.EndX = Video.ViewportWidth - 1;
+		UI.MapArea.EndY = Video.ViewportHeight - 1;
 
 		SetViewportMode(UI.ViewportMode);
 
@@ -390,16 +376,17 @@ static void UiSetDefaultGameSpeed()
 */
 static void UiCenterOnSelected()
 {
-	int n = NumSelected;
-
-	if (n) {
-		PixelPos pos = Selected[--n]->GetMapPixelPosCenter();
-
-		while (n--) {
-			pos += (Selected[n]->GetMapPixelPosCenter() - pos) / 2;
-		}
-		UI.SelectedViewport->Center(pos);
+	if (Selected.empty()) {
+		return;
 	}
+
+	PixelPos pos;
+
+	for (size_t i = 0; i != Selected.size(); ++i) {
+		pos += Selected[i]->GetMapPixelPosCenter();
+	}
+	pos /= Selected.size();
+	UI.SelectedViewport->Center(pos);
 }
 
 /**
@@ -425,7 +412,7 @@ static void UiRecallMapPosition(unsigned position)
 /**
 **  Toggle terrain display on/off.
 */
-static void UiToggleTerrain()
+void UiToggleTerrain()
 {
 	UI.Minimap.WithTerrain ^= 1;
 	if (UI.Minimap.WithTerrain) {
@@ -438,18 +425,29 @@ static void UiToggleTerrain()
 /**
 **  Find the next idle worker, select it, and center on it
 */
-static void UiFindIdleWorker()
+void UiFindIdleWorker()
 {
-	// FIXME: static variable, is not needed.
-	static CUnit *LastIdleWorker = NULL;
-
-	CUnit *unit = FindIdleWorker(*ThisPlayer, LastIdleWorker);
+	if (ThisPlayer->FreeWorkers.empty()) {
+		return;
+	}
+	CUnit *unit = ThisPlayer->FreeWorkers[0];
+	if (LastIdleWorker) {
+		const std::vector<CUnit *> &freeWorkers = ThisPlayer->FreeWorkers;
+		std::vector<CUnit *>::const_iterator it = std::find(freeWorkers.begin(),
+															freeWorkers.end(),
+															LastIdleWorker);
+		if (it != ThisPlayer->FreeWorkers.end()) {
+			if (*it != ThisPlayer->FreeWorkers.back()) {
+				unit = *(++it);
+			}
+		}
+	}
 
 	if (unit != NULL) {
 		LastIdleWorker = unit;
 		SelectSingleUnit(*unit);
 		UI.StatusLine.Clear();
-		ClearCosts();
+		UI.StatusLine.ClearCosts();
 		CurrentButtonLevel = 0;
 		PlayUnitSound(*Selected[0], VoiceSelected);
 		SelectionChanged();
@@ -470,10 +468,10 @@ static void UiToggleGrabMouse()
 /**
 **  Track unit, the viewport follows the unit.
 */
-static void UiTrackUnit()
+void UiTrackUnit()
 {
 	//Check if player has selected at least 1 unit
-	if (!Selected[0]) {
+	if (Selected.empty()) {
 		UI.SelectedViewport->Unit = NULL;
 		return;
 	}
@@ -489,7 +487,6 @@ static void UiTrackUnit()
 */
 bool HandleCommandKey(int key)
 {
-	bool ret;
 	int base = lua_gettop(Lua);
 
 	lua_getglobal(Lua, "HandleCommandKey");
@@ -503,18 +500,60 @@ bool HandleCommandKey(int key)
 	lua_pushboolean(Lua, (KeyModifiers & ModifierShift));
 	LuaCall(4, 0);
 	if (lua_gettop(Lua) - base == 1) {
-		ret = LuaToBoolean(Lua, base + 1);
+		bool ret = LuaToBoolean(Lua, base + 1);
 		lua_pop(Lua, 1);
+		return ret;
 	} else {
 		LuaError(Lua, "HandleCommandKey must return a boolean");
-		ret = false;
+		return false;
 	}
-	return ret;
 }
 
 #ifdef DEBUG
 extern void ToggleShowBuilListMessages();
 #endif
+
+static void CommandKey_Group(int group)
+{
+	if (KeyModifiers & ModifierShift) {
+		if (KeyModifiers & (ModifierAlt | ModifierDoublePress)) {
+			if (KeyModifiers & ModifierDoublePress) {
+				UiCenterOnGroup(group, SELECT_ALL);
+			} else {
+				UiSelectGroup(group, SELECT_ALL);
+			}
+		} else if (KeyModifiers & ModifierControl) {
+			UiAddToGroup(group);
+		} else {
+			UiAddGroupToSelection(group);
+		}
+	} else {
+		if (KeyModifiers & (ModifierAlt | ModifierDoublePress)) {
+			if (KeyModifiers & ModifierAlt) {
+				if (KeyModifiers & ModifierDoublePress) {
+					UiCenterOnGroup(group, NON_SELECTABLE_BY_RECTANGLE_ONLY);
+				} else {
+					UiSelectGroup(group, NON_SELECTABLE_BY_RECTANGLE_ONLY);
+				}
+			} else {
+				UiCenterOnGroup(group);
+			}
+		} else if (KeyModifiers & ModifierControl) {
+			UiDefineGroup(group);
+		} else {
+			UiSelectGroup(group);
+		}
+	}
+}
+
+static void CommandKey_MapPosition(int index)
+{
+	if (KeyModifiers & ModifierShift) {
+		UiSaveMapPosition(index);
+	} else {
+		UiRecallMapPosition(index);
+	}
+}
 
 /**
 **  Handle keys in command mode.
@@ -529,69 +568,37 @@ static bool CommandKey(int key)
 
 	// FIXME: don't handle unicode well. Should work on all latin keyboard.
 	if (ptr) {
-		key = '0' + ptr - UiGroupKeys.c_str();
+		key = ((int)'0') + ptr - UiGroupKeys.c_str();
 		if (key > '9') {
 			key = SDLK_BACKQUOTE;
 		}
 	}
 
 	switch (key) {
-			// Return enters chat/input mode.
+		// Return enters chat/input mode.
 		case SDLK_RETURN:
 		case SDLK_KP_ENTER: // RETURN
 			UiBeginInput();
 			return true;
 
-			// Unselect everything
+		// Unselect everything
 		case SDLK_CARET:
 		case SDLK_BACKQUOTE:
 			UiUnselectAll();
 			break;
 
-			// Group selection
+		// Group selection
 		case '0': case '1': case '2':
 		case '3': case '4': case '5':
 		case '6': case '7': case '8':
 		case '9':
-			if (KeyModifiers & ModifierShift) {
-				if (KeyModifiers & (ModifierAlt | ModifierDoublePress)) {
-					if (KeyModifiers & ModifierDoublePress) {
-						UiCenterOnGroup(key - '0', SELECT_ALL);
-					} else {
-						UiSelectGroup(key - '0', SELECT_ALL);
-					}
-				} else if (KeyModifiers & ModifierControl) {
-					UiAddToGroup(key - '0');
-				} else {
-					UiAddGroupToSelection(key - '0');
-				}
-			} else {
-				if (KeyModifiers & (ModifierAlt | ModifierDoublePress)) {
-					if (KeyModifiers & ModifierAlt) {
-						if (KeyModifiers & ModifierDoublePress) {
-							UiCenterOnGroup(key - '0', NON_SELECTABLE_BY_RECTANGLE_ONLY);
-						} else {
-							UiSelectGroup(key - '0', NON_SELECTABLE_BY_RECTANGLE_ONLY);
-						}
-					} else {
-						UiCenterOnGroup(key - '0');
-					}
-				} else if (KeyModifiers & ModifierControl) {
-					UiDefineGroup(key - '0');
-				} else {
-					UiSelectGroup(key - '0');
-				}
-			}
+			CommandKey_Group(key - '0');
 			break;
 
 		case SDLK_F2:
 		case SDLK_F3:
 		case SDLK_F4: // Set/Goto place
-			if (KeyModifiers & ModifierShift) {
-				UiSaveMapPosition(key - SDLK_F2);
-			} else {
-				UiRecallMapPosition(key - SDLK_F2);
-			}
+			CommandKey_MapPosition(key - SDLK_F2);
 			break;
 
 		case SDLK_SPACE: // center on last action
@@ -641,7 +648,7 @@ static bool CommandKey(int key)
 			if (!(KeyModifiers & (ModifierAlt | ModifierControl))) {
 				break;
 			}
-			// FALL THROUGH
+		// FALL THROUGH
 		case SDLK_PERIOD: // ., ALT+I, CTRL+I: Find idle worker
 			UiFindIdleWorker();
 			break;
@@ -658,7 +665,7 @@ static bool CommandKey(int key)
 			if (!(KeyModifiers & (ModifierAlt | ModifierControl))) {
 				break;
 			}
-			// FALL THROUGH (CTRL+P, ALT+P)
+		// FALL THROUGH (CTRL+P, ALT+P)
 		case SDLK_PAUSE:
 			UiTogglePause();
 			break;
@@ -707,21 +714,34 @@ static bool CommandKey(int key)
 			break;
 
 		case SDLK_UP:
-		case SDLK_KP8:
+		case SDLK_KP_8:
 			KeyScrollState |= ScrollUp;
 			break;
 		case SDLK_DOWN:
-		case SDLK_KP2:
+		case SDLK_KP_2:
 			KeyScrollState |= ScrollDown;
 			break;
 		case SDLK_LEFT:
-		case SDLK_KP4:
+		case SDLK_KP_4:
 			KeyScrollState |= ScrollLeft;
 			break;
 		case SDLK_RIGHT:
-		case SDLK_KP6:
+		case SDLK_KP_6:
 			KeyScrollState |= ScrollRight;
 			break;
+
+#ifdef USE_OPENGL
+		case SDLK_SLASH:
+		case SDLK_BACKSLASH:
+			if (KeyModifiers & ModifierAlt) {
+				if (GLShaderPipelineSupported) {
+					char shadername[1024] = { '\0' };
+					LoadShaders(key == SDLK_SLASH ? 1 : -1, shadername);
+					SetMessage("%s", shadername);
+				}
+			}
+			break;
+#endif
 
 		default:
 			if (HandleCommandKey(key)) {
@@ -739,8 +759,6 @@ static bool CommandKey(int key)
 */
 int HandleCheats(const std::string &input)
 {
-	int ret;
-
 #if defined(DEBUG) || defined(PROF)
 	if (input == "ai me") {
 		if (ThisPlayer->AiEnabled) {
@@ -774,13 +792,42 @@ int HandleCheats(const std::string &input)
 	lua_pushstring(Lua, input.c_str());
 	LuaCall(1, 0, false);
 	if (lua_gettop(Lua) - base == 1) {
-		ret = LuaToBoolean(Lua, -1);
+		int ret = LuaToBoolean(Lua, -1);
 		lua_pop(Lua, 1);
+		return ret;
 	} else {
 		DebugPrint("HandleCheats must return a boolean");
-		ret = 0;
+		return 0;
 	}
-	return ret;
+}
+
+// Replace ~~ with ~
+static void Replace2TildeByTilde(char *s)
+{
+	for (char *p = s; *p; ++p) {
+		if (*p == '~') {
+			++p;
+		}
+		*s++ = *p;
+	}
+	*s = '\0';
+}
+
+// Replace ~ with ~~
+static void ReplaceTildeBy2Tilde(char *s)
+{
+	for (char *p = s; *p; ++p) {
+		if (*p != '~') {
+			continue;
+		}
+		char *q = p + strlen(p);
+		q[1] = '\0';
+		while (q > p) {
+			*q = *(q - 1);
+			--q;
+		}
+		++p;
+	}
 }
 
 /**
@@ -791,33 +838,21 @@ int HandleCheats(const std::string &input)
 */
 static int InputKey(int key)
 {
-	char ChatMessage[sizeof(Input) + 40];
-	int i;
-	char *namestart;
-	char *p;
-	char *q;
-
 	switch (key) {
 		case SDLK_RETURN:
-		case SDLK_KP_ENTER: // RETURN
+		case SDLK_KP_ENTER: { // RETURN
 			// Replace ~~ with ~
-			for (p = q = Input; *p;) {
-				if (*p == '~') {
-					++p;
-				}
-				*q++ = *p++;
-			}
-			*q = '\0';
+			Replace2TildeByTilde(Input);
 #ifdef DEBUG
 			if (Input[0] == '-') {
-				if (!GameObserve && !GamePaused) {
+				if (!GameObserve && !GamePaused && !GameEstablishing) {
 					CommandLog("input", NoUnitP, FlushCommands, -1, -1, NoUnitP, Input, -1);
 					CclCommand(Input + 1, false);
 				}
 			} else
 #endif
 				if (!IsNetworkGame()) {
-					if (!GameObserve && !GamePaused) {
+					if (!GameObserve && !GamePaused && !GameEstablishing) {
 						if (HandleCheats(Input)) {
 							CommandLog("input", NoUnitP, FlushCommands, -1, -1, NoUnitP, Input, -1);
 						}
@@ -835,29 +870,24 @@ static int InputKey(int key)
 
 			if (Input[0]) {
 				// Replace ~ with ~~
-				for (p = Input; *p; ++p) {
-					if (*p == '~') {
-						q = p + strlen(p);
-						q[1] = '\0';
-						while (q > p) {
-							*q = *(q - 1);
-							--q;
-						}
-						++p;
-					}
-				}
-				snprintf(ChatMessage, sizeof(ChatMessage), "~%s~<%s>~> %s",
+				ReplaceTildeBy2Tilde(Input);
+				char chatMessage[sizeof(Input) + 40];
+				snprintf(chatMessage, sizeof(chatMessage), "~%s~<%s>~> %s",
 						 PlayerColorNames[ThisPlayer->Index].c_str(),
 						 ThisPlayer->Name.c_str(), Input);
 				// FIXME: only to selected players ...
-				NetworkChatMessage(ChatMessage);
+				NetworkSendChatMessage(chatMessage);
 			}
-			// FALL THROUGH
+		}
+	// FALL THROUGH
 		case SDLK_ESCAPE:
 			KeyState = KeyStateCommand;
 			UI.StatusLine.Clear();
 			return 1;
 
+#ifdef USE_MAC
+		case SDLK_DELETE:
+#endif
 		case SDLK_BACKSPACE:
 			if (InputIndex) {
 				if (Input[InputIndex - 1] == '~') {
@@ -871,8 +901,8 @@ static int InputKey(int key)
 			}
 			return 1;
 
-		case SDLK_TAB:
-			namestart = strrchr(Input, ' ');
+		case SDLK_TAB: {
+			char *namestart = strrchr(Input, ' ');
 			if (namestart) {
 				++namestart;
 			} else {
@@ -881,7 +911,7 @@ static int InputKey(int key)
 			if (!strlen(namestart)) {
 				return 1;
 			}
-			for (i = 0; i < PlayerMax; ++i) {
+			for (int i = 0; i < PlayerMax; ++i) {
 				if (Players[i].Type != PlayerPerson) {
 					continue;
 				}
@@ -896,7 +926,7 @@ static int InputKey(int key)
 				}
 			}
 			return 1;
-
+		}
 		default:
 			if (key >= ' ') {
 				gcn::Key k(key);
@@ -929,9 +959,8 @@ static void Screenshot()
 {
 	CFile fd;
 	char filename[30];
-	int i;
 
-	for (i = 1; i <= 99; ++i) {
+	for (int i = 1; i <= 99; ++i) {
 		// FIXME: what if we can't write to this directory?
 		snprintf(filename, sizeof(filename), "screen%02d.png", i);
 		if (fd.open(filename, CL_OPEN_READ) == -1) {
@@ -963,20 +992,20 @@ int HandleKeyModifiersDown(unsigned key, unsigned)
 			return 1;
 		case SDLK_LALT:
 		case SDLK_RALT:
-		case SDLK_LMETA:
-		case SDLK_RMETA:
+		//case SDLK_LMETA:
+		//case SDLK_RMETA:
 			KeyModifiers |= ModifierAlt;
 			// maxy: disabled
 			if (InterfaceState == IfaceStateNormal) {
 				SelectedUnitChanged(); // VLADI: to allow alt-buttons
 			}
 			return 1;
-		case SDLK_LSUPER:
-		case SDLK_RSUPER:
+		case SDLK_LGUI:
+		case SDLK_RGUI:
 			KeyModifiers |= ModifierSuper;
 			return 1;
 		case SDLK_SYSREQ:
-		case SDLK_PRINT:
+		case SDLK_PRINTSCREEN:
 			Screenshot();
 			if (GameRunning) {
 				SetMessage("%s", _("Screenshot made."));
@@ -1009,16 +1038,16 @@ int HandleKeyModifiersUp(unsigned key, unsigned)
 			return 1;
 		case SDLK_LALT:
 		case SDLK_RALT:
-		case SDLK_LMETA:
-		case SDLK_RMETA:
+		//case SDLK_LMETA:
+		//case SDLK_RMETA:
 			KeyModifiers &= ~ModifierAlt;
 			// maxy: disabled
 			if (InterfaceState == IfaceStateNormal) {
 				SelectedUnitChanged(); // VLADI: to allow alt-buttons
 			}
 			return 1;
-		case SDLK_LSUPER:
-		case SDLK_RSUPER:
+		case SDLK_LGUI:
+		case SDLK_RGUI:
 			KeyModifiers &= ~ModifierSuper;
 			return 1;
 	}
@@ -1030,8 +1059,8 @@ int HandleKeyModifiersUp(unsigned key, unsigned)
 */
 static bool IsKeyPad(unsigned key, unsigned *kp)
 {
-	if (key >= SDLK_KP0 && key <= SDLK_KP9) {
-		*kp = SDLK_0 + (key - SDLK_KP0);
+	if (key >= SDLK_KP_0 && key <= SDLK_KP_9) {
+		*kp = SDLK_0 + (key - SDLK_KP_0);
 	} else if (key == SDLK_KP_PERIOD) {
 		*kp = SDLK_PERIOD;
 	} else if (key == SDLK_KP_DIVIDE) {
@@ -1074,7 +1103,7 @@ void HandleKeyDown(unsigned key, unsigned keychar)
 	} else {
 		// If no modifier look if button bound
 		if (!(KeyModifiers & (ModifierControl | ModifierAlt | ModifierSuper))) {
-			if (!GameObserve && !GamePaused) {
+			if (!GameObserve && !GamePaused && !GameEstablishing) {
 				if (UI.ButtonPanel.DoKey(key)) {
 					return;
 				}
@@ -1098,19 +1127,19 @@ void HandleKeyUp(unsigned key, unsigned keychar)
 
 	switch (key) {
 		case SDLK_UP:
-		case SDLK_KP8:
+		case SDLK_KP_8:
 			KeyScrollState &= ~ScrollUp;
 			break;
 		case SDLK_DOWN:
-		case SDLK_KP2:
+		case SDLK_KP_2:
 			KeyScrollState &= ~ScrollDown;
 			break;
 		case SDLK_LEFT:
-		case SDLK_KP4:
+		case SDLK_KP_4:
 			KeyScrollState &= ~ScrollLeft;
 			break;
 		case SDLK_RIGHT:
-		case SDLK_KP6:
+		case SDLK_KP_6:
 			KeyScrollState &= ~ScrollRight;
 			break;
 		default:
@@ -1134,8 +1163,7 @@ void HandleKeyRepeat(unsigned, unsigned keychar)
 /**
 **  Handle the mouse in scroll area
 **
-**  @param x  Screen X position.
-**  @param y  Screen Y position.
+**  @param mousePos  Screen position.
 **
 **  @return   true if the mouse is in the scroll area, false otherwise
 */
@@ -1206,8 +1234,7 @@ void HandleCursorMove(int *x, int *y)
 /**
 **  Handle movement of the cursor.
 **
-**  @param x  screen pixel X position.
-**  @param y  screen pixel Y position.
+**  @param screePos  screen pixel position.
 */
 void HandleMouseMove(const PixelPos &screenPos)
 {
@@ -1244,23 +1271,22 @@ void HandleButtonUp(unsigned button)
 ----------------------------------------------------------------------------*/
 
 #ifdef USE_TOUCHSCREEN
-int DoubleClickDelay = 1000;             /// Time to detect double clicks.
-int HoldClickDelay = 2000;              /// Time to detect hold clicks.
+int DoubleClickDelay = 1000;      /// Time to detect double clicks.
+int HoldClickDelay = 2000;        /// Time to detect hold clicks.
 #else
-int DoubleClickDelay = 300;             /// Time to detect double clicks.
-int HoldClickDelay = 1000;              /// Time to detect hold clicks.
+int DoubleClickDelay = 300;       /// Time to detect double clicks.
+int HoldClickDelay = 1000;        /// Time to detect hold clicks.
 #endif
 
 static enum {
-	InitialMouseState,                  /// start state
-	ClickedMouseState                   /// button is clicked
-} MouseState;                           /// Current state of mouse
+	InitialMouseState,            /// start state
+	ClickedMouseState             /// button is clicked
+} MouseState;                     /// Current state of mouse
 
-static int MouseX;                       /// Last mouse X position
-static int MouseY;                       /// Last mouse Y position
-static unsigned LastMouseButton;         /// last mouse button handled
-static unsigned StartMouseTicks;         /// Ticks of first click
-static unsigned LastMouseTicks;          /// Ticks of last mouse event
+static PixelPos LastMousePos;     /// Last mouse position
+static unsigned LastMouseButton;  /// last mouse button handled
+static unsigned StartMouseTicks;  /// Ticks of first click
+static unsigned LastMouseTicks;   /// Ticks of last mouse event
 
 /**
 **  Called if any mouse button is pressed down
@@ -1340,28 +1366,31 @@ void InputMouseButtonRelease(const EventCallback &callbacks,
 void InputMouseMove(const EventCallback &callbacks,
 					unsigned ticks, int x, int y)
 {
+	PixelPos mousePos(x, y);
 	// Don't reset the mouse state unless we really moved
 #ifdef USE_TOUCHSCREEN
 	const int buff = 32;
-	if (((x - buff) <= MouseX && MouseX <= (x + buff)) == 0
-		|| ((y - buff) <= MouseY && MouseY <= (y + buff)) == 0) {
+	const PixelDiff diff = LastMousePos - mousePos;
+
+	if (abs(diff.x) > buff || abs(diff.y) > buff) {
 		MouseState = InitialMouseState;
 		LastMouseTicks = ticks;
+		// Reset rectangle select cursor state if we moved by a lot
+		// - rectangle select should be a drag, not a tap
+		if (CursorState == CursorStateRectangle
+			&& (abs(diff.x) > 2 * buff || abs(diff.y) > 2 * buff)) {
+			CursorState = CursorStatePoint;
+		}
 	}
-	if (MouseX != x || MouseY != y) {
-		MouseX = x;
-		MouseY = y;
-	}
+	LastMousePos = mousePos;
 #else
-	if (MouseX != x || MouseY != y) {
+	if (LastMousePos != mousePos) {
 		MouseState = InitialMouseState;
 		LastMouseTicks = ticks;
-		MouseX = x;
-		MouseY = y;
+		LastMousePos = mousePos;
 	}
 #endif
-	const PixelPos pos(x, y);
-	callbacks.MouseMoved(pos);
+	callbacks.MouseMoved(mousePos);
 }
 
 /**
@@ -1369,7 +1398,6 @@ void InputMouseMove(const EventCallback &callbacks,
 **
 **  @param callbacks  Callback structure for events.
 **  @param ticks      Denotes time-stamp of video-system
-**
 */
 void InputMouseExit(const EventCallback &callbacks, unsigned /* ticks */)
 {

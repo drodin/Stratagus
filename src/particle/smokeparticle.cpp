@@ -35,15 +35,25 @@
 
 
 
-CSmokeParticle::CSmokeParticle(CPosition position, Animation *smoke) :
-	CParticle(position), puff(smoke)
+CSmokeParticle::CSmokeParticle(CPosition position, GraphicAnimation *smoke,
+							   float speedx, float speedy, int drawlevel) :
+	CParticle(position, drawlevel)
 {
 	Assert(smoke);
+	this->puff = smoke->clone();
+
+	speedVector.x = speedx;
+	speedVector.y = speedy;
 }
 
 CSmokeParticle::~CSmokeParticle()
 {
 	delete puff;
+}
+
+bool CSmokeParticle::isVisible(const CViewport &vp) const
+{
+	return puff && puff->isVisible(vp, pos);
 }
 
 void CSmokeParticle::draw()
@@ -61,13 +71,13 @@ void CSmokeParticle::update(int ticks)
 	}
 
 	// smoke rises
-	const int smokeRisePerSecond = 22;
-	pos.y -= ticks / 1000.f * smokeRisePerSecond;
+	pos.x += ticks / 1000.f * speedVector.x;
+	pos.y += ticks / 1000.f * speedVector.y;
 }
 
 CParticle *CSmokeParticle::clone()
 {
-	return new CSmokeParticle(pos, puff);
+	return new CSmokeParticle(pos, puff, speedVector.x, speedVector.y, drawLevel);
 }
 
 //@}

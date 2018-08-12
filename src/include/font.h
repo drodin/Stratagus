@@ -92,11 +92,13 @@ public:
 
 	virtual int getHeight() const { return Height(); }
 	virtual int getWidth(const std::string &text) const { return Width(text); }
-	virtual void drawString(gcn::Graphics *graphics, const std::string &text, int x, int y);
+	virtual void drawString(gcn::Graphics *graphics, const std::string &text, int x, int y, bool is_normal = true);
 
 	void Load();
 	void Reload() const;
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	void FreeOpenGL();
+#endif
 	void Clean();
 
 	CGraphic *GetFontColorGraphic(const CFontColor &fontColor) const;
@@ -107,7 +109,9 @@ public:
 	void DynamicLoad() const;
 
 private:
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	void MakeFontColorTextures() const;
+#endif
 	void MeasureWidths();
 
 private:
@@ -146,43 +150,46 @@ public:
 #define FontGrey "grey"
 
 /*----------------------------------------------------------------------------
---  Variables
+--  Functions
 ----------------------------------------------------------------------------*/
 
 /**
 **  Font selector for the font functions.
 **  FIXME: should be moved to lua
 */
-extern CFont &GetSmallFont();       /// Small font used in stats
-extern CFont &GetGameFont();        /// Normal font used in game
+extern CFont &GetSmallFont();  /// Small font used in stats
+extern CFont &GetGameFont();   /// Normal font used in game
+extern bool IsGameFontReady(); /// true when GameFont is provided
 
-/*----------------------------------------------------------------------------
---  Functions
-----------------------------------------------------------------------------*/
 
 /// Set the default text colors for normal and reverse text
 extern void SetDefaultTextColors(const std::string &normal, const std::string &reverse);
 /// Get the default text colors for normal and reverse text
 extern void GetDefaultTextColors(std::string &normalp, std::string &reversep);
 ///  Return the 'line' line of the string 's'.
-extern std::string GetLineFont(unsigned int line, const std::string &s, unsigned int maxlen, CFont *font);
+extern std::string GetLineFont(unsigned int line, const std::string &s, unsigned int maxlen, const CFont *font);
 
 /// Get the hot key from a string
 extern int GetHotKey(const std::string &text);
 
 /// Load and initialize the fonts
 extern void LoadFonts();
+
+#if defined(USE_OPENGL) || defined(USE_GLES)
 /// Free OpenGL fonts
 extern void FreeOpenGLFonts();
 /// Reload OpenGL fonts
 extern void ReloadFonts();
+#endif
+
 /// Cleanup the font module
 extern void CleanFonts();
 
 class CLabel
 {
 public:
-	CLabel(const CFont &f, const std::string &nc, const std::string &rc): font(&f) {
+	CLabel(const CFont &f, const std::string &nc, const std::string &rc): font(&f)
+	{
 		normal = CFontColor::Get(nc);
 		reverse = CFontColor::Get(rc);
 	}
@@ -200,7 +207,7 @@ public:
 	int Draw(int x, int y, int number) const;
 	/// Draw text/number clipped
 	int DrawClip(int x, int y, const char *const text) const;
-	int DrawClip(int x, int y, const std::string &text) const;
+	int DrawClip(int x, int y, const std::string &text, bool is_normal = true) const;
 	int DrawClip(int x, int y, int number) const;
 	/// Draw reverse text/number unclipped
 	int DrawReverse(int x, int y, const char *const text) const;
@@ -212,6 +219,7 @@ public:
 	int DrawReverseClip(int x, int y, int number) const;
 
 	int DrawCentered(int x, int y, const std::string &text) const;
+	int DrawReverseCentered(int x, int y, const std::string &text) const;
 private:
 	template <const bool CLIP>
 	int DoDrawText(int x, int y, const char *const text,

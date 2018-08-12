@@ -37,6 +37,7 @@
 
 #include "action/action_unload.h"
 
+#include "animation.h"
 #include "iolib.h"
 #include "map.h"
 #include "pathfinder.h"
@@ -45,6 +46,7 @@
 #include "ui.h"
 #include "unit.h"
 #include "unittype.h"
+#include "video.h"
 
 /*----------------------------------------------------------------------------
 --  Functions
@@ -67,6 +69,7 @@
 	if (this->Finished) {
 		file.printf(" \"finished\", ");
 	}
+	file.printf(" \"range\", %d,", this->Range);
 	if (this->HasGoal()) {
 		file.printf(" \"goal\", \"%s\",", UnitReference(this->GetGoal()).c_str());
 	}
@@ -79,9 +82,10 @@
 {
 	if (!strcmp("state", value)) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->State = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->State = LuaToNumber(l, -1, j + 1);
+	} else if (!strcmp(value, "range")) {
+		++j;
+		this->Range = LuaToNumber(l, -1, j + 1);
 	} else if (!strcmp(value, "tile")) {
 		++j;
 		lua_rawgeti(l, -1, j + 1);
@@ -125,7 +129,7 @@
 **  @param transporter
 **  @param unit         Unit to unload.
 **  @param startPos     Original search position
-**  @param maxrange     maximal range to unload.
+**  @param maxrange     maximum range to unload.
 **  @param res          Unload position.
 **
 **  @return      True if a position was found, False otherwise.
@@ -199,12 +203,12 @@ static int UnloadUnit(CUnit &transporter, CUnit &unit)
 	}
 	unit.Boarded = 0;
 	unit.Place(pos);
-	transporter.BoardCount--;
+	transporter.BoardCount -= unit.Type->BoardSize;
 	return true;
 }
 
 /**
-**  Return true is possition is a correct place to drop out units.
+**  Return true if position is a correct place to drop out units.
 **
 **  @param transporter  Transporter unit.
 **  @param pos          position to drop out units.
@@ -298,6 +302,7 @@ static int ClosestFreeDropZone(CUnit &transporter, const Vec2i &startPos, int ma
 		return 0;
 	}
 	const bool isTransporterRemoved = transporter.Removed;
+	const bool selected = transporter.Selected;
 
 	if (!isTransporterRemoved) {
 		// Remove transporter to avoid "collision" with itself.
@@ -306,6 +311,10 @@ static int ClosestFreeDropZone(CUnit &transporter, const Vec2i &startPos, int ma
 	const bool res = ClosestFreeDropZone_internal(transporter, startPos, maxRange, resPos);
 	if (!isTransporterRemoved) {
 		transporter.Place(transporter.tilePos);
+		if (selected) {
+			SelectUnit(transporter);
+			SelectionChanged();
+		}
 	}
 	return res;
 }
@@ -322,7 +331,7 @@ static int MoveToDropZone(CUnit &unit)
 {
 	switch (DoActionMove(unit)) { // reached end-point?
 		case PF_UNREACHABLE:
-			return -1;
+			return PF_UNREACHABLE;
 		case PF_REACHED:
 			break;
 		default:
@@ -392,6 +401,25 @@ bool COrder_Unload::LeaveTransporter(CUnit &transporter)
 	if (!unit.CanMove()) {
 		this->State = 2;
 	}
+
+	if (unit.Wait) {
+		if (!unit.Waiting) {
+			unit.Waiting = 1;
+			unit.WaitBackup = unit.Anim;
+		}
+		UnitShowAnimation(unit, unit.Type->Animations->Still);
+		unit.Wait--;
+		return;
+	}
+	if (unit.Waiting) {
+		unit.Anim = unit.WaitBackup;
+		unit.Waiting = 0;
+	}
+	if (this->State == 1 && this->Range >= 5) {
+		// failed to reach the goal
+		this->State = 2;
+	}
+
 	switch (this->State) {
 		case 0: // Choose destination
 			if (!this->HasGoal()) {
@@ -405,7 +433,7 @@ bool COrder_Unload::LeaveTransporter(CUnit &transporter)
 			}
 
 			this->State = 1;
-			// follow on next case
+		// follow on next case
 		case 1: // Move unit to destination
 			// The Goal is the unit that we have to unload.
 			if (!this->HasGoal()) {
@@ -418,6 +446,10 @@ bool COrder_Unload::LeaveTransporter(CUnit &transporter)
 							this->Finished = true;
 							return ;
 						}
+					} else if (moveResult == PF_UNREACHABLE) {
+						unit.Wait = 30;
+						this->Range++;
+						break;
 					} else {
 						this->State = 2;
 					}

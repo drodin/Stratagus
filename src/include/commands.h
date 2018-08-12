@@ -62,6 +62,8 @@ extern void CommandQuit(int player);
 extern void CommandStopUnit(CUnit &unit);
 /// Prepare command stand ground
 extern void CommandStandGround(CUnit &unit, int flush);
+/// Prepare command defend
+extern void CommandDefend(CUnit &unit, CUnit &dest, int flush);
 /// Prepare command follow
 extern void CommandFollow(CUnit &unit, CUnit &dest, int flush);
 /// Prepare command move
@@ -105,7 +107,7 @@ extern void CommandResearch(CUnit &unit, CUpgrade &what, int flush);
 /// Prepare command cancel research
 extern void CommandCancelResearch(CUnit &unit);
 /// Prepare command spellcast
-extern void CommandSpellCast(CUnit &unit, const Vec2i &pos, CUnit *dest, const SpellType &spell, int flush);
+extern void CommandSpellCast(CUnit &unit, const Vec2i &pos, CUnit *dest, const SpellType &spell, int flush, bool isAutocast = false);
 /// Prepare command auto spellcast
 extern void CommandAutoSpellCast(CUnit &unit, int spellid, int on);
 /// Prepare diplomacy command
@@ -128,6 +130,8 @@ typedef unsigned short UnitRef;
 extern void SendCommandStopUnit(CUnit &unit);
 /// Send stand ground command
 extern void SendCommandStandGround(CUnit &unit, int flush);
+/// Send defend command
+extern void SendCommandDefend(CUnit &unit, CUnit &dest, int flush);
 /// Send follow command
 extern void SendCommandFollow(CUnit &unit, CUnit &dest, int flush);
 /// Send move command
@@ -177,15 +181,13 @@ extern void SendCommandDiplomacy(int player, int state, int opponent);
 /// Send shared vision command
 extern void SendCommandSharedVision(int player, bool state, int opponent);
 
-/// Parse a command (from network).
-extern void ParseCommand(unsigned char type, UnitRef unum, unsigned short x,
-						 unsigned short y, UnitRef dest);
-/// Parse an extended command (from network).
-extern void ParseExtendedCommand(unsigned char type, int status,
-								 unsigned char arg1, unsigned short arg2, unsigned short arg3,
-								 unsigned short arg4);
-
-
+/// Execute a command (from network).
+extern void ExecCommand(unsigned char type, UnitRef unum, unsigned short x,
+						unsigned short y, UnitRef dest);
+/// Execute an extended command (from network).
+extern void ExecExtendedCommand(unsigned char type, int status, unsigned char arg1,
+								unsigned short arg2, unsigned short arg3,
+								unsigned short arg4);
 
 #define FlushCommands 1          /// Flush commands in queue
 

@@ -32,10 +32,12 @@
 
 //@{
 
+#include "color.h"
 #include "vec2i.h"
-#include "video.h"
 
 class CViewport;
+
+struct SDL_Surface;
 
 /*----------------------------------------------------------------------------
 --  Declarations
@@ -61,12 +63,14 @@ public:
 	void UpdateSeenXY(const Vec2i &) {}
 	void Update();
 	void Create();
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	void FreeOpenGL();
 	void Reload();
+#endif
 	void Destroy();
 	void Draw() const;
 	void DrawViewportArea(const CViewport &viewport) const;
-	void AddEvent(const Vec2i &pos, Uint32 color);
+	void AddEvent(const Vec2i &pos, IntColor color);
 
 	Vec2i ScreenToTilePos(const PixelPos &screenPos) const;
 	PixelPos TilePosToScreenPos(const Vec2i &tilePos) const;
@@ -85,10 +89,13 @@ public:
 	bool UpdateCache;
 };
 
+#if defined(USE_OPENGL) || defined(USE_GLES)
 // Minimap surface with units (for OpenGL)
 extern unsigned char *MinimapSurfaceGL;
 // Minimap surface with terrain only (for OpenGL)
 extern unsigned char *MinimapTerrainSurfaceGL;
+#endif
+
 // Minimap surface with units (for software)
 extern SDL_Surface *MinimapSurface;
 // Minimap surface with terrain only (for software)

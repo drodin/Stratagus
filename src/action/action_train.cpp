@@ -10,7 +10,7 @@
 //
 /**@name action_train.cpp - The building train action. */
 //
-//      (c) Copyright 1998-2005 by Lutz Sammer and Jimmy Salmon
+//      (c) Copyright 1998-2015 by Lutz Sammer, Jimmy Salmon and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -81,14 +81,10 @@
 {
 	if (!strcmp(value, "type")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Type = UnitTypeByIdent(LuaToString(l, -1));
-		lua_pop(l, 1);
+		this->Type = UnitTypeByIdent(LuaToString(l, -1, j + 1));
 	} else if (!strcmp(value, "ticks")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Ticks = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->Ticks = LuaToNumber(l, -1, j + 1);
 	} else {
 		return false;
 	}
@@ -100,7 +96,7 @@
 	return true;
 }
 
-/* virtual */ PixelPos COrder_Train::Show(const CViewport & , const PixelPos &lastScreenPos) const
+/* virtual */ PixelPos COrder_Train::Show(const CViewport &, const PixelPos &lastScreenPos) const
 {
 	return lastScreenPos;
 }
@@ -149,7 +145,7 @@ static bool CanHandleOrder(const CUnit &unit, COrder *order)
 	}
 	if (order->Action == UnitActionResource) {
 		//  Check if new unit can harvest.
-		if (!unit.Type->Harvester) {
+		if (!unit.Type->BoolFlag[HARVESTER_INDEX].value) {
 			return false;
 		}
 		//  Also check if new unit can harvest this specific resource.
@@ -187,7 +183,7 @@ static void AnimateActionTrain(CUnit &unit)
 	CPlayer &player = *unit.Player;
 	const CUnitType &nType = *this->Type;
 	const int cost = nType.Stats[player.Index].Costs[TimeCost];
-	this->Ticks += player.SpeedTrain / SPEEDUP_FACTOR;
+	this->Ticks += std::max(1, player.SpeedTrain / SPEEDUP_FACTOR);
 
 	if (this->Ticks < cost) {
 		unit.Wait = CYCLES_PER_SECOND / 6;
@@ -221,17 +217,22 @@ static void AnimateActionTrain(CUnit &unit)
 		newUnit->TTL = GameCycle + unit.Type->DecayRate * 6 * CYCLES_PER_SECOND;
 	}
 
+
 	/* Auto Group Add */
+	/* Remove this code from active status to allow buildings to be a group member
+	   without trained units becoming part of the group. Reactivate to enable units
+	   to be added to the group by uncommenting this code block
+
 	if (!unit.Player->AiEnabled && unit.GroupId) {
 		int num = 0;
 		while (!(unit.GroupId & (1 << num))) {
 			++num;
 		}
 		AddToGroup(&newUnit, 1, num);
-	}
+	} */
 
 	DropOutOnSide(*newUnit, LookingW, &unit);
-	player.Notify(NotifyYellow, newUnit->tilePos, _("New %s ready"), nType.Name.c_str());
+	player.Notify(NotifyGreen, newUnit->tilePos, _("New %s ready"), nType.Name.c_str());
 	if (&player == ThisPlayer) {
 		PlayUnitSound(*newUnit, VoiceReady);
 	}

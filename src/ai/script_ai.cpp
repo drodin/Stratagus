@@ -10,8 +10,8 @@
 //
 /**@name script_ai.cpp - The AI ccl functions. */
 //
-//      (c) Copyright 2000-2007 by Lutz Sammer, Ludovic Pollet,
-//                                 and Jimmy Salmon
+//      (c) Copyright 2000-2015 by Lutz Sammer, Ludovic Pollet,
+//      Jimmy Salmon and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -43,6 +43,7 @@
 #include "pathfinder.h"
 #include "player.h"
 #include "script.h"
+#include "unit.h"
 #include "unit_manager.h"
 #include "unittype.h"
 #include "upgrade.h"
@@ -122,7 +123,7 @@ static std::vector<CUnitType *> getSupplyUnits()
 	for (std::vector<CUnitType *>::const_iterator i = UnitTypes.begin(); i != UnitTypes.end(); ++i) {
 		CUnitType &type = **i;
 
-		if (type.Supply > 0) {
+		if (type.DefaultStat.Variables[SUPPLY_INDEX].Value > 0) { //supply units are identified as being those with a default stat supply of 1 or more; so if a unit has a supply default stat of 0, but through an upgrade ends up having 1 or more supply, it won't be included here
 			res.push_back(&type);
 		}
 	}
@@ -136,9 +137,9 @@ static std::vector<CUnitType *> getSupplyUnits()
 			unsigned int cost = 0;
 
 			for (unsigned j = 0; j < MaxCosts; ++j) {
-				cost += type.DefaultStat.Costs[j];
+				cost += type.DefaultStat.Costs[j]; //this cannot be MapDefaultStat because this function is called when the AiHelper is defined, rather than when a game is started
 			}
-			const float score = ((float) type.Supply) / cost;
+			const float score = ((float) type.DefaultStat.Variables[SUPPLY_INDEX].Value) / cost;
 			if (score > bestscore) {
 				bestscore = score;
 				besttype = &type;
@@ -167,7 +168,7 @@ static std::vector<CUnitType *> getRefineryUnits()
 	for (std::vector<CUnitType *>::const_iterator i = UnitTypes.begin(); i != UnitTypes.end(); ++i) {
 		CUnitType &type = **i;
 
-		if (type.GivesResource > 0 && type.CanHarvest) {
+		if (type.GivesResource > 0 && type.BoolFlag[CANHARVEST_INDEX].value) {
 			res.push_back(&type);
 		}
 	}
@@ -234,13 +235,12 @@ static void InitAiHelper(AiHelper &aiHelper)
 				AiHelperInsert(aiHelper.Refinery, i - 1, **j);
 			}
 		}
-
 		for (std::vector<CUnitType *>::const_iterator d = UnitTypes.begin(); d != UnitTypes.end(); ++d) {
-			CUnitType *type = *d;
+			CUnitType &type = **d;
 
-			if (type->CanStore[i] > 0) {
+			if (type.CanStore[i] > 0) {
 				/* HACK : we can't store TIME then use 0 as 1 */
-				AiHelperInsert(aiHelper.Depots, i - 1, **d);
+				AiHelperInsert(aiHelper.Depots, i - 1, type);
 			}
 		}
 	}
@@ -312,65 +312,37 @@ static int CclDefineAiHelper(lua_State *l)
 			LuaError(l, "incorrect argument");
 		}
 		const int subargs = lua_rawlen(l, j + 1);
-		int k = 0;
-		lua_rawgeti(l, j + 1, k + 1);
-		const char *value = LuaToString(l, -1);
-		lua_pop(l, 1);
-		++k;
-
-		//
-		// Type build,train,research/upgrade.
-		//
-		int what;
-
-		if (!strcmp(value, "build")) {
-			what = -1;
-		} else if (!strcmp(value, "train")) {
-			what = -1;
-		} else if (!strcmp(value, "upgrade")) {
-			what = -1;
-		} else if (!strcmp(value, "research")) {
-			what = -1;
-		} else if (!strcmp(value, "unit-limit")) {
-			what = -1;
+		const char *value = LuaToString(l, j + 1, 1);
+		if (!strcmp(value, "build")
+			|| !strcmp(value, "train")
+			|| !strcmp(value, "upgrade")
+			|| !strcmp(value, "research")
+			|| !strcmp(value, "unit-limit")
+			|| !strcmp(value, "repair")) {
+#ifdef DEBUG
+			fprintf(stderr, "DefineAiHelper: Relation is computed from buttons, you may remove safely the block beginning with '\"%s\"'\n", value);
+#endif
+			continue;
 		} else if (!strcmp(value, "unit-equiv")) {
-			what = 5;
-		} else if (!strcmp(value, "repair")) {
-			what = -1;
 		} else {
 			LuaError(l, "unknown tag: %s" _C_ value);
-			what = -1;
 		}
-		if (what == -1) {
-			continue;
-		}
-		//
 		// Get the base unit type, which could handle the action.
-		//
-
-		// FIXME: support value as list!
-		lua_rawgeti(l, j + 1, k + 1);
-		value = LuaToString(l, -1);
-		lua_pop(l, 1);
-		++k;
-		CUnitType *base = UnitTypeByIdent(value);
+		const char *baseTypeName = LuaToString(l, j + 1, 2);
+		const CUnitType *base = UnitTypeByIdent(baseTypeName);
 		if (!base) {
-			LuaError(l, "unknown unittype: %s" _C_ value);
+			LuaError(l, "unknown unittype: %s" _C_ baseTypeName);
 		}
 
-		//
 		// Get the unit types, which could be produced
-		//
-		for (; k < subargs; ++k) {
-			lua_rawgeti(l, j + 1, k + 1);
-			value = LuaToString(l, -1);
-			lua_pop(l, 1);
-			CUnitType *type = UnitTypeByIdent(value);
+		for (int k = 2; k < subargs; ++k) {
+			const char *equivTypeName = LuaToString(l, j + 1, k + 1);
+			CUnitType *type = UnitTypeByIdent(equivTypeName);
 			if (!type) {
-				LuaError(l, "unknown unittype: %s" _C_ value);
+				LuaError(l, "unknown unittype: %s" _C_ equivTypeName);
 			}
 			AiHelperInsert(AiHelpers.Equiv, base->Slot, *type);
-			AiNewUnitTypeEquiv(base, type);
+			AiNewUnitTypeEquiv(*base, *type);
 		}
 	}
 	return 0;
@@ -659,7 +631,7 @@ static int CclAiWait(lua_State *l)
 {
 	LuaCheckArgs(l, 1);
 	const CUnitType *type = CclGetUnitType(l);
-	const int *unit_types_count = AiPlayer->Player->UnitTypesCount;
+	const int *unit_types_count = AiPlayer->Player->UnitTypesAiActiveCount;
 	const AiRequestType *autt = FindInUnitTypeRequests(type);
 	if (!autt) {
 		// Look if we have this unit-type.
@@ -711,15 +683,26 @@ static int CclAiWait(lua_State *l)
 */
 static int CclAiForce(lua_State *l)
 {
-	LuaCheckArgs(l, 2);
+	bool resetForce = false;
+	const int arg = lua_gettop(l);
+	Assert(0 < arg && arg <= 3);
 	if (!lua_istable(l, 2)) {
 		LuaError(l, "incorrect argument");
 	}
+	if (arg == 3) {
+		resetForce = LuaToBoolean(l, 3);
+	}
 	int force = LuaToNumber(l, 1);
-	if (force < 0 || force >= AI_MAX_FORCES) {
+	if (force < 0 || force >= AI_MAX_FORCE_INTERNAL) {
 		LuaError(l, "Force out of range: %d" _C_ force);
 	}
 	AiForce &aiforce = AiPlayer->Force[AiPlayer->Force.getScriptForce(force)];
+	if (resetForce) {
+		aiforce.Reset(true);
+	}
+	AiForceRole role = aiforce.Role;
+	aiforce.State = AiForceAttackingState_Waiting;
+	aiforce.Role = role;
 
 	int args = lua_rawlen(l, 2);
 	for (int j = 0; j < args; ++j) {
@@ -727,9 +710,7 @@ static int CclAiForce(lua_State *l)
 		CUnitType *type = CclGetUnitType(l);
 		lua_pop(l, 1);
 		++j;
-		lua_rawgeti(l, 2, j + 1);
-		int count = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		int count = LuaToNumber(l, 2, j + 1);
 
 		if (!type) { // bulletproof
 			continue;
@@ -738,28 +719,37 @@ static int CclAiForce(lua_State *l)
 		// Use the equivalent unittype.
 		type = UnitTypes[UnitTypeEquivs[type->Slot]];
 
-		// Look if already in force.
-		size_t i;
-		for (i = 0; i < aiforce.UnitTypes.size(); ++i) {
-			AiUnitType *aiut = &aiforce.UnitTypes[i];
-			if (aiut->Type->Slot == type->Slot) { // found
-				if (count) {
-					aiut->Want = count;
-				} else {
-					aiforce.UnitTypes.erase(aiforce.UnitTypes.begin() + i);
-				}
-				break;
-			}
-		}
-		// New type append it.
-		if (i == aiforce.UnitTypes.size()) {
+		if (resetForce) {
+			// Append it.
 			AiUnitType newaiut;
 			newaiut.Want = count;
 			newaiut.Type = type;
 			aiforce.UnitTypes.push_back(newaiut);
+		} else {
+			// Look if already in force.
+			size_t i;
+			for (i = 0; i < aiforce.UnitTypes.size(); ++i) {
+				AiUnitType *aiut = &aiforce.UnitTypes[i];
+				if (aiut->Type->Slot == type->Slot) { // found
+					if (count) {
+						aiut->Want = count;
+					} else {
+						aiforce.UnitTypes.erase(aiforce.UnitTypes.begin() + i);
+					}
+					break;
+				}
+			}
+			// New type append it.
+			if (i == aiforce.UnitTypes.size()) {
+				AiUnitType newaiut;
+				newaiut.Want = count;
+				newaiut.Type = type;
+				aiforce.UnitTypes.push_back(newaiut);
+			}
 		}
+
 	}
-	AiAssignFreeUnitsToForce();
+	AiAssignFreeUnitsToForce(force);
 	lua_pushboolean(l, 0);
 	return 1;
 }
@@ -773,7 +763,7 @@ static int CclAiForceRole(lua_State *l)
 {
 	LuaCheckArgs(l, 2);
 	int force = LuaToNumber(l, 1);
-	if (force < 0 || force >= AI_MAX_FORCES) {
+	if (force < 0 || force >= AI_MAX_FORCE_INTERNAL) {
 		LuaError(l, "Force %i out of range" _C_ force);
 	}
 
@@ -792,6 +782,33 @@ static int CclAiForceRole(lua_State *l)
 }
 
 /**
+**  Release force.
+**
+**  @param l  Lua state.
+*/
+static int CclAiReleaseForce(lua_State *l)
+{
+	LuaCheckArgs(l, 1);
+	int force = LuaToNumber(l, 1);
+	if (force < 0 || force >= AI_MAX_FORCE_INTERNAL) {
+		LuaError(l, "Force out of range: %d" _C_ force);
+	}
+	for (int i = AI_MAX_FORCE_INTERNAL; i < AI_MAX_FORCES; ++i) {
+		if (AiPlayer->Force[i].FormerForce != -1 && AiPlayer->Force[i].FormerForce == force) {
+			while (AiPlayer->Force[i].Size()) {
+				CUnit &aiunit = *AiPlayer->Force[i].Units[AiPlayer->Force[i].Size() - 1];
+				aiunit.GroupId = 0;
+				AiPlayer->Force[i].Units.Remove(&aiunit);
+			}
+			AiPlayer->Force[i].Reset(false);
+		}
+	}
+
+	lua_pushboolean(l, 0);
+	return 1;
+}
+
+/**
 **  Check if a force ready.
 **
 **  @param l  Lua state.
@@ -800,7 +817,7 @@ static int CclAiCheckForce(lua_State *l)
 {
 	LuaCheckArgs(l, 1);
 	int force = LuaToNumber(l, 1);
-	if (force < 0 || force >= AI_MAX_FORCES) {
+	if (force < 0 || force >= AI_MAX_FORCE_INTERNAL) {
 		lua_pushfstring(l, "Force out of range: %d", force);
 	}
 	if (AiPlayer->Force[AiPlayer->Force.getScriptForce(force)].Completed) {
@@ -820,7 +837,7 @@ static int CclAiWaitForce(lua_State *l)
 {
 	LuaCheckArgs(l, 1);
 	int force = LuaToNumber(l, 1);
-	if (force < 0 || force >= AI_MAX_FORCES) {
+	if (force < 0 || force >= AI_MAX_FORCE_INTERNAL) {
 		lua_pushfstring(l, "Force out of range: %d", force);
 	}
 	if (AiPlayer->Force[AiPlayer->Force.getScriptForce(force)].Completed) {
@@ -845,10 +862,10 @@ static int CclAiAttackWithForce(lua_State *l)
 {
 	LuaCheckArgs(l, 1);
 	int force = LuaToNumber(l, 1);
-	if (force < 0 || force >= AI_MAX_FORCES) {
+	if (force < 0 || force >= AI_MAX_FORCE_INTERNAL) {
 		LuaError(l, "Force out of range: %d" _C_ force);
 	}
-	AiAttackWithForce(AiPlayer->Force.getScriptForce(force));
+	AiAttackWithForce(force);
 	lua_pushboolean(l, 0);
 	return 1;
 }
@@ -864,12 +881,11 @@ static int CclAiWaitForces(lua_State *l)
 	if (!lua_istable(l, 1)) {
 		LuaError(l, "incorrect argument");
 	}
-	int args = lua_rawlen(l, 1);
+	const int args = lua_rawlen(l, 1);
 	for (int i = 0; i < args; ++i) {
-		lua_rawgeti(l, 1, i + 1);
-		int force = LuaToNumber(l, -1);
-		lua_pop(l, 1);
-		if (force < 0 || force >= AI_MAX_FORCES) {
+		const int force = LuaToNumber(l, 1, i + 1);
+
+		if (force < 0 || force >= AI_MAX_FORCE_INTERNAL) {
 			lua_pushfstring(l, "Force out of range: %d", force);
 		}
 		if (!AiPlayer->Force[AiPlayer->Force.getScriptForce(force)].Completed) {
@@ -888,7 +904,7 @@ static int CclAiWaitForces(lua_State *l)
 */
 static int CclAiAttackWithForces(lua_State *l)
 {
-	int Forces[AI_MAX_FORCES + 1];
+	int Forces[AI_MAX_FORCE_INTERNAL + 1];
 
 	LuaCheckArgs(l, 1);
 	if (!lua_istable(l, 1)) {
@@ -896,10 +912,9 @@ static int CclAiAttackWithForces(lua_State *l)
 	}
 	int args = lua_rawlen(l, 1);
 	for (int i = 0; i < args; ++i) {
-		lua_rawgeti(l, 1, i + 1);
-		int force = LuaToNumber(l, -1);
-		lua_pop(l, 1);
-		if (force < 0 || force >= AI_MAX_FORCES) {
+		const int force = LuaToNumber(l, 1, i + 1);
+
+		if (force < 0 || force >= AI_MAX_FORCE_INTERNAL) {
 			lua_pushfstring(l, "Force out of range: %d", force);
 		}
 		Forces[i] = AiPlayer->Force.getScriptForce(force);
@@ -1002,9 +1017,7 @@ static int CclAiSetReserve(lua_State *l)
 		lua_rawseti(l, -2, i + 1);
 	}
 	for (int i = 0; i < MaxCosts; ++i) {
-		lua_rawgeti(l, 1, i + 1);
-		AiPlayer->Reserve[i] = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		AiPlayer->Reserve[i] = LuaToNumber(l, 1, i + 1);
 	}
 	return 1;
 }
@@ -1021,73 +1034,94 @@ static int CclAiSetCollect(lua_State *l)
 		LuaError(l, "incorrect argument");
 	}
 	for (int i = 0; i < MaxCosts; ++i) {
-		lua_rawgeti(l, 1, i + 1);
-		AiPlayer->Collect[i] = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		AiPlayer->Collect[i] = LuaToNumber(l, 1, i + 1);
 	}
 	return 0;
 }
 
 /**
-**  Dump some AI debug informations.
+**  Set AI player build.
+**
+**  @param l  Lua state.
+*/
+static int CclAiSetBuildDepots(lua_State *l)
+{
+	LuaCheckArgs(l, 1);
+	if (!lua_isboolean(l, 1)) {
+		LuaError(l, "incorrect argument");
+	}
+	AiPlayer->BuildDepots = LuaToBoolean(l, 1);
+	return 0;
+}
+
+/**
+**  Dump some AI debug information.
 **
 **  @param l  Lua state.
 */
 static int CclAiDump(lua_State *l)
 {
 	LuaCheckArgs(l, 0);
-	//
-	// Script
-	//
-	printf("------\n");
-	for (int i = 0; i < MaxCosts; ++i) {
-		printf("%s(%4d) ", DefaultResourceNames[i].c_str(), AiPlayer->Player->Resources[i]);
-	}
-	printf("\n");
-	printf("%d:", AiPlayer->Player->Index);
+	for (int p = 0; p < PlayerMax - 1; ++p) {
+		CPlayer &aip = Players[p];
+		if (aip.AiEnabled) {
+			//
+			// Script
+			//
+
+			printf("------\n");
+			for (int i = 0; i < MaxCosts; ++i) {
+				printf("%s(%4d, %4d/%4d) ", DefaultResourceNames[i].c_str(),
+					   aip.Resources[i], aip.StoredResources[i], aip.MaxResources[i]);
+			}
+			printf("\n");
+			printf("Player %d:", aip.Index);
 #if 0
-	gh_display(gh_car(AiPlayer->Script));
+			gh_display(gh_car(AiPlayer->Script));
 #endif
-	//
-	// Requests
-	//
-	size_t n = AiPlayer->UnitTypeRequests.size();
-	printf("UnitTypeRequests(%u):\n", static_cast<unsigned int>(n));
-	for (size_t i = 0; i < n; ++i) {
-		printf("%s ", AiPlayer->UnitTypeRequests[i].Type->Ident.c_str());
-	}
-	printf("\n");
-	n = AiPlayer->UpgradeToRequests.size();
-	printf("UpgradeToRequests(%u):\n", static_cast<unsigned int>(n));
-	for (size_t i = 0; i < n; ++i) {
-		printf("%s ", AiPlayer->UpgradeToRequests[i]->Ident.c_str());
-	}
-	printf("\n");
-	n = AiPlayer->ResearchRequests.size();
-	printf("ResearchRequests(%u):\n", static_cast<unsigned int>(n));
-	for (size_t i = 0; i < n; ++i) {
-		printf("%s ", AiPlayer->ResearchRequests[i]->Ident.c_str());
-	}
-	printf("\n");
+			//
+			// Requests
+			//
+			size_t n = aip.Ai->UnitTypeRequests.size();
+			printf("UnitTypeRequests(%u):\n", static_cast<unsigned int>(n));
+			for (size_t i = 0; i < n; ++i) {
+				printf("%s ", aip.Ai->UnitTypeRequests[i].Type->Ident.c_str());
+			}
+			printf("\n");
+			n = aip.Ai->UpgradeToRequests.size();
+			printf("UpgradeToRequests(%u):\n", static_cast<unsigned int>(n));
+			for (size_t i = 0; i < n; ++i) {
+				printf("%s ", aip.Ai->UpgradeToRequests[i]->Ident.c_str());
+			}
+			printf("\n");
+			n = aip.Ai->ResearchRequests.size();
+			printf("ResearchRequests(%u):\n", static_cast<unsigned int>(n));
+			for (size_t i = 0; i < n; ++i) {
+				printf("%s ", aip.Ai->ResearchRequests[i]->Ident.c_str());
+			}
+			printf("\n");
 
-	// Building queue
-	printf("Building queue:\n");
-	for (size_t i = 0; i < AiPlayer->UnitTypeBuilt.size(); ++i) {
-		const AiBuildQueue &queue = AiPlayer->UnitTypeBuilt[i];
-		printf("%s(%d/%d) ", queue.Type->Ident.c_str(), queue.Made, queue.Want);
-	}
-	printf("\n");
+			// Building queue
+			printf("Building queue:\n");
+			for (size_t i = 0; i < aip.Ai->UnitTypeBuilt.size(); ++i) {
+				const AiBuildQueue &queue = aip.Ai->UnitTypeBuilt[i];
+				printf("%s(%d/%d) ", queue.Type->Ident.c_str(), queue.Made, queue.Want);
+			}
+			printf("\n");
 
-	// PrintForce
-	for (size_t i = 0; i < AiPlayer->Force.Size(); ++i) {
-		printf("Force(%u%s%s):\n", static_cast<unsigned int>(i),
-			   AiPlayer->Force[i].Completed ? ",complete" : ",recruit",
-			   AiPlayer->Force[i].Attacking ? ",attack" : "");
-		for (size_t j = 0; j < AiPlayer->Force[i].UnitTypes.size(); ++j) {
-			const AiUnitType &aut = AiPlayer->Force[i].UnitTypes[j];
-			printf("%s(%d) ", aut.Type->Ident.c_str(), aut.Want);
+			// PrintForce
+			for (size_t i = 0; i < aip.Ai->Force.Size(); ++i) {
+				printf("Force(%u%s%s):\n", static_cast<unsigned int>(i),
+					   aip.Ai->Force[i].Completed ? ",complete" : ",recruit",
+					   aip.Ai->Force[i].Attacking ? ",attack" : "");
+				for (size_t j = 0; j < aip.Ai->Force[i].UnitTypes.size(); ++j) {
+					const AiUnitType &aut = aip.Ai->Force[i].UnitTypes[j];
+					printf("%s(%d) ", aut.Type->Ident.c_str(), aut.Want);
+				}
+				printf("\n");
+			}
+			printf("\n");
 		}
-		printf("\n");
 	}
 	lua_pushboolean(l, 0);
 	return 1;
@@ -1109,32 +1143,19 @@ static void CclParseBuildQueue(lua_State *l, PlayerAi *ai, int offset)
 
 	const int args = lua_rawlen(l, offset);
 	for (int k = 0; k < args; ++k) {
-		lua_rawgeti(l, offset, k + 1);
-		const char *value = LuaToString(l, -1);
-		lua_pop(l, 1);
+		const char *value = LuaToString(l, offset, k + 1);
 		++k;
 
 		if (!strcmp(value, "onpos")) {
-			lua_rawgeti(l, offset, k + 1);
-			pos.x = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			pos.x = LuaToNumber(l, offset, k + 1);
 			++k;
-			lua_rawgeti(l, offset, k + 1);
-			pos.y = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			pos.y = LuaToNumber(l, offset, k + 1);
 		} else {
-
-			//lua_rawgeti(l, j + 1, k + 1);
-			//ident = LuaToString(l, -1);
-			//lua_pop(l, 1);
+			//ident = LuaToString(l, j + 1, k + 1);
 			//++k;
-			lua_rawgeti(l, offset, k + 1);
-			const int made = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			const int made = LuaToNumber(l, offset, k + 1);
 			++k;
-			lua_rawgeti(l, offset, k + 1);
-			const int want = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			const int want = LuaToNumber(l, offset, k + 1);
 
 			AiBuildQueue queue;
 			queue.Type = UnitTypeByIdent(value);
@@ -1176,7 +1197,7 @@ static int CclDefineAiPlayer(lua_State *l)
 			const char *aiName = LuaToString(l, j + 1);
 			CAiType *ait = GetAiTypesByName(aiName);
 			if (ait == NULL) {
-				lua_pushfstring(l, "ai-type not found: %s", aiName);
+				LuaError(l, "ai-type not found: %s" _C_ aiName);
 			}
 			ai->AiType = ait;
 			ai->Script = ait->Script;
@@ -1191,16 +1212,12 @@ static int CclDefineAiPlayer(lua_State *l)
 				LuaError(l, "incorrect argument");
 			}
 			const int subargs = lua_rawlen(l, j + 1);
-			lua_rawgeti(l, j + 1, 0 + 1);
-			const int cclforceIdx = LuaToNumber(l, -1);
+			const int cclforceIdx = LuaToNumber(l, j + 1, 1);
 			UNUSED(cclforceIdx);
 			const int forceIdx = ai->Force.FindFreeForce(AiForceRoleDefault);
-			lua_pop(l, 1);
 
 			for (int k = 1; k < subargs; ++k) {
-				lua_rawgeti(l, j + 1, k + 1);
-				const char *value = LuaToString(l, -1);
-				lua_pop(l, 1);
+				const char *value = LuaToString(l, j + 1, k + 1);
 				++k;
 				if (!strcmp(value, "complete")) {
 					ai->Force[forceIdx].Completed = true;
@@ -1215,9 +1232,7 @@ static int CclDefineAiPlayer(lua_State *l)
 					ai->Force[forceIdx].Defending = true;
 					--k;
 				} else if (!strcmp(value, "role")) {
-					lua_rawgeti(l, j + 1, k + 1);
-					value = LuaToString(l, -1);
-					lua_pop(l, 1);
+					value = LuaToString(l, j + 1, k + 1);
 					if (!strcmp(value, "attack")) {
 						ai->Force[forceIdx].Role = AiForceRoleAttack;
 					} else if (!strcmp(value, "defend")) {
@@ -1232,13 +1247,9 @@ static int CclDefineAiPlayer(lua_State *l)
 					}
 					const int subsubargs = lua_rawlen(l, -1);
 					for (int subk = 0; subk < subsubargs; ++subk) {
-						lua_rawgeti(l, -1, subk + 1);
-						const int num = LuaToNumber(l, -1);
-						lua_pop(l, 1);
+						const int num = LuaToNumber(l, -1, subk + 1);
 						++subk;
-						lua_rawgeti(l, -1, subk + 1);
-						const char *ident = LuaToString(l, -1);
-						lua_pop(l, 1);
+						const char *ident = LuaToString(l, -1, subk + 1);
 						AiUnitType queue;
 
 						queue.Want = num;
@@ -1253,31 +1264,21 @@ static int CclDefineAiPlayer(lua_State *l)
 					}
 					const int subsubargs = lua_rawlen(l, -1);
 					for (int subk = 0; subk < subsubargs; ++subk) {
-						lua_rawgeti(l, -1, subk + 1);
-						const int num = LuaToNumber(l, -1);
-						lua_pop(l, 1);
+						const int num = LuaToNumber(l, -1, subk + 1);
 						++subk;
 #if 0
-						lua_rawgeti(l, -1, subk + 1);
-						const char *ident = LuaToString(l, -1);
+						const char *ident = LuaToString(l, -1, subk + 1);
 						UNUSED(ident);
-						lua_pop(l, 1);
 #endif
 						ai->Force[forceIdx].Units.Insert(&UnitManager.GetSlotUnit(num));
 					}
 					lua_pop(l, 1);
 				} else if (!strcmp(value, "state")) {
-					lua_rawgeti(l, j + 1, k + 1);
-					ai->Force[forceIdx].State = AiForceAttackingState(LuaToNumber(l, -1));
-					lua_pop(l, 1);
+					ai->Force[forceIdx].State = AiForceAttackingState(LuaToNumber(l, j + 1, k + 1));
 				} else if (!strcmp(value, "goalx")) {
-					lua_rawgeti(l, j + 1, k + 1);
-					ai->Force[forceIdx].GoalPos.x = LuaToNumber(l, -1);
-					lua_pop(l, 1);
+					ai->Force[forceIdx].GoalPos.x = LuaToNumber(l, j + 1, k + 1);
 				} else if (!strcmp(value, "goaly")) {
-					lua_rawgeti(l, j + 1, k + 1);
-					ai->Force[forceIdx].GoalPos.y = LuaToNumber(l, -1);
-					lua_pop(l, 1);
+					ai->Force[forceIdx].GoalPos.y = LuaToNumber(l, j + 1, k + 1);
 				} else if (!strcmp(value, "must-transport")) {
 					// Keep for backward compatibility
 				} else {
@@ -1290,13 +1291,9 @@ static int CclDefineAiPlayer(lua_State *l)
 			}
 			const int subargs = lua_rawlen(l, j + 1);
 			for (int k = 0; k < subargs; ++k) {
-				lua_rawgeti(l, j + 1, k + 1);
-				const char *type = LuaToString(l, -1);
-				lua_pop(l, 1);
+				const char *type = LuaToString(l, j + 1, k + 1);
 				++k;
-				lua_rawgeti(l, j + 1, k + 1);
-				int num = LuaToNumber(l, -1);
-				lua_pop(l, 1);
+				int num = LuaToNumber(l, j + 1, k + 1);
 				const int resId = GetResourceIdByName(l, type);
 				ai->Reserve[resId] = num;
 			}
@@ -1306,13 +1303,9 @@ static int CclDefineAiPlayer(lua_State *l)
 			}
 			const int subargs = lua_rawlen(l, j + 1);
 			for (int k = 0; k < subargs; ++k) {
-				lua_rawgeti(l, j + 1, k + 1);
-				const char *type = LuaToString(l, -1);
-				lua_pop(l, 1);
+				const char *type = LuaToString(l, j + 1, k + 1);
 				++k;
-				lua_rawgeti(l, j + 1, k + 1);
-				const int num = LuaToNumber(l, -1);
-				lua_pop(l, 1);
+				const int num = LuaToNumber(l, j + 1, k + 1);
 				const int resId = GetResourceIdByName(l, type);
 				ai->Used[resId] = num;
 			}
@@ -1322,13 +1315,9 @@ static int CclDefineAiPlayer(lua_State *l)
 			}
 			const int subargs = lua_rawlen(l, j + 1);
 			for (int k = 0; k < subargs; ++k) {
-				lua_rawgeti(l, j + 1, k + 1);
-				const char *type = LuaToString(l, -1);
-				lua_pop(l, 1);
+				const char *type = LuaToString(l, j + 1, k + 1);
 				++k;
-				lua_rawgeti(l, j + 1, k + 1);
-				const int num = LuaToNumber(l, -1);
-				lua_pop(l, 1);
+				const int num = LuaToNumber(l, j + 1, k + 1);
 				const int resId = GetResourceIdByName(l, type);
 				ai->Needed[resId] = num;
 			}
@@ -1338,13 +1327,9 @@ static int CclDefineAiPlayer(lua_State *l)
 			}
 			const int subargs = lua_rawlen(l, j + 1);
 			for (int k = 0; k < subargs; ++k) {
-				lua_rawgeti(l, j + 1, k + 1);
-				const char *type = LuaToString(l, -1);
-				lua_pop(l, 1);
+				const char *type = LuaToString(l, j + 1, k + 1);
 				++k;
-				lua_rawgeti(l, j + 1, k + 1);
-				const int num = LuaToNumber(l, -1);
-				lua_pop(l, 1);
+				const int num = LuaToNumber(l, j + 1, k + 1);
 				const int resId = GetResourceIdByName(l, type);
 				ai->Collect[resId] = num;
 			}
@@ -1354,9 +1339,7 @@ static int CclDefineAiPlayer(lua_State *l)
 			}
 			const int subargs = lua_rawlen(l, j + 1);
 			for (int k = 0; k < subargs; ++k) {
-				lua_rawgeti(l, j + 1, k + 1);
-				const char *type = LuaToString(l, -1);
-				lua_pop(l, 1);
+				const char *type = LuaToString(l, j + 1, k + 1);
 				const int resId = GetResourceIdByName(l, type);
 				ai->NeededMask |= (1 << resId);
 			}
@@ -1375,15 +1358,9 @@ static int CclDefineAiPlayer(lua_State *l)
 				if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 3) {
 					LuaError(l, "incorrect argument");
 				}
-				lua_rawgeti(l, -1, 1);
-				pos.x = LuaToNumber(l, -1);
-				lua_pop(l, 1);
-				lua_rawgeti(l, -1, 2);
-				pos.y = LuaToNumber(l, -1);
-				lua_pop(l, 1);
-				lua_rawgeti(l, -1, 3);
-				const int mask = LuaToNumber(l, -1);
-				lua_pop(l, 1);
+				pos.x = LuaToNumber(l, -1, 1);
+				pos.y = LuaToNumber(l, -1, 2);
+				const int mask = LuaToNumber(l, -1, 3);
 				lua_pop(l, 1);
 				AiExplorationRequest queue(pos, mask);
 				ai->FirstExplorationRequest.push_back(queue);
@@ -1402,13 +1379,9 @@ static int CclDefineAiPlayer(lua_State *l)
 				ai->UnitTypeRequests.resize(subargs / 2);
 			}
 			for (int k = 0; k < subargs; ++k) {
-				lua_rawgeti(l, j + 1, k + 1);
-				const char *ident = LuaToString(l, -1);
-				lua_pop(l, 1);
+				const char *ident = LuaToString(l, j + 1, k + 1);
 				++k;
-				lua_rawgeti(l, j + 1, k + 1);
-				const int count = LuaToNumber(l, -1);
-				lua_pop(l, 1);
+				const int count = LuaToNumber(l, j + 1, k + 1);
 				ai->UnitTypeRequests[i].Type = UnitTypeByIdent(ident);
 				ai->UnitTypeRequests[i].Count = count;
 				++i;
@@ -1419,9 +1392,7 @@ static int CclDefineAiPlayer(lua_State *l)
 			}
 			const int subargs = lua_rawlen(l, j + 1);
 			for (int k = 0; k < subargs; ++k) {
-				lua_rawgeti(l, j + 1, k + 1);
-				const char *ident = LuaToString(l, -1);
-				lua_pop(l, 1);
+				const char *ident = LuaToString(l, j + 1, k + 1);
 				ai->UpgradeToRequests.push_back(UnitTypeByIdent(ident));
 			}
 		} else if (!strcmp(value, "research")) {
@@ -1430,9 +1401,7 @@ static int CclDefineAiPlayer(lua_State *l)
 			}
 			const int subargs = lua_rawlen(l, j + 1);
 			for (int k = 0; k < subargs; ++k) {
-				lua_rawgeti(l, j + 1, k + 1);
-				const char *ident = LuaToString(l, -1);
-				lua_pop(l, 1);
+				const char *ident = LuaToString(l, j + 1, k + 1);
 				ai->ResearchRequests.push_back(CUpgrade::Get(ident));
 			}
 		} else if (!strcmp(value, "building")) {
@@ -1468,6 +1437,7 @@ void AiCclRegister()
 
 	lua_register(Lua, "AiForce", CclAiForce);
 
+	lua_register(Lua, "AiReleaseForce", CclAiReleaseForce);
 	lua_register(Lua, "AiForceRole", CclAiForceRole);
 	lua_register(Lua, "AiCheckForce", CclAiCheckForce);
 	lua_register(Lua, "AiWaitForce", CclAiWaitForce);
@@ -1480,6 +1450,8 @@ void AiCclRegister()
 	lua_register(Lua, "AiPlayer", CclAiPlayer);
 	lua_register(Lua, "AiSetReserve", CclAiSetReserve);
 	lua_register(Lua, "AiSetCollect", CclAiSetCollect);
+
+	lua_register(Lua, "AiSetBuildDepots", CclAiSetBuildDepots);
 
 	lua_register(Lua, "AiDump", CclAiDump);
 

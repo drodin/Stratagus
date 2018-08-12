@@ -10,8 +10,8 @@
 //
 /**@name action_build.cpp - The build building action. */
 //
-//      (c) Copyright 1998-2012 by Lutz Sammer, Jimmy Salmon, and
-//                                 Russell Smith
+//      (c) Copyright 1998-2015 by Lutz Sammer, Jimmy Salmon,
+//      Russell Smith and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -63,7 +63,7 @@ extern void AiReduceMadeInBuilt(PlayerAi &pai, const CUnitType &type);
 	}
 	order->UpdateConstructionFrame(unit);
 
-	if (unit.Type->BuilderOutside == false) {
+	if (unit.Type->BoolFlag[BUILDEROUTSIDE_INDEX].value == false) {
 		order->Worker = &builder;
 	}
 	return order;
@@ -101,16 +101,12 @@ extern void AiReduceMadeInBuilt(PlayerAi &pai, const CUnitType &type);
 		lua_pop(l, 1);
 	} else if (!strcmp(value, "progress")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->ProgressCounter = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->ProgressCounter = LuaToNumber(l, -1, j + 1);
 	} else if (!strcmp(value, "cancel")) {
 		this->IsCancelled = true;
 	} else if (!strcmp(value, "frame")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		int frame = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		int frame = LuaToNumber(l, -1, j + 1);
 		CConstructionFrame *cframe = unit.Type->Construction->Frames;
 		while (frame-- && cframe->Next != NULL) {
 			cframe = cframe->Next;
@@ -127,7 +123,7 @@ extern void AiReduceMadeInBuilt(PlayerAi &pai, const CUnitType &type);
 	return true;
 }
 
-/* virtual */ PixelPos COrder_Built::Show(const CViewport & , const PixelPos &lastScreenPos) const
+/* virtual */ PixelPos COrder_Built::Show(const CViewport &, const PixelPos &lastScreenPos) const
 {
 	return lastScreenPos;
 }
@@ -159,6 +155,9 @@ static void Finish(COrder_Built &order, CUnit &unit)
 
 	// HACK: the building is ready now
 	player.UnitTypesCount[type.Slot]++;
+	if (unit.Active) {
+		player.UnitTypesAiActiveCount[type.Slot]++;
+	}
 	unit.Constructed = 0;
 	if (unit.Frame < 0) {
 		unit.Frame = -1;
@@ -168,7 +167,7 @@ static void Finish(COrder_Built &order, CUnit &unit)
 	CUnit *worker = order.GetWorkerPtr();
 
 	if (worker != NULL) {
-		if (type.BuilderLost) {
+		if (type.BoolFlag[BUILDERLOST_INDEX].value) {
 			// Bye bye worker.
 			LetUnitDie(*worker);
 			worker = NULL;
@@ -181,6 +180,10 @@ static void Finish(COrder_Built &order, CUnit &unit)
 			if (worker->Type->ResInfo[type.GivesResource]) {
 				CommandResource(*worker, unit, 0);
 			}
+			// If we can reurn goods to a new depot, do it.
+			if (worker->CurrentResource && worker->ResourcesHeld > 0 && type.CanStore[worker->CurrentResource]) {
+				CommandReturnGoods(*worker, &unit, 0);
+			}
 		}
 	}
 
@@ -191,7 +194,7 @@ static void Finish(COrder_Built &order, CUnit &unit)
 
 	player.Notify(NotifyGreen, unit.tilePos, _("New %s done"), type.Name.c_str());
 	if (&player == ThisPlayer) {
-		if (type.Sound.Ready.Sound) {
+		if (type.MapSound.Ready.Sound) {
 			PlayUnitSound(unit, VoiceReady);
 		} else if (worker) {
 			PlayUnitSound(*worker, VoiceWorkCompleted);
@@ -220,12 +223,12 @@ static void Finish(COrder_Built &order, CUnit &unit)
 	UpdateForNewUnit(unit, 0);
 
 	// Set the direction of the building if it supports them
-	if (type.NumDirections > 1) {
-		if (type.Wall) { // Special logic for walls
+	if (type.NumDirections > 1 && type.BoolFlag[NORANDOMPLACING_INDEX].value == false) {
+		if (type.BoolFlag[WALL_INDEX].value) { // Special logic for walls
 			CorrectWallDirections(unit);
 			CorrectWallNeighBours(unit);
 		} else {
-			unit.Direction = (MyRand() >> 8) & 0xFF; // random heading
+			unit.Direction = (SyncRand() >> 8) & 0xFF; // random heading
 		}
 		UnitUpdateHeading(unit);
 	}
@@ -245,7 +248,7 @@ static void Finish(COrder_Built &order, CUnit &unit)
 	const CUnitType &type = *unit.Type;
 
 	int amount;
-	if (type.BuilderOutside) {
+	if (type.BoolFlag[BUILDEROUTSIDE_INDEX].value) {
 		amount = type.AutoBuildRate;
 	} else {
 		// FIXME: implement this below:
@@ -259,7 +262,6 @@ static void Finish(COrder_Built &order, CUnit &unit)
 		DebugPrint("%d: %s canceled.\n" _C_ unit.Player->Index _C_ unit.Type->Name.c_str());
 
 		CancelBuilt(*this, unit);
-		this->Finished = true;
 		return ;
 	}
 
@@ -286,10 +288,7 @@ static void Finish(COrder_Built &order, CUnit &unit)
 	// This should happen when building unit with several peons
 	// Maybe also with only one.
 	// FIXME : Should be better to fix it in action_{build,repair}.c ?
-	if (unit.Variable[BUILD_INDEX].Value > unit.Variable[BUILD_INDEX].Max) {
-		// assume value is wrong.
-		unit.Variable[BUILD_INDEX].Value = unit.Variable[BUILD_INDEX].Max;
-	}
+	unit.Variable[BUILD_INDEX].Value = std::min(unit.Variable[BUILD_INDEX].Max, unit.Variable[BUILD_INDEX].Value);
 }
 
 /* virtual */ void COrder_Built::FillSeenValues(CUnit &unit) const
@@ -351,7 +350,7 @@ void COrder_Built::Progress(CUnit &unit, int amount)
 	Boost(unit, amount, HP_INDEX);
 	Boost(unit, amount, SHIELD_INDEX);
 
-	this->ProgressCounter += amount * unit.Player->SpeedBuild / SPEEDUP_FACTOR;
+	this->ProgressCounter += std::max(1, amount * unit.Player->SpeedBuild / SPEEDUP_FACTOR);
 	UpdateConstructionFrame(unit);
 }
 
@@ -359,7 +358,7 @@ void COrder_Built::ProgressHp(CUnit &unit, int amount)
 {
 	Boost(unit, amount, HP_INDEX);
 
-	this->ProgressCounter += amount * unit.Player->SpeedBuild / SPEEDUP_FACTOR;
+	this->ProgressCounter += std::max(1, amount * unit.Player->SpeedBuild / SPEEDUP_FACTOR);
 	UpdateConstructionFrame(unit);
 }
 
@@ -370,7 +369,7 @@ void COrder_Built::Boost(CUnit &building, int amount, int varIndex) const
 
 	const int costs = building.Stats->Costs[TimeCost] * 600;
 	const int progress = this->ProgressCounter;
-	const int newProgress = progress + amount * building.Player->SpeedBuild / SPEEDUP_FACTOR;
+	const int newProgress = progress + std::max(1, amount * building.Player->SpeedBuild / SPEEDUP_FACTOR);
 	const int maxValue = building.Variable[varIndex].Max;
 
 	int &currentValue = building.Variable[varIndex].Value;

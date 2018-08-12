@@ -10,7 +10,8 @@
 //
 /**@name upgrade.cpp - The upgrade/allow functions. */
 //
-//      (c) Copyright 1999-2007 by Vladi Belperchinov-Shabanski and Jimmy Salmon
+//      (c) Copyright 1999-2015 by Vladi Belperchinov-Shabanski, Jimmy Salmon
+//		and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -59,7 +60,6 @@
 ----------------------------------------------------------------------------*/
 
 static void AllowUnitId(CPlayer &player, int id, int units);
-static void AllowUpgradeId(CPlayer &player, int id, char af);
 
 /*----------------------------------------------------------------------------
 --  Variables
@@ -67,12 +67,10 @@ static void AllowUpgradeId(CPlayer &player, int id, char af);
 
 std::vector<CUpgrade *> AllUpgrades;           /// The main user useable upgrades
 
-/// How many upgrades modifiers supported
-#define UPGRADE_MODIFIERS_MAX (UpgradeMax * 4)
 /// Upgrades modifiers
-static CUpgradeModifier *UpgradeModifiers[UPGRADE_MODIFIERS_MAX];
+CUpgradeModifier *UpgradeModifiers[UPGRADE_MODIFIERS_MAX];
 /// Number of upgrades modifiers used
-static int NumUpgradeModifiers;
+int NumUpgradeModifiers;
 
 std::map<std::string, CUpgrade *> Upgrades;
 
@@ -91,6 +89,7 @@ const CUnitStats &CUnitStats::operator = (const CUnitStats &rhs)
 	for (unsigned int i = 0; i < MaxCosts; ++i) {
 		this->Costs[i] = rhs.Costs[i];
 		this->Storing[i] = rhs.Storing[i];
+		this->ImproveIncomes[i] = rhs.ImproveIncomes[i];
 	}
 	delete [] this->Variables;
 	const unsigned int size = UnitTypeVar.GetNumberVariable();
@@ -107,6 +106,9 @@ bool CUnitStats::operator == (const CUnitStats &rhs) const
 			return false;
 		}
 		if (this->Storing[i] != rhs.Storing[i]) {
+			return false;
+		}
+		if (this->ImproveIncomes[i] != rhs.ImproveIncomes[i]) {
 			return false;
 		}
 	}
@@ -255,15 +257,17 @@ static int CclDefineModifier(lua_State *l)
 	um->ModifyPercent = new int[UnitTypeVar.GetNumberVariable()];
 	memset(um->ModifyPercent, 0, UnitTypeVar.GetNumberVariable() * sizeof(int));
 
-	um->UpgradeId = UpgradeIdByIdent(LuaToString(l, 1));
+	std::string upgrade_ident = LuaToString(l, 1);
+	um->UpgradeId = UpgradeIdByIdent(upgrade_ident);
+	if (um->UpgradeId == -1) {
+		LuaError(l, "Error when defining upgrade modifier: upgrade \"%s\" doesn't exist." _C_ upgrade_ident.c_str());
+	}
 
 	for (int j = 1; j < args; ++j) {
 		if (!lua_istable(l, j + 1)) {
 			LuaError(l, "incorrect argument");
 		}
-		lua_rawgeti(l, j + 1, 1);
-		const char *key = LuaToString(l, -1);
-		lua_pop(l, 1);
+		const char *key = LuaToString(l, j + 1, 1);
 #if 0 // To be removed. must modify lua file.
 		if (!strcmp(key, "attack-range")) {
 			key = "AttackRange";
@@ -280,74 +284,55 @@ static int CclDefineModifier(lua_State *l)
 		}
 #endif
 		if (!strcmp(key, "regeneration-rate")) {
-			lua_rawgeti(l, j + 1, 2);
-			um->Modifier.Variables[HP_INDEX].Increase = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			um->Modifier.Variables[HP_INDEX].Increase = LuaToNumber(l, j + 1, 2);
 		} else if (!strcmp(key, "cost")) {
 			if (!lua_istable(l, j + 1) || lua_rawlen(l, j + 1) != 2) {
 				LuaError(l, "incorrect argument");
 			}
-			lua_rawgeti(l, j + 1, 1);
-			const char *value = LuaToString(l, -1);
-			lua_pop(l, 1);
+			const char *value = LuaToString(l, j + 1, 1);
 			const int resId = GetResourceIdByName(l, value);
-			lua_rawgeti(l, j + 1, 2);
-			um->Modifier.Costs[resId] = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			um->Modifier.Costs[resId] = LuaToNumber(l, j + 1, 2);
 		} else if (!strcmp(key, "storing")) {
 			if (!lua_istable(l, j + 1) || lua_rawlen(l, j + 1) != 2) {
 				LuaError(l, "incorrect argument");
 			}
-			lua_rawgeti(l, j + 1, 1);
-			const char *value = LuaToString(l, -1);
-			lua_pop(l, 1);
+			const char *value = LuaToString(l, j + 1, 1);
 			const int resId = GetResourceIdByName(l, value);
-			lua_rawgeti(l, j + 1, 2);
-			um->Modifier.Storing[resId] = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			um->Modifier.Storing[resId] = LuaToNumber(l, j + 1, 2);
+		} else if (!strcmp(key, "improve-production")) {
+			const char *value = LuaToString(l, j + 1, 2);
+			const int resId = GetResourceIdByName(l, value);
+			um->Modifier.ImproveIncomes[resId] = LuaToNumber(l, j + 1, 3);
 		} else if (!strcmp(key, "allow-unit")) {
-			lua_rawgeti(l, j + 1, 2);
-			const char *value = LuaToString(l, -1);
-			lua_pop(l, 1);
+			const char *value = LuaToString(l, j + 1, 2);
+
 			if (!strncmp(value, "unit-", 5)) {
-				lua_rawgeti(l, j + 1, 3);
-				um->ChangeUnits[UnitTypeIdByIdent(value)] = LuaToNumber(l, -1);
-				lua_pop(l, 1);
+				um->ChangeUnits[UnitTypeIdByIdent(value)] = LuaToNumber(l, j + 1, 3);
 			} else {
 				LuaError(l, "unit expected");
 			}
 		} else if (!strcmp(key, "allow")) {
-			lua_rawgeti(l, j + 1, 2);
-			const char *value = LuaToString(l, -1);
-			lua_pop(l, 1);
+			const char *value = LuaToString(l, j + 1, 2);
 			if (!strncmp(value, "upgrade-", 8)) {
-				lua_rawgeti(l, j + 1, 3);
-				um->ChangeUpgrades[UpgradeIdByIdent(value)] = LuaToNumber(l, -1);
-				lua_pop(l, 1);
+				um->ChangeUpgrades[UpgradeIdByIdent(value)] = LuaToNumber(l, j + 1, 3);
 			} else {
 				LuaError(l, "upgrade expected");
 			}
 		} else if (!strcmp(key, "apply-to")) {
-			lua_rawgeti(l, j + 1, 2);
-			const char *value = LuaToString(l, -1);
-			lua_pop(l, 1);
+			const char *value = LuaToString(l, j + 1, 2);
 			um->ApplyTo[UnitTypeIdByIdent(value)] = 'X';
 		} else if (!strcmp(key, "convert-to")) {
-			lua_rawgeti(l, j + 1, 2);
-			const char *value = LuaToString(l, -1);
-			lua_pop(l, 1);
+			const char *value = LuaToString(l, j + 1, 2);
 			um->ConvertTo = UnitTypeByIdent(value);
+		} else if (!strcmp(key, "research-speed")) {
+			um->SpeedResearch = LuaToNumber(l, j + 1, 2);
 		} else {
 			int index = UnitTypeVar.VariableNameLookup[key]; // variable index;
 			if (index != -1) {
 				if (lua_rawlen(l, j + 1) == 3) {
-					lua_rawgeti(l, j + 1, 3);
-					const char *value = LuaToString(l, -1);
-					lua_pop(l, 1);
+					const char *value = LuaToString(l, j + 1, 3);
 					if (!strcmp(value, "Percent")) {
-						lua_rawgeti(l, j + 1, 2);
-						um->ModifyPercent[index] = LuaToNumber(l, -1);
-						lua_pop(l, 1);
+						um->ModifyPercent[index] = LuaToNumber(l, j + 1, 2);
 					}
 				} else {
 					lua_rawgeti(l, j + 1, 2);
@@ -586,10 +571,50 @@ static void ApplyUpgradeModifier(CPlayer &player, const CUpgradeModifier *um)
 					}
 				}
 			}
+			
+			// if a unit type's supply is changed, we need to update the player's supply accordingly
+			if (um->Modifier.Variables[SUPPLY_INDEX].Value) {
+				std::vector<CUnit *> unitupgrade;
+
+				FindUnitsByType(*UnitTypes[z], unitupgrade);
+				for (size_t j = 0; j != unitupgrade.size(); ++j) {
+					CUnit &unit = *unitupgrade[j];
+					if (unit.Player->Index == pn && unit.IsAlive()) {
+						unit.Player->Supply += um->Modifier.Variables[SUPPLY_INDEX].Value;
+					}
+				}
+			}
+			
+			// if a unit type's demand is changed, we need to update the player's demand accordingly
+			if (um->Modifier.Variables[DEMAND_INDEX].Value) {
+				std::vector<CUnit *> unitupgrade;
+
+				FindUnitsByType(*UnitTypes[z], unitupgrade);
+				for (size_t j = 0; j != unitupgrade.size(); ++j) {
+					CUnit &unit = *unitupgrade[j];
+					if (unit.Player->Index == pn && unit.IsAlive()) {
+						unit.Player->Demand += um->Modifier.Variables[DEMAND_INDEX].Value;
+					}
+				}
+			}
+			
 			// upgrade costs :)
 			for (unsigned int j = 0; j < MaxCosts; ++j) {
 				stat.Costs[j] += um->Modifier.Costs[j];
 				stat.Storing[j] += um->Modifier.Storing[j];
+				if (um->Modifier.ImproveIncomes[j]) {
+					if (!stat.ImproveIncomes[j]) {
+						stat.ImproveIncomes[j] += DefaultIncomes[j] + um->Modifier.ImproveIncomes[j];
+					} else {
+						stat.ImproveIncomes[j] += um->Modifier.ImproveIncomes[j];
+					}
+					//update player's income
+					std::vector<CUnit *> unitupgrade;
+					FindUnitsByType(*UnitTypes[z], unitupgrade);
+					if (unitupgrade.size() > 0) {
+						player.Incomes[j] = std::max(player.Incomes[j], stat.ImproveIncomes[j]);
+					}
+				}
 			}
 
 			int varModified = 0;
@@ -609,22 +634,15 @@ static void ApplyUpgradeModifier(CPlayer &player, const CUpgradeModifier *um)
 					stat.Variables[j].Increase += um->Modifier.Variables[j].Increase;
 				}
 
-				if (stat.Variables[j].Value < 0) {
-					stat.Variables[j].Value = 0;
-				}
-				if (stat.Variables[j].Max < 0) {
-					stat.Variables[j].Max = 0;
-				}
-				if (stat.Variables[j].Value > stat.Variables[j].Max) {
-					stat.Variables[j].Value = stat.Variables[j].Max;
-				}
+				stat.Variables[j].Max = std::max(stat.Variables[j].Max, 0);
+				clamp(&stat.Variables[j].Value, 0, stat.Variables[j].Max);
 			}
 
 			// And now modify ingame units
 			if (varModified) {
 				std::vector<CUnit *> unitupgrade;
 
-				FindUnitsByType(*UnitTypes[z], unitupgrade);
+				FindUnitsByType(*UnitTypes[z], unitupgrade, true);
 				for (size_t j = 0; j != unitupgrade.size(); ++j) {
 					CUnit &unit = *unitupgrade[j];
 
@@ -641,15 +659,10 @@ static void ApplyUpgradeModifier(CPlayer &player, const CUpgradeModifier *um)
 							unit.Variable[j].Increase += um->Modifier.Variables[j].Increase;
 						}
 
-						if (unit.Variable[j].Value < 0) {
-							unit.Variable[j].Value = 0;
-						}
 						unit.Variable[j].Max += um->Modifier.Variables[j].Max;
-						if (unit.Variable[j].Max < 0) {
-							unit.Variable[j].Max = 0;
-						}
-						if (unit.Variable[j].Value > unit.Variable[j].Max) {
-							unit.Variable[j].Value = unit.Variable[j].Max;
+						unit.Variable[j].Max = std::max(unit.Variable[j].Max, 0);
+						if (unit.Variable[j].Max > 0) {
+							clamp(&unit.Variable[j].Value, 0, unit.Variable[j].Max);
 						}
 					}
 				}
@@ -657,6 +670,244 @@ static void ApplyUpgradeModifier(CPlayer &player, const CUpgradeModifier *um)
 			if (um->ConvertTo) {
 				ConvertUnitTypeTo(player, *UnitTypes[z], *um->ConvertTo);
 			}
+		}
+	}
+}
+
+/**
+**  Remove the modifiers of an upgrade.
+**
+**  This function will unmark upgrade as done and undo all required modifications
+**  to unit types and will modify allow/forbid maps back
+**
+**  @param player  Player that get all the upgrades.
+**  @param um      Upgrade modifier that do the effects
+*/
+static void RemoveUpgradeModifier(CPlayer &player, const CUpgradeModifier *um)
+{
+	Assert(um);
+
+	int pn = player.Index;
+
+	if (um->SpeedResearch != 0) {
+		player.SpeedResearch -= um->SpeedResearch;
+	}
+
+	for (int z = 0; z < UpgradeMax; ++z) {
+		// allow/forbid upgrades for player.  only if upgrade is not acquired
+
+		// FIXME: check if modify is allowed
+
+		if (player.Allow.Upgrades[z] != 'R') {
+			if (um->ChangeUpgrades[z] == 'A') {
+				player.Allow.Upgrades[z] = 'F';
+			}
+			if (um->ChangeUpgrades[z] == 'F') {
+				player.Allow.Upgrades[z] = 'A';
+			}
+			// we can even have upgrade acquired w/o costs
+			if (um->ChangeUpgrades[z] == 'R') {
+				player.Allow.Upgrades[z] = 'A';
+			}
+		}
+	}
+
+	for (size_t z = 0; z < UnitTypes.size(); ++z) {
+		CUnitStats &stat = UnitTypes[z]->Stats[pn];
+		// add/remove allowed units
+
+		// FIXME: check if modify is allowed
+
+		player.Allow.Units[z] -= um->ChangeUnits[z];
+
+		Assert(um->ApplyTo[z] == '?' || um->ApplyTo[z] == 'X');
+
+		// this modifier should be applied to unittype id == z
+		if (um->ApplyTo[z] == 'X') {
+
+			// If Sight range is upgraded, we need to change EVERY unit
+			// to the new range, otherwise the counters get confused.
+			if (um->Modifier.Variables[SIGHTRANGE_INDEX].Value) {
+				std::vector<CUnit *> unitupgrade;
+
+				FindUnitsByType(*UnitTypes[z], unitupgrade);
+				for (size_t j = 0; j != unitupgrade.size(); ++j) {
+					CUnit &unit = *unitupgrade[j];
+					if (unit.Player->Index == pn && !unit.Removed) {
+						MapUnmarkUnitSight(unit);
+						unit.CurrentSightRange = stat.Variables[SIGHTRANGE_INDEX].Max -
+							um->Modifier.Variables[SIGHTRANGE_INDEX].Value;
+						MapMarkUnitSight(unit);
+					}
+				}
+			}
+			
+			// if a unit type's supply is changed, we need to update the player's supply accordingly
+			if (um->Modifier.Variables[SUPPLY_INDEX].Value) {
+				std::vector<CUnit *> unitupgrade;
+
+				FindUnitsByType(*UnitTypes[z], unitupgrade);
+				for (size_t j = 0; j != unitupgrade.size(); ++j) {
+					CUnit &unit = *unitupgrade[j];
+					if (unit.Player->Index == pn && unit.IsAlive()) {
+						unit.Player->Supply -= um->Modifier.Variables[SUPPLY_INDEX].Value;
+					}
+				}
+			}
+			
+			// if a unit type's demand is changed, we need to update the player's demand accordingly
+			if (um->Modifier.Variables[DEMAND_INDEX].Value) {
+				std::vector<CUnit *> unitupgrade;
+
+				FindUnitsByType(*UnitTypes[z], unitupgrade);
+				for (size_t j = 0; j != unitupgrade.size(); ++j) {
+					CUnit &unit = *unitupgrade[j];
+					if (unit.Player->Index == pn && unit.IsAlive()) {
+						unit.Player->Demand -= um->Modifier.Variables[DEMAND_INDEX].Value;
+					}
+				}
+			}
+			
+			// upgrade costs :)
+			for (unsigned int j = 0; j < MaxCosts; ++j) {
+				stat.Costs[j] -= um->Modifier.Costs[j];
+				stat.Storing[j] -= um->Modifier.Storing[j];
+				stat.ImproveIncomes[j] -= um->Modifier.ImproveIncomes[j];
+				//if this was the highest improve income, search for another
+				if (player.Incomes[j] && (stat.ImproveIncomes[j] + um->Modifier.ImproveIncomes[j]) == player.Incomes[j]) {
+					int m = DefaultIncomes[j];
+
+					for (int k = 0; k < player.GetUnitCount(); ++k) {
+						m = std::max(m, player.GetUnit(k).Type->Stats[player.Index].ImproveIncomes[j]);
+					}
+					player.Incomes[j] = m;
+				}
+			}
+
+			int varModified = 0;
+			for (unsigned int j = 0; j < UnitTypeVar.GetNumberVariable(); j++) {
+				varModified |= um->Modifier.Variables[j].Value
+					| um->Modifier.Variables[j].Max
+					| um->Modifier.Variables[j].Increase
+					| um->Modifier.Variables[j].Enable
+					| um->ModifyPercent[j];
+				stat.Variables[j].Enable |= um->Modifier.Variables[j].Enable;
+				if (um->ModifyPercent[j]) {
+					stat.Variables[j].Value = stat.Variables[j].Value * 100 / (100 + um->ModifyPercent[j]);
+					stat.Variables[j].Max = stat.Variables[j].Max * 100 / (100 + um->ModifyPercent[j]);
+				} else {
+					stat.Variables[j].Value -= um->Modifier.Variables[j].Value;
+					stat.Variables[j].Max -= um->Modifier.Variables[j].Max;
+					stat.Variables[j].Increase -= um->Modifier.Variables[j].Increase;
+				}
+
+				stat.Variables[j].Max = std::max(stat.Variables[j].Max, 0);
+				clamp(&stat.Variables[j].Value, 0, stat.Variables[j].Max);
+			}
+
+			// And now modify ingame units
+			if (varModified) {
+				std::vector<CUnit *> unitupgrade;
+
+				FindUnitsByType(*UnitTypes[z], unitupgrade, true);
+				for (size_t j = 0; j != unitupgrade.size(); ++j) {
+					CUnit &unit = *unitupgrade[j];
+
+					if (unit.Player->Index != player.Index) {
+						continue;
+					}
+					for (unsigned int j = 0; j < UnitTypeVar.GetNumberVariable(); j++) {
+						unit.Variable[j].Enable |= um->Modifier.Variables[j].Enable;
+						if (um->ModifyPercent[j]) {
+							unit.Variable[j].Value = unit.Variable[j].Value * 100 / (100 + um->ModifyPercent[j]);
+							unit.Variable[j].Max = unit.Variable[j].Max * 100 / (100 + um->ModifyPercent[j]);
+						} else {
+							unit.Variable[j].Value -= um->Modifier.Variables[j].Value;
+							unit.Variable[j].Increase -= um->Modifier.Variables[j].Increase;
+						}
+
+						unit.Variable[j].Max -= um->Modifier.Variables[j].Max;
+						unit.Variable[j].Max = std::max(unit.Variable[j].Max, 0);
+
+						clamp(&unit.Variable[j].Value, 0, unit.Variable[j].Max);
+					}
+				}
+			}
+			if (um->ConvertTo) {
+				ConvertUnitTypeTo(player, *um->ConvertTo, *UnitTypes[z]);
+			}
+		}
+	}
+}
+
+/**
+**  Apply the modifiers of an individual upgrade.
+**
+**  @param unit    Unit that will get the modifier applied
+**  @param um      Upgrade modifier that does the effects
+*/
+void ApplyIndividualUpgradeModifier(CUnit &unit, const CUpgradeModifier *um)
+{
+	Assert(um);
+
+	if (um->Modifier.Variables[SIGHTRANGE_INDEX].Value) {
+		if (!unit.Removed) {
+			MapUnmarkUnitSight(unit);
+			unit.CurrentSightRange = unit.Variable[SIGHTRANGE_INDEX].Value +
+									 um->Modifier.Variables[SIGHTRANGE_INDEX].Value;
+			UpdateUnitSightRange(unit);
+			MapMarkUnitSight(unit);
+		}
+	}
+
+	for (unsigned int j = 0; j < UnitTypeVar.GetNumberVariable(); j++) {
+		unit.Variable[j].Enable |= um->Modifier.Variables[j].Enable;
+		if (um->ModifyPercent[j]) {
+			unit.Variable[j].Value += unit.Variable[j].Value * um->ModifyPercent[j] / 100;
+			unit.Variable[j].Max += unit.Variable[j].Max * um->ModifyPercent[j] / 100;
+		} else {
+			unit.Variable[j].Value += um->Modifier.Variables[j].Value;
+			unit.Variable[j].Increase += um->Modifier.Variables[j].Increase;
+		}
+		unit.Variable[j].Max += um->Modifier.Variables[j].Max;
+		unit.Variable[j].Max = std::max(unit.Variable[j].Max, 0);
+		if (unit.Variable[j].Max > 0) {
+			clamp(&unit.Variable[j].Value, 0, unit.Variable[j].Max);
+		}
+	}
+	
+	if (um->ConvertTo) {
+		CommandTransformIntoType(unit, *um->ConvertTo);
+	}
+}
+
+static void RemoveIndividualUpgradeModifier(CUnit &unit, const CUpgradeModifier *um)
+{
+	Assert(um);
+
+	if (um->Modifier.Variables[SIGHTRANGE_INDEX].Value) {
+		if (!unit.Removed) {
+			MapUnmarkUnitSight(unit);
+			unit.CurrentSightRange = unit.Variable[SIGHTRANGE_INDEX].Value -
+									 um->Modifier.Variables[SIGHTRANGE_INDEX].Value;
+			UpdateUnitSightRange(unit);
+			MapMarkUnitSight(unit);
+		}
+	}
+
+	for (unsigned int j = 0; j < UnitTypeVar.GetNumberVariable(); j++) {
+		unit.Variable[j].Enable |= um->Modifier.Variables[j].Enable;
+		if (um->ModifyPercent[j]) {
+			unit.Variable[j].Value = unit.Variable[j].Value * 100 / (100 + um->ModifyPercent[j]);
+			unit.Variable[j].Max = unit.Variable[j].Max * 100 / (100 + um->ModifyPercent[j]);
+		} else {
+			unit.Variable[j].Value -= um->Modifier.Variables[j].Value;
+			unit.Variable[j].Increase -= um->Modifier.Variables[j].Increase;
+		}
+		unit.Variable[j].Max -= um->Modifier.Variables[j].Max;
+		unit.Variable[j].Max = std::max(unit.Variable[j].Max, 0);
+		if (unit.Variable[j].Max > 0) {
+			clamp(&unit.Variable[j].Value, 0, unit.Variable[j].Max);
 		}
 	}
 }
@@ -687,20 +938,97 @@ void UpgradeAcquire(CPlayer &player, const CUpgrade *upgrade)
 	}
 }
 
-#if 0 // UpgradeLost not implemented.
 /**
-**  for now it will be empty?
-**  perhaps acquired upgrade can be lost if (for example) a building is lost
-**  (lumber mill? stronghold?)
-**  this function will apply all modifiers in reverse way
+**  Upgrade will be lost
+**
+**  @param player   Player researching the upgrade.
+**  @param id       Upgrade to be lost.
+**  
 */
-void UpgradeLost(Player &player, int id)
+void UpgradeLost(CPlayer &player, int id)
 {
 	player.UpgradeTimers.Upgrades[id] = 0;
-	AllowUpgradeId(player, id, 'A'); // research is lost i.e. available
-	// FIXME: here we should reverse apply upgrade...
+
+	for (int z = 0; z < NumUpgradeModifiers; ++z) {
+		if (UpgradeModifiers[z]->UpgradeId == id) {
+			RemoveUpgradeModifier(player, UpgradeModifiers[z]);
+		}
+	}
+
+	//
+	//  Upgrades could change the buttons displayed.
+	//
+	if (&player == ThisPlayer) {
+		SelectedUnitChanged();
+	}
 }
-#endif
+
+/**
+**  Apply researched upgrades when map is loading
+**
+**  @return:   void
+*/
+void ApplyUpgrades()
+{
+	for (std::vector<CUpgrade *>::size_type j = 0; j < AllUpgrades.size(); ++j) {
+		CUpgrade *upgrade = AllUpgrades[j];
+		if (upgrade) {
+			for (int p = 0; p < PlayerMax; ++p) {
+				if (Players[p].Allow.Upgrades[j] == 'R') {
+					int id = upgrade->ID;
+					Players[p].UpgradeTimers.Upgrades[id] = upgrade->Costs[TimeCost];
+					AllowUpgradeId(Players[p], id, 'R');  // research done
+
+					for (int z = 0; z < NumUpgradeModifiers; ++z) {
+						if (UpgradeModifiers[z]->UpgradeId == id) {
+							ApplyUpgradeModifier(Players[p], UpgradeModifiers[z]);
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+void IndividualUpgradeAcquire(CUnit &unit, const CUpgrade *upgrade)
+{
+	int id = upgrade->ID;
+	unit.Player->UpgradeTimers.Upgrades[id] = upgrade->Costs[TimeCost];
+	unit.IndividualUpgrades[id] = true;
+
+	for (int z = 0; z < NumUpgradeModifiers; ++z) {
+		if (UpgradeModifiers[z]->UpgradeId == id) {
+			ApplyIndividualUpgradeModifier(unit, UpgradeModifiers[z]);
+		}
+	}
+
+	//
+	//  Upgrades could change the buttons displayed.
+	//
+	if (unit.Player == ThisPlayer) {
+		SelectedUnitChanged();
+	}
+}
+
+void IndividualUpgradeLost(CUnit &unit, const CUpgrade *upgrade)
+{
+	int id = upgrade->ID;
+	unit.Player->UpgradeTimers.Upgrades[id] = 0;
+	unit.IndividualUpgrades[id] = false;
+
+	for (int z = 0; z < NumUpgradeModifiers; ++z) {
+		if (UpgradeModifiers[z]->UpgradeId == id) {
+			RemoveIndividualUpgradeModifier(unit, UpgradeModifiers[z]);
+		}
+	}
+
+	//
+	//  Upgrades could change the buttons displayed.
+	//
+	if (unit.Player == ThisPlayer) {
+		SelectedUnitChanged();
+	}
+}
 
 /*----------------------------------------------------------------------------
 --  Allow(s)
@@ -727,7 +1055,7 @@ static void AllowUnitId(CPlayer &player, int id, int units)
 **  @param id      upgrade id
 **  @param af      `A'llow/`F'orbid/`R'eseached
 */
-static void AllowUpgradeId(CPlayer &player, int id, char af)
+void AllowUpgradeId(CPlayer &player, int id, char af)
 {
 	Assert(af == 'A' || af == 'F' || af == 'R');
 	player.Allow.Upgrades[id] = af;
@@ -778,7 +1106,7 @@ char UpgradeIdentAllowed(const CPlayer &player, const std::string &ident)
 	if (id != -1) {
 		return UpgradeIdAllowed(player, id);
 	}
-	DebugPrint("Fix your code, wrong identifier `%s'\n" _C_ ident.c_str());
+	DebugPrint("Fix your code, wrong identifier '%s'\n" _C_ ident.c_str());
 	return '-';
 }
 

@@ -32,18 +32,25 @@
 
 //@{
 
-#ifndef __unix
+#ifdef USE_WIN32
 #undef NOUSER
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0400
 #endif
 #endif
 
+#include <cstdlib>
+#include <cstdint>
+#include <string>
+
 /*----------------------------------------------------------------------------
 --  Random
 ----------------------------------------------------------------------------*/
 
+#include <cmath>
+
 extern unsigned SyncRandSeed;           /// Sync random seed value
+extern uint32_t FileChecksums;          /// checksums of all loaded lua files
 
 extern void InitSyncRand();             /// Initialize the syncron rand
 extern int SyncRand();                  /// Syncron rand
@@ -76,16 +83,32 @@ void clamp(T *value, T minValue, T maxValue)
 	}
 }
 
+extern uint32_t fletcher32(const std::string &content);
 
 /*----------------------------------------------------------------------------
 --  Strings
 ----------------------------------------------------------------------------*/
 
-#if !defined(_MSC_VER) || _MSC_VER < 1400
+#include <string.h>
+
+#ifndef _TRUNCATE
 #define _TRUNCATE ((size_t)-1)
-extern unsigned int strcpy_s(char *dst, size_t dstsize, const char *src);
-extern unsigned int strncpy_s(char *dst, size_t dstsize, const char *src, size_t count);
-extern unsigned int strcat_s(char *dst, size_t dstsize, const char *src);
+#endif
+
+#ifndef HAVE_ERRNOT
+typedef int errno_t;
+#endif
+
+#ifndef HAVE_STRCPYS
+extern errno_t strcpy_s(char *dst, size_t dstsize, const char *src);
+#endif
+
+#ifndef HAVE_STRNCPYS
+extern errno_t strncpy_s(char *dst, size_t dstsize, const char *src, size_t count);
+#endif
+
+#ifndef HAVE_STRCATS
+extern errno_t strcat_s(char *dst, size_t dstsize, const char *src);
 #endif
 
 #ifndef HAVE_STRCASESTR
@@ -97,6 +120,18 @@ extern char *strcasestr(const char *str, const char *substr);
 /// determine length of a fixed-length string
 extern size_t strnlen(const char *str, size_t strsize);
 #endif // !HAVE_STRNLEN
+
+/*----------------------------------------------------------------------------
+--  Getopt
+----------------------------------------------------------------------------*/
+
+#ifdef HAVE_GETOPT
+#include <unistd.h>
+#else
+extern char *optarg;
+extern int optind, opterr, optopt;
+int getopt(int argc, char *const argv[], const char *optstring);
+#endif
 
 /*----------------------------------------------------------------------------
 --  Clipboard

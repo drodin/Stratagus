@@ -52,6 +52,7 @@ public:
 	virtual ~LuaActionListener();
 };
 
+#if defined(USE_OPENGL) || defined(USE_GLES)
 class MyOpenGLGraphics : public gcn::Graphics
 {
 public:
@@ -72,6 +73,7 @@ public:
 private:
 	gcn::Color mColor;
 };
+#endif
 
 class ImageWidget : public gcn::Icon
 {
@@ -82,7 +84,8 @@ public:
 class ButtonWidget : public gcn::Button
 {
 public:
-	explicit ButtonWidget(const std::string &caption) : Button(caption) {
+	explicit ButtonWidget(const std::string &caption) : Button(caption)
+	{
 		this->setHotKey(GetHotKey(caption));
 	}
 };
@@ -122,13 +125,17 @@ public:
 
 	void setUncheckedNormalImage(gcn::Image *image) { uncheckedNormalImage = image; }
 	void setUncheckedPressedImage(gcn::Image *image) { uncheckedPressedImage = image; }
+	void setUncheckedDisabledImage(gcn::Image *image) { uncheckedDisabledImage = image; }
 	void setCheckedNormalImage(gcn::Image *image) { checkedNormalImage = image; }
 	void setCheckedPressedImage(gcn::Image *image) { checkedPressedImage = image; }
+	void setCheckedDisabledImage(gcn::Image *image) { checkedDisabledImage = image; }
 
 	gcn::Image *uncheckedNormalImage;
 	gcn::Image *uncheckedPressedImage;
+	gcn::Image *uncheckedDisabledImage;
 	gcn::Image *checkedNormalImage;
 	gcn::Image *checkedPressedImage;
+	gcn::Image *checkedDisabledImage;
 	bool mMouseDown;
 };
 
@@ -148,13 +155,17 @@ public:
 
 	void setUncheckedNormalImage(gcn::Image *image) { uncheckedNormalImage = image; }
 	void setUncheckedPressedImage(gcn::Image *image) { uncheckedPressedImage = image; }
+	void setUncheckedDisabledImage(gcn::Image *image) { uncheckedDisabledImage = image; }
 	void setCheckedNormalImage(gcn::Image *image) { checkedNormalImage = image; }
 	void setCheckedPressedImage(gcn::Image *image) { checkedPressedImage = image; }
+	void setCheckedDisabledImage(gcn::Image *image) { checkedDisabledImage = image; }
 
 	gcn::Image *uncheckedNormalImage;
 	gcn::Image *uncheckedPressedImage;
+	gcn::Image *uncheckedDisabledImage;
 	gcn::Image *checkedNormalImage;
 	gcn::Image *checkedPressedImage;
+	gcn::Image *checkedDisabledImage;
 	bool mMouseDown;
 };
 
@@ -169,9 +180,11 @@ public:
 
 	void setMarkerImage(gcn::Image *image);
 	void setBackgroundImage(gcn::Image *image);
+	void setDisabledBackgroundImage(gcn::Image *image);
 
 	gcn::Image *markerImage;
 	gcn::Image *backgroundImage;
+	gcn::Image *disabledBackgroundImage;
 };
 
 class MultiLineLabel : public gcn::Widget
@@ -243,6 +256,19 @@ private:
 	/// @todo Method to set this variable. Maybe set the variable static.
 };
 
+class ImageTextField : public gcn::TextField
+{
+
+public:
+	ImageTextField() : TextField(), itemImage(NULL) {}
+	ImageTextField(const std::string& text) : gcn::TextField(text), itemImage(NULL) {}
+	virtual void draw(gcn::Graphics *graphics);
+	virtual void drawBorder(gcn::Graphics *graphics);
+	void setItemImage(CGraphic *image) { itemImage = image; }
+private:
+	CGraphic *itemImage;
+};
+
 class LuaListModel : public gcn::ListModel
 {
 	std::vector<std::string> list;
@@ -252,6 +278,26 @@ public:
 	void setList(lua_State *lua, lua_Object *lo);
 	virtual int getNumberOfElements() {return list.size();}
 	virtual std::string getElementAt(int i) {return list[i];}
+};
+
+class ImageListBox : public gcn::ListBox
+{
+public:
+	ImageListBox();
+	ImageListBox(gcn::ListModel *listModel);
+	virtual void draw(gcn::Graphics *graphics);
+	virtual void drawBorder(gcn::Graphics *graphics);
+	void setItemImage(CGraphic *image) { itemImage = image; }
+	void adjustSize();
+	void mousePress(int, int y, int button);
+	void setSelected(int selected);
+	void setListModel(gcn::ListModel *listModel);
+	void logic()
+	{
+		adjustSize();
+	}
+private:
+	CGraphic *itemImage;
 };
 
 class ListBoxWidget : public gcn::ScrollArea
@@ -271,6 +317,76 @@ private:
 	gcn::ListBox listbox;
 };
 
+class ImageListBoxWidget : public ListBoxWidget
+{
+public:
+	ImageListBoxWidget(unsigned int width, unsigned int height);
+	void setList(lua_State *lua, lua_Object *lo);
+	void setSelected(int i);
+	int getSelected() const;
+	virtual void setBackgroundColor(const gcn::Color &color);
+	virtual void setFont(gcn::Font *font);
+	virtual void addActionListener(gcn::ActionListener *actionListener);
+
+	void setItemImage(CGraphic *image) {
+		itemImage = image;
+		listbox.setItemImage(image);
+	}
+	void setUpButtonImage(CGraphic *image) { upButtonImage = image; }
+	void setUpPressedButtonImage(CGraphic *image) { upPressedButtonImage = image; }
+	void setDownButtonImage(CGraphic *image) { downButtonImage = image; }
+	void setDownPressedButtonImage(CGraphic *image) { downPressedButtonImage = image; }
+	void setLeftButtonImage(CGraphic *image) { leftButtonImage = image; }
+	void setLeftPressedButtonImage(CGraphic *image) { leftPressedButtonImage = image; }
+	void setRightButtonImage(CGraphic *image) { rightButtonImage = image; }
+	void setRightPressedButtonImage(CGraphic *image) { rightPressedButtonImage = image; }
+	void setHBarImage(CGraphic *image) {
+		hBarButtonImage = image;
+		mScrollbarWidth = std::min<int>(image->getWidth(), image->getHeight());
+	}
+	void setVBarImage(CGraphic *image) {
+		vBarButtonImage = image;
+		mScrollbarWidth = std::min<int>(image->getWidth(), image->getHeight());
+	}
+	void setMarkerImage(CGraphic *image) { markerImage = image; }
+
+	virtual void draw(gcn::Graphics *graphics);
+	virtual void drawBorder(gcn::Graphics *graphics);
+	virtual gcn::Rectangle getVerticalMarkerDimension();
+	virtual gcn::Rectangle getHorizontalMarkerDimension();
+private:
+	void adjustSize();
+
+	void drawUpButton(gcn::Graphics *graphics);
+	void drawDownButton(gcn::Graphics *graphics);
+	void drawLeftButton(gcn::Graphics *graphics);
+	void drawRightButton(gcn::Graphics *graphics);
+	void drawUpPressedButton(gcn::Graphics *graphics);
+	void drawDownPressedButton(gcn::Graphics *graphics);
+	void drawLeftPressedButton(gcn::Graphics *graphics);
+	void drawRightPressedButton(gcn::Graphics *graphics);
+	void drawHMarker(gcn::Graphics *graphics);
+	void drawVMarker(gcn::Graphics *graphics);
+	void drawHBar(gcn::Graphics *graphics);
+	void drawVBar(gcn::Graphics *graphics);
+private:
+	CGraphic *itemImage;
+	CGraphic *upButtonImage;
+	CGraphic *upPressedButtonImage;
+	CGraphic *downButtonImage;
+	CGraphic *downPressedButtonImage;
+	CGraphic *leftButtonImage;
+	CGraphic *leftPressedButtonImage;
+	CGraphic *rightButtonImage;
+	CGraphic *rightPressedButtonImage;
+	CGraphic *hBarButtonImage;
+	CGraphic *vBarButtonImage;
+	CGraphic *markerImage;
+
+	LuaListModel lualistmodel;
+	ImageListBox listbox;
+};
+
 class DropDownWidget : public gcn::DropDown
 {
 	LuaListModel listmodel;
@@ -278,6 +394,42 @@ public:
 	DropDownWidget() {}
 	void setList(lua_State *lua, lua_Object *lo);
 	virtual void setSize(int width, int height);
+};
+
+class ImageDropDownWidget : public DropDownWidget
+{
+public:
+	ImageDropDownWidget() : itemImage(NULL) {
+		mListBox.addActionListener(this);
+		setListModel(&listmodel);
+		mScrollArea->setContent(&mListBox);
+	}
+	void setItemImage(CGraphic *image) {
+		itemImage = image;
+		mListBox.setItemImage(image);
+	}
+	void setDownNormalImage(CGraphic *image) { DownNormalImage = image; }
+	void setDownPressedImage(CGraphic *image) { DownPressedImage = image; }
+
+	virtual ImageListBox *getListBox() { return &mListBox; }
+	virtual void draw(gcn::Graphics *graphics);
+	virtual void drawBorder(gcn::Graphics *graphics);
+	void drawButton(gcn::Graphics *graphics);
+	void setList(lua_State *lua, lua_Object *lo);
+	virtual void setSize(int width, int height);
+	void setListModel(LuaListModel *listModel);
+	int getSelected();
+	void setSelected(int selected);
+	void adjustHeight();
+	void setListBox(ImageListBox *listBox);
+	void setFont(gcn::Font *font);
+	void _mouseInputMessage(const gcn::MouseInput &mouseInput);
+private:
+	CGraphic *itemImage;
+	CGraphic *DownNormalImage;
+	CGraphic *DownPressedImage;
+	ImageListBox mListBox;
+	LuaListModel listmodel;
 };
 
 class StatBoxWidget : public gcn::Widget
@@ -292,8 +444,6 @@ public:
 	int getPercent() const;
 
 private:
-	int width;            /// width of the widget.
-	int height;           /// height of the widget.
 	std::string caption;  /// caption of the widget.
 	unsigned int percent; /// percent value of the widget.
 };

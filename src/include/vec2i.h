@@ -27,8 +27,8 @@
 //      02111-1307, USA.
 //
 
-#ifndef __VEC2I_H__
-#define __VEC2I_H__
+#ifndef VEC2I_H
+#define VEC2I_H
 
 //@{
 
@@ -151,7 +151,8 @@ typedef Vec2T<short int> Vec2i;
 typedef Vec2T<int> PixelPos;
 typedef Vec2T<int> PixelDiff;
 typedef Vec2T<int> PixelSize;
+typedef Vec2T<double> PixelPrecise;
 
 //@}
 
-#endif // !__VEC2I_H__
+#endif // !VEC2I_H

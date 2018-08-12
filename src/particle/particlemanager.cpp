@@ -31,8 +31,10 @@
 
 #include "stratagus.h"
 #include "particle.h"
-#include "video.h"
 #include "ui.h"
+#include "video.h"
+
+#include <algorithm>
 
 
 CParticleManager ParticleManager;
@@ -70,21 +72,33 @@ void CParticleManager::clear()
 	new_particles.clear();
 }
 
-void CParticleManager::draw(const CViewport &vp)
+static inline bool DrawLevelCompare(const CParticle *lhs, const CParticle *rhs)
+{
+	return lhs->getDrawLevel() < rhs->getDrawLevel();
+}
+
+void CParticleManager::prepareToDraw(const CViewport &vp, std::vector<CParticle *> &table)
 {
 	this->vp = &vp;
 
-	std::vector<CParticle *>::iterator i;
-	for (i = particles.begin(); i != particles.end(); ++i) {
-		(*i)->draw();
+	for (std::vector<CParticle *>::iterator it = particles.begin(); it != particles.end(); ++it) {
+		CParticle &particle = **it;
+		if (particle.isVisible(vp)) {
+			table.push_back(&particle);
+		}
 	}
 
+	std::sort(table.begin(), table.end(), DrawLevelCompare);
+}
+
+void CParticleManager::endDraw()
+{
 	this->vp = NULL;
 }
 
 void CParticleManager::update()
 {
-	unsigned long ticks = GetTicks() - lastTicks;
+	unsigned long ticks = GameCycle - lastTicks;
 	std::vector<CParticle *>::iterator i;
 
 	particles.insert(particles.end(), new_particles.begin(), new_particles.end());
@@ -92,7 +106,7 @@ void CParticleManager::update()
 
 	i = particles.begin();
 	while (i != particles.end()) {
-		(*i)->update(ticks);
+		(*i)->update(1000.0f / CYCLES_PER_SECOND * ticks);
 		if ((*i)->isDestroyed()) {
 			delete *i;
 			i = particles.erase(i);

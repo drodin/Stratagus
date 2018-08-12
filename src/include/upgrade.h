@@ -10,7 +10,8 @@
 //
 /**@name upgrade.h - The upgrades headerfile. */
 //
-//      (c) Copyright 1999-2006 by Vladi Belperchinov-Shabanski and Jimmy Salmon
+//      (c) Copyright 1999-2015 by Vladi Belperchinov-Shabanski, Jimmy Salmon
+//      and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -39,10 +40,19 @@
 class CFile;
 class CPlayer;
 class CUpgrade;
+class CUnit;
+class CUpgradeModifier;
 
 /*----------------------------------------------------------------------------
 --  Variables
 ----------------------------------------------------------------------------*/
+
+/// How many upgrades modifiers supported
+#define UPGRADE_MODIFIERS_MAX (UpgradeMax * 4)
+
+extern CUpgradeModifier *UpgradeModifiers[UPGRADE_MODIFIERS_MAX];
+
+extern int NumUpgradeModifiers;
 
 /*----------------------------------------------------------------------------
 --  Functions
@@ -74,12 +84,14 @@ extern int UpgradeIdByIdent(const std::string &sid);
 
 /// Upgrade will be acquired
 extern void UpgradeAcquire(CPlayer &player, const CUpgrade *upgrade);
-
-/// for now it will be empty?
-/// perhaps acquired upgrade can be lost if (for example) a building is lost
-/// (lumber mill? stronghold?)
-/// this function will apply all modifiers in reverse way
+/// Upgrade will be lost
 extern void UpgradeLost(CPlayer &player, int id);
+/// Apply researched upgrades when map is loading
+extern void ApplyUpgrades();
+
+extern void ApplyIndividualUpgradeModifier(CUnit &unit, const CUpgradeModifier *um); /// Apply upgrade modifier of an individual upgrade
+extern void IndividualUpgradeAcquire(CUnit &unit, const CUpgrade *upgrade); /// Make a unit acquire in individual upgrade
+extern void IndividualUpgradeLost(CUnit &unit, const CUpgrade *upgrade); /// Make a unit lose in individual upgrade
 
 /*----------------------------------------------------------------------------
 --  Allow(s)
@@ -89,6 +101,7 @@ extern void UpgradeLost(CPlayer &player, int id);
 // id -- unit type id, af -- `A'llow/`F'orbid
 
 extern int UnitIdAllowed(const CPlayer &player, int id);
+extern void AllowUpgradeId(CPlayer &player, int id, char af);
 
 extern char UpgradeIdAllowed(const CPlayer &player, int id);
 extern char UpgradeIdentAllowed(const CPlayer &player, const std::string &ident);

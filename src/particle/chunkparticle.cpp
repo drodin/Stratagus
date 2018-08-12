@@ -44,10 +44,11 @@ static inline float deg2rad(int degrees)
 }
 
 
-CChunkParticle::CChunkParticle(CPosition position, Animation *smokeAnimation, Animation *debrisAnimation,
-							   int minVelocity = 0, int maxVelocity = 400, int minTrajectoryAngle = 77) :
-	CParticle(position), initialPos(position), nextSmokeTicks(0), age(0),
-	height(0.f)
+CChunkParticle::CChunkParticle(CPosition position, GraphicAnimation *smokeAnimation, GraphicAnimation *debrisAnimation,
+							   GraphicAnimation *destroyAnimation,
+							   int minVelocity, int maxVelocity, int minTrajectoryAngle, int maxTTL, int drawlevel) :
+	CParticle(position, drawlevel), initialPos(position), maxTTL(maxTTL), nextSmokeTicks(0),
+	age(0), height(0.f)
 {
 	float radians = deg2rad(MyRand() % 360);
 	direction.x = cos(radians);
@@ -59,20 +60,31 @@ CChunkParticle::CChunkParticle(CPosition position, Animation *smokeAnimation, An
 	this->initialVelocity = this->minVelocity + MyRand() % (this->maxVelocity - this->minVelocity + 1);
 	this->trajectoryAngle = deg2rad(MyRand() % (90 - this->minTrajectoryAngle) + this->minTrajectoryAngle);
 	this->lifetime = (int)(1000 * (initialVelocity * sin(trajectoryAngle) / gravity) * 2);
+	if (maxTTL) {
+		this->lifetime = std::min(maxTTL, this->lifetime);
+	}
 
 	this->smokeAnimation = smokeAnimation->clone();
 	this->debrisAnimation = debrisAnimation->clone();
+	this->destroyAnimation = destroyAnimation->clone();
 }
 
 CChunkParticle::~CChunkParticle()
 {
 	delete debrisAnimation;
 	delete smokeAnimation;
+	delete destroyAnimation;
 }
 
 static float calculateScreenPos(float posy, float height)
 {
 	return posy - height * 0.2f;
+}
+
+
+bool CChunkParticle::isVisible(const CViewport &vp) const
+{
+	return debrisAnimation && debrisAnimation->isVisible(vp, pos);
 }
 
 void CChunkParticle::draw()
@@ -97,6 +109,13 @@ void CChunkParticle::update(int ticks)
 {
 	age += ticks;
 	if (age >= lifetime) {
+		if (destroyAnimation) {
+			CPosition p(pos.x, calculateScreenPos(pos.y, height));
+			GraphicAnimation *destroyanimation = destroyAnimation->clone();
+			StaticParticle *destroy = new StaticParticle(p, destroyanimation, destroyDrawLevel);
+			ParticleManager.add(destroy);
+		}
+
 		destroy();
 		return;
 	}
@@ -106,8 +125,8 @@ void CChunkParticle::update(int ticks)
 
 	if (age > nextSmokeTicks) {
 		CPosition p(pos.x, calculateScreenPos(pos.y, height));
-		Animation *smokeanimation = smokeAnimation->clone();
-		CSmokeParticle *smoke = new CSmokeParticle(p, smokeanimation);
+		GraphicAnimation *smokeanimation = smokeAnimation->clone();
+		CSmokeParticle *smoke = new CSmokeParticle(p, smokeanimation, 0, -22.0f, smokeDrawLevel);
 		ParticleManager.add(smoke);
 
 		nextSmokeTicks += MyRand() % randSmokeTicks + minSmokeTicks;
@@ -115,7 +134,7 @@ void CChunkParticle::update(int ticks)
 
 	debrisAnimation->update(ticks);
 	if (debrisAnimation->isFinished()) {
-		Animation *debrisanimation = debrisAnimation->clone();
+		GraphicAnimation *debrisanimation = debrisAnimation->clone();
 		delete debrisAnimation;
 		debrisAnimation = debrisanimation;
 	}
@@ -132,7 +151,10 @@ void CChunkParticle::update(int ticks)
 
 CParticle *CChunkParticle::clone()
 {
-	return new CChunkParticle(pos, smokeAnimation, debrisAnimation, minVelocity, maxVelocity, minTrajectoryAngle);
+	CChunkParticle *particle = new CChunkParticle(pos, smokeAnimation, debrisAnimation, destroyAnimation, minVelocity, maxVelocity, minTrajectoryAngle, maxTTL, drawLevel);
+	particle->smokeDrawLevel = smokeDrawLevel;
+	particle->destroyDrawLevel = destroyDrawLevel;
+	return particle;
 }
 
 //@}

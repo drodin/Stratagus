@@ -39,6 +39,8 @@
 
 #include "unit.h"
 
+#include <stdio.h>
+
 /* virtual */ void CAnimation_Die::Action(CUnit &unit, int &/*move*/, int /*scale*/) const
 {
 	Assert(unit.Anim.Anim == this);
@@ -52,7 +54,7 @@
 	throw AnimationDie_Exception();
 }
 
-/* virtual */ void CAnimation_Die::Init(const char *s)
+/* virtual */ void CAnimation_Die::Init(const char *s, lua_State *)
 {
 	this->DeathType = s;
 }

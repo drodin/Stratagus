@@ -10,7 +10,7 @@
 //
 /**@name script_unit.cpp - The unit ccl functions. */
 //
-//      (c) Copyright 2001-2005 by Lutz Sammer and Jimmy Salmon
+//      (c) Copyright 2001-2015 by Lutz Sammer, Jimmy Salmon and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -40,6 +40,7 @@
 #include "animation.h"
 #include "commands.h"
 #include "construct.h"
+#include "interface.h"
 #include "map.h"
 #include "pathfinder.h"
 #include "player.h"
@@ -125,7 +126,16 @@ static int CclResourcesMultiBuildersMultiplier(lua_State *l)
 */
 static CUnit *CclGetUnit(lua_State *l)
 {
-	return &UnitManager.GetSlotUnit((int)LuaToNumber(l, -1));
+	int num = LuaToNumber(l, -1);
+	if (num == -1) {
+		if (!Selected.empty()) {
+			return Selected[0];
+		} else if (UnitUnderCursor) {
+			return UnitUnderCursor;
+		}
+		return NULL;
+	}
+	return &UnitManager.GetSlotUnit(num);
 }
 
 /**
@@ -147,13 +157,11 @@ CUnit *CclGetUnitFromRef(lua_State *l)
 bool COrder::ParseGenericData(lua_State *l, int &j, const char *value)
 {
 	if (!strcmp(value, "finished")) {
-		lua_rawgeti(l, -1, j + 1);
 		this->Finished = true;
-		lua_pop(l, 1);
 	} else if (!strcmp(value, "goal")) {
 		++j;
 		lua_rawgeti(l, -1, j + 1);
-		this->Goal = CclGetUnitFromRef(l);
+		this->SetGoal(CclGetUnitFromRef(l));
 		lua_pop(l, 1);
 	} else {
 		return false;
@@ -170,9 +178,7 @@ void PathFinderInput::Load(lua_State *l)
 	}
 	const int args = 1 + lua_rawlen(l, -1);
 	for (int i = 1; i < args; ++i) {
-		lua_rawgeti(l, -1, i);
-		const char *tag = LuaToString(l, -1);
-		lua_pop(l, 1);
+		const char *tag = LuaToString(l, -1, i);
 		++i;
 		if (!strcmp(tag, "unit-size")) {
 			lua_rawgeti(l, -1, i);
@@ -187,13 +193,9 @@ void PathFinderInput::Load(lua_State *l)
 			CclGetPos(l, &this->goalSize.x, &this->goalSize.y);
 			lua_pop(l, 1);
 		} else if (!strcmp(tag, "minrange")) {
-			lua_rawgeti(l, -1, i);
-			this->minRange = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			this->minRange = LuaToNumber(l, -1, i);
 		} else if (!strcmp(tag, "maxrange")) {
-			lua_rawgeti(l, -1, i);
-			this->maxRange = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			this->maxRange = LuaToNumber(l, -1, i);
 		} else if (!strcmp(tag, "invalid")) {
 			this->isRecalculatePathNeeded = true;
 			--i;
@@ -211,14 +213,10 @@ void PathFinderOutput::Load(lua_State *l)
 	}
 	const int args = 1 + lua_rawlen(l, -1);
 	for (int i = 1; i < args; ++i) {
-		lua_rawgeti(l, -1, i);
-		const char *tag = LuaToString(l, -1);
-		lua_pop(l, 1);
+		const char *tag = LuaToString(l, -1, i);
 		++i;
 		if (!strcmp(tag, "cycles")) {
-			lua_rawgeti(l, -1, i);
-			this->Cycles = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			this->Cycles = LuaToNumber(l, -1, i);
 		} else if (!strcmp(tag, "fast")) {
 			this->Fast = 1;
 			--i;
@@ -229,9 +227,7 @@ void PathFinderOutput::Load(lua_State *l)
 			}
 			const int subargs = lua_rawlen(l, -1);
 			for (int k = 0; k < subargs; ++k) {
-				lua_rawgeti(l, -1, k + 1);
-				this->Path[k] = LuaToNumber(l, -1);
-				lua_pop(l, 1);
+				this->Path[k] = LuaToNumber(l, -1, k + 1);
 			}
 			this->Length = subargs;
 			lua_pop(l, 1);
@@ -292,23 +288,15 @@ static int CclUnit(lua_State *l)
 	// Parse the list:
 	const int args = lua_rawlen(l, 2);
 	for (int j = 0; j < args; ++j) {
-		lua_rawgeti(l, 2, j + 1);
-		const char *value = LuaToString(l, -1);
-		lua_pop(l, 1);
+		const char *value = LuaToString(l, 2, j + 1);
 		++j;
 
 		if (!strcmp(value, "type")) {
-			lua_rawgeti(l, 2, j + 1);
-			type = UnitTypeByIdent(LuaToString(l, -1));
-			lua_pop(l, 1);
+			type = UnitTypeByIdent(LuaToString(l, 2, j + 1));
 		} else if (!strcmp(value, "seen-type")) {
-			lua_rawgeti(l, 2, j + 1);
-			seentype = UnitTypeByIdent(LuaToString(l, -1));
-			lua_pop(l, 1);
+			seentype = UnitTypeByIdent(LuaToString(l, 2, j + 1));
 		} else if (!strcmp(value, "player")) {
-			lua_rawgeti(l, 2, j + 1);
-			player = &Players[(int)LuaToNumber(l, -1)];
-			lua_pop(l, 1);
+			player = &Players[LuaToNumber(l, 2, j + 1)];
 
 			// During a unit's death animation (when action is "die" but the
 			// unit still has its original type, i.e. it's still not a corpse)
@@ -328,37 +316,25 @@ static int CclUnit(lua_State *l)
 			unit->Removed = 0;
 			Assert(UnitNumber(*unit) == slot);
 		} else if (!strcmp(value, "current-sight-range")) {
-			lua_rawgeti(l, 2, j + 1);
-			unit->CurrentSightRange = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			unit->CurrentSightRange = LuaToNumber(l, 2, j + 1);
 		} else if (!strcmp(value, "refs")) {
-			lua_rawgeti(l, 2, j + 1);
-			unit->Refs = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			unit->Refs = LuaToNumber(l, 2, j + 1);
 		} else if (!strcmp(value, "host-info")) {
-			int w;
-			int h;
-
 			lua_rawgeti(l, 2, j + 1);
 			if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 4) {
 				LuaError(l, "incorrect argument");
 			}
 			Vec2i pos;
-			lua_rawgeti(l, -1, 1);
-			pos.x = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, -1, 2);
-			pos.y = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, -1, 3);
-			w = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, -1, 4);
-			h = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			int w;
+			int h;
+
+			pos.x = LuaToNumber(l, -1, 1);
+			pos.y = LuaToNumber(l, -1, 2);
+			w = LuaToNumber(l, -1, 3);
+			h = LuaToNumber(l, -1, 4);
 			MapSight(*player, pos, w, h, unit->CurrentSightRange, MapMarkTileSight);
 			// Detectcloak works in container
-			if (unit->Type->DetectCloak) {
+			if (unit->Type->BoolFlag[DETECTCLOAK_INDEX].value) {
 				MapSight(*player, pos, w, h, unit->CurrentSightRange, MapMarkTileDetectCloak);
 			}
 			// Radar(Jammer) not.
@@ -367,15 +343,13 @@ static int CclUnit(lua_State *l)
 			lua_rawgeti(l, 2, j + 1);
 			CclGetPos(l, &unit->tilePos.x , &unit->tilePos.y, -1);
 			lua_pop(l, 1);
-			unit->Offset = Map.getIndex(unit->tilePos.x, unit->tilePos.y);
+			unit->Offset = Map.getIndex(unit->tilePos);
 		} else if (!strcmp(value, "seen-tile")) {
 			lua_rawgeti(l, 2, j + 1);
 			CclGetPos(l, &unit->Seen.tilePos.x , &unit->Seen.tilePos.y, -1);
 			lua_pop(l, 1);
 		} else if (!strcmp(value, "stats")) {
-			lua_rawgeti(l, 2, j + 1);
-			unit->Stats = &type->Stats[(int)LuaToNumber(l, -1)];
-			lua_pop(l, 1);
+			unit->Stats = &type->Stats[LuaToNumber(l, 2, j + 1)];
 		} else if (!strcmp(value, "pixel")) {
 			lua_rawgeti(l, 2, j + 1);
 			CclGetPos(l, &unit->IX , &unit->IY, -1);
@@ -385,29 +359,19 @@ static int CclUnit(lua_State *l)
 			CclGetPos(l, &unit->Seen.IX , &unit->Seen.IY, -1);
 			lua_pop(l, 1);
 		} else if (!strcmp(value, "frame")) {
-			lua_rawgeti(l, 2, j + 1);
-			unit->Frame = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			unit->Frame = LuaToNumber(l, 2, j + 1);
 		} else if (!strcmp(value, "seen")) {
-			lua_rawgeti(l, 2, j + 1);
-			unit->Seen.Frame = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			unit->Seen.Frame = LuaToNumber(l, 2, j + 1);
 		} else if (!strcmp(value, "not-seen")) {
 			unit->Seen.Frame = UnitNotSeen;
 			--j;
 		} else if (!strcmp(value, "direction")) {
-			lua_rawgeti(l, 2, j + 1);
-			unit->Direction = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			unit->Direction = LuaToNumber(l, 2, j + 1);
 		} else if (!strcmp(value, "damage-type")) {
-			lua_rawgeti(l, 2, j + 1);
-			unit->DamagedType = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			unit->DamagedType = LuaToNumber(l, 2, j + 1);
 		} else if (!strcmp(value, "attacked")) {
-			lua_rawgeti(l, 2, j + 1);
 			// FIXME : unsigned long should be better handled
-			unit->Attacked = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			unit->Attacked = LuaToNumber(l, 2, j + 1);
 		} else if (!strcmp(value, "auto-repair")) {
 			unit->AutoRepair = 1;
 			--j;
@@ -423,14 +387,19 @@ static int CclUnit(lua_State *l)
 		} else if (!strcmp(value, "selected")) {
 			unit->Selected = 1;
 			--j;
+		} else if (!strcmp(value, "summoned")) {
+			unit->Summoned = 1;
+			--j;
+		} else if (!strcmp(value, "waiting")) {
+			unit->Waiting = 1;
+			--j;
+		} else if (!strcmp(value, "mine-low")) {
+			unit->MineLow = 1;
+			--j;
 		} else if (!strcmp(value, "rescued-from")) {
-			lua_rawgeti(l, 2, j + 1);
-			unit->RescuedFrom = &Players[(int)LuaToNumber(l, -1)];
-			lua_pop(l, 1);
+			unit->RescuedFrom = &Players[LuaToNumber(l, 2, j + 1)];
 		} else if (!strcmp(value, "seen-by-player")) {
-			lua_rawgeti(l, 2, j + 1);
-			const char *s = LuaToString(l, -1);
-			lua_pop(l, 1);
+			const char *s = LuaToString(l, 2, j + 1);
 			unit->Seen.ByPlayer = 0;
 			for (int i = 0; i < PlayerMax && *s; ++i, ++s) {
 				if (*s == '-' || *s == '_' || *s == ' ') {
@@ -440,9 +409,7 @@ static int CclUnit(lua_State *l)
 				}
 			}
 		} else if (!strcmp(value, "seen-destroyed")) {
-			lua_rawgeti(l, 2, j + 1);
-			const char *s = LuaToString(l, -1);
-			lua_pop(l, 1);
+			const char *s = LuaToString(l, 2, j + 1);
 			unit->Seen.Destroyed = 0;
 			for (int i = 0; i < PlayerMax && *s; ++i, ++s) {
 				if (*s == '-' || *s == '_' || *s == ' ') {
@@ -458,34 +425,22 @@ static int CclUnit(lua_State *l)
 			unit->Seen.Constructed = 1;
 			--j;
 		} else if (!strcmp(value, "seen-state")) {
-			lua_rawgeti(l, 2, j + 1);
-			unit->Seen.State = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			unit->Seen.State = LuaToNumber(l, 2, j + 1);
 		} else if (!strcmp(value, "active")) {
 			unit->Active = 1;
 			--j;
 		} else if (!strcmp(value, "ttl")) {
-			lua_rawgeti(l, 2, j + 1);
 			// FIXME : unsigned long should be better handled
-			unit->TTL = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			unit->TTL = LuaToNumber(l, 2, j + 1);
 		} else if (!strcmp(value, "threshold")) {
-			lua_rawgeti(l, 2, j + 1);
 			// FIXME : unsigned long should be better handled
-			unit->Threshold = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			unit->Threshold = LuaToNumber(l, 2, j + 1);
 		} else if (!strcmp(value, "group-id")) {
-			lua_rawgeti(l, 2, j + 1);
-			unit->GroupId = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			unit->GroupId = LuaToNumber(l, 2, j + 1);
 		} else if (!strcmp(value, "last-group")) {
-			lua_rawgeti(l, 2, j + 1);
-			unit->LastGroup = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			unit->LastGroup = LuaToNumber(l, 2, j + 1);
 		} else if (!strcmp(value, "resources-held")) {
-			lua_rawgeti(l, 2, j + 1);
-			unit->ResourcesHeld = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			unit->ResourcesHeld = LuaToNumber(l, 2, j + 1);
 		} else if (!strcmp(value, "current-resource")) {
 			lua_rawgeti(l, 2, j + 1);
 			lua_pushvalue(l, -1);
@@ -502,17 +457,17 @@ static int CclUnit(lua_State *l)
 			unit->pathFinderData->output.Load(l);
 			lua_pop(l, 1);
 		} else if (!strcmp(value, "wait")) {
-			lua_rawgeti(l, 2, j + 1);
-			unit->Wait = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			unit->Wait = LuaToNumber(l, 2, j + 1);
 		} else if (!strcmp(value, "anim-data")) {
 			lua_rawgeti(l, 2, j + 1);
 			CAnimations::LoadUnitAnim(l, *unit, -1);
 			lua_pop(l, 1);
-		} else if (!strcmp(value, "blink")) {
+		} else if (!strcmp(value, "wait-anim-data")) {
 			lua_rawgeti(l, 2, j + 1);
-			unit->Blink = LuaToNumber(l, -1);
+			CAnimations::LoadWaitUnitAnim(l, *unit, -1);
 			lua_pop(l, 1);
+		} else if (!strcmp(value, "blink")) {
+			unit->Blink = LuaToNumber(l, 2, j + 1);
 		} else if (!strcmp(value, "moving")) {
 			unit->Moving = 1;
 			--j;
@@ -542,14 +497,8 @@ static int CclUnit(lua_State *l)
 			lua_pushvalue(l, -1);
 			unit->Resource.Active = LuaToNumber(l, -1);
 			lua_pop(l, 1);
-		} else if (!strcmp(value, "rs")) {
-			lua_rawgeti(l, 2, j + 1);
-			unit->Rs = LuaToNumber(l, -1);
-			lua_pop(l, 1);
 		} else if (!strcmp(value, "units-boarded-count")) {
-			lua_rawgeti(l, 2, j + 1);
-			unit->BoardCount = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			unit->BoardCount = LuaToNumber(l, 2, j + 1);
 		} else if (!strcmp(value, "units-contained")) {
 			int subargs;
 			int k;
@@ -577,6 +526,9 @@ static int CclUnit(lua_State *l)
 				DebugPrint("HACK: the building is not ready yet\n");
 				// HACK: the building is not ready yet
 				unit->Player->UnitTypesCount[type->Slot]--;
+				if (unit->Active) {
+					unit->Player->UnitTypesAiActiveCount[type->Slot]--;
+				}
 			}
 		} else if (!strcmp(value, "critical-order")) {
 			lua_rawgeti(l, 2, j + 1);
@@ -594,18 +546,27 @@ static int CclUnit(lua_State *l)
 			CclParseOrder(l, *unit, &unit->NewOrder);
 			lua_pop(l, 1);
 		} else if (!strcmp(value, "goal")) {
-			lua_rawgeti(l, 2, j + 1);
-			unit->Goal = &UnitManager.GetSlotUnit(LuaToNumber(l, -1));
-			lua_pop(l, 1);
+			unit->Goal = &UnitManager.GetSlotUnit(LuaToNumber(l, 2, j + 1));
 		} else if (!strcmp(value, "auto-cast")) {
-			lua_rawgeti(l, 2, j + 1);
-			const char *s = LuaToString(l, -1);
+			const char *s = LuaToString(l, 2, j + 1);
 			Assert(SpellTypeByIdent(s));
 			if (!unit->AutoCastSpell) {
 				unit->AutoCastSpell = new char[SpellTypeTable.size()];
 				memset(unit->AutoCastSpell, 0, SpellTypeTable.size());
 			}
 			unit->AutoCastSpell[SpellTypeByIdent(s)->Slot] = 1;
+		} else if (!strcmp(value, "spell-cooldown")) {
+			lua_rawgeti(l, 2, j + 1);
+			if (!lua_istable(l, -1) || lua_rawlen(l, -1) != SpellTypeTable.size()) {
+				LuaError(l, "incorrect argument");
+			}
+			if (!unit->SpellCoolDownTimers) {
+				unit->SpellCoolDownTimers = new int[SpellTypeTable.size()];
+				memset(unit->SpellCoolDownTimers, 0, SpellTypeTable.size() * sizeof(int));
+			}
+			for (size_t k = 0; k < SpellTypeTable.size(); ++k) {
+				unit->SpellCoolDownTimers[k] = LuaToNumber(l, -1, k + 1);
+			}
 			lua_pop(l, 1);
 		} else {
 			const int index = UnitTypeVar.VariableNameLookup[value];// User variables
@@ -631,7 +592,7 @@ static int CclUnit(lua_State *l)
 	}
 
 	//  Revealers are units that can see while removed
-	if (unit->Removed && unit->Type->Revealer) {
+	if (unit->Removed && unit->Type->BoolFlag[REVEALER_INDEX].value) {
 		MapMarkUnitSight(*unit);
 	}
 
@@ -659,13 +620,7 @@ static int CclMoveUnit(lua_State *l)
 	lua_pop(l, 1);
 
 	Vec2i ipos;
-
-	lua_rawgeti(l, 2, 1);
-	ipos.x = LuaToNumber(l, -1);
-	lua_pop(l, 1);
-	lua_rawgeti(l, 2, 2);
-	ipos.y = LuaToNumber(l, -1);
-	lua_pop(l, 1);
+	CclGetPos(l, &ipos.x, &ipos.y, 2);
 
 	if (UnitCanBeAt(*unit, ipos)) {
 		unit->Place(ipos);
@@ -675,6 +630,25 @@ static int CclMoveUnit(lua_State *l)
 		unit->tilePos = ipos;
 		DropOutOnSide(*unit, heading, NULL);
 	}
+	lua_pushvalue(l, 1);
+	return 1;
+}
+
+/**
+**  Remove unit from the map.
+**
+**  @param l  Lua state.
+**
+**  @return   Returns 1.
+*/
+static int CclRemoveUnit(lua_State *l)
+{
+	LuaCheckArgs(l, 1);
+	lua_pushvalue(l, 1);
+	CUnit *unit = CclGetUnit(l);
+	lua_pop(l, 1);
+	unit->Remove(NULL);
+	LetUnitDie(*unit);
 	lua_pushvalue(l, 1);
 	return 1;
 }
@@ -696,16 +670,8 @@ static int CclCreateUnit(lua_State *l)
 		LuaError(l, "Bad unittype");
 	}
 	lua_pop(l, 1);
-	if (!lua_istable(l, 3) || lua_rawlen(l, 3) != 2) {
-		LuaError(l, "incorrect argument !!");
-	}
-	lua_rawgeti(l, 3, 1);
 	Vec2i ipos;
-	ipos.x = LuaToNumber(l, -1);
-	lua_pop(l, 1);
-	lua_rawgeti(l, 3, 2);
-	ipos.y = LuaToNumber(l, -1);
-	lua_pop(l, 1);
+	CclGetPos(l, &ipos.x, &ipos.y, 3);
 
 	lua_pushvalue(l, 2);
 	const int playerno = TriggerGetPlayer(l);
@@ -742,6 +708,51 @@ static int CclCreateUnit(lua_State *l)
 }
 
 /**
+**  'Upgrade' a unit in place to a unit of different type.
+**
+**  @param l  Lua state.
+**
+**  @return   Returns success.
+*/
+static int CclTransformUnit(lua_State *l)
+{
+	lua_pushvalue(l, 1);
+	CUnit *targetUnit = CclGetUnit(l);
+	lua_pop(l, 1);
+	lua_pushvalue(l, 2);
+	const CUnitType *unittype = TriggerGetUnitType(l);
+	lua_pop(l, 1);
+	CommandUpgradeTo(*targetUnit, *(CUnitType*)unittype, 1);
+	lua_pushvalue(l, 1);
+	return 1;
+}
+
+/**
+**  Damages unit, additionally using another unit as first's attacker
+**
+**  @param l  Lua state.
+**
+**  @return   Returns the slot number of the made unit.
+*/
+static int CclDamageUnit(lua_State *l)
+{
+	LuaCheckArgs(l, 3);
+
+	const int attacker = LuaToNumber(l, 1);
+	CUnit *attackerUnit = NULL;
+	if (attacker != -1) {
+		attackerUnit = &UnitManager.GetSlotUnit(attacker);
+	}
+	lua_pushvalue(l, 2);
+	CUnit *targetUnit = CclGetUnit(l);
+	lua_pop(l, 1);
+	const int damage = LuaToNumber(l, 3);
+	HitUnit(attackerUnit, *targetUnit, damage);
+
+	return 1;
+}
+
+/**
 **  Set resources held by a unit
 **
 **  @param l  Lua state.
@@ -759,6 +770,34 @@ static int CclSetResourcesHeld(lua_State *l)
 	lua_pop(l, 1);
 	const int value = LuaToNumber(l, 2);
 	unit->ResourcesHeld = value;
+	unit->Variable[GIVERESOURCE_INDEX].Value = value;
+	unit->Variable[GIVERESOURCE_INDEX].Max = value;
+	unit->Variable[GIVERESOURCE_INDEX].Enable = 1;
+
+	return 0;
+}
+
+/**
+**  Set teleport deastination for teleporter unit
+**
+**  @param l  Lua state.
+*/
+static int CclSetTeleportDestination(lua_State *l)
+{
+	LuaCheckArgs(l, 2);
+
+	lua_pushvalue(l, 1);
+	CUnit *unit = CclGetUnit(l);
+	lua_pop(l, 1);
+	if (unit->Type->BoolFlag[TELEPORTER_INDEX].value == false) {
+		LuaError(l, "Unit not a teleporter");
+	}
+	lua_pushvalue(l, 2);
+	CUnit *dest = CclGetUnit(l);
+	lua_pop(l, 1);
+	if (dest->IsAliveOnMap()) {
+		unit->Goal = dest;
+	}
 
 	return 0;
 }
@@ -783,22 +822,14 @@ static int CclOrderUnit(lua_State *l)
 	if (!lua_istable(l, 3)) {
 		LuaError(l, "incorrect argument");
 	}
-	lua_rawgeti(l, 3, 1);
 	Vec2i pos1;
-	pos1.x = LuaToNumber(l, -1);
-	lua_pop(l, 1);
-	lua_rawgeti(l, 3, 2);
-	pos1.y = LuaToNumber(l, -1);
-	lua_pop(l, 1);
+	pos1.x = LuaToNumber(l, 3, 1);
+	pos1.y = LuaToNumber(l, 3, 2);
 
 	Vec2i pos2;
 	if (lua_rawlen(l, 3) == 4) {
-		lua_rawgeti(l, 3, 3);
-		pos2.x = LuaToNumber(l, -1);
-		lua_pop(l, 1);
-		lua_rawgeti(l, 3, 4);
-		pos2.y = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		pos2.x = LuaToNumber(l, 3, 3);
+		pos2.y = LuaToNumber(l, 3, 4);
 	} else {
 		pos2 = pos1;
 	}
@@ -807,19 +838,11 @@ static int CclOrderUnit(lua_State *l)
 	}
 	Vec2i dpos1;
 	Vec2i dpos2;
-	lua_rawgeti(l, 4, 1);
-	dpos1.x = LuaToNumber(l, -1);
-	lua_pop(l, 1);
-	lua_rawgeti(l, 4, 2);
-	dpos1.y = LuaToNumber(l, -1);
-	lua_pop(l, 1);
+	dpos1.x = LuaToNumber(l, 4, 1);
+	dpos1.y = LuaToNumber(l, 4, 2);
 	if (lua_rawlen(l, 4) == 4) {
-		lua_rawgeti(l, 4, 3);
-		dpos2.x = LuaToNumber(l, -1);
-		lua_pop(l, 1);
-		lua_rawgeti(l, 4, 4);
-		dpos2.y = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		dpos2.x = LuaToNumber(l, 4, 3);
+		dpos2.y = LuaToNumber(l, 4, 4);
 	} else {
 		dpos2 = dpos1;
 	}
@@ -855,7 +878,8 @@ class HasSameUnitTypeAs
 {
 public:
 	explicit HasSameUnitTypeAs(const CUnitType *_type) : type(_type) {}
-	bool operator()(const CUnit *unit) const {
+	bool operator()(const CUnit *unit) const
+	{
 		return (type == ANY_UNIT || type == unit->Type
 				|| (type == ALL_FOODUNITS && !unit->Type->Building)
 				|| (type == ALL_BUILDINGS && unit->Type->Building));
@@ -911,47 +935,38 @@ static int CclKillUnit(lua_State *l)
 */
 static int CclKillUnitAt(lua_State *l)
 {
-	LuaCheckArgs(l, 2);
+	LuaCheckArgs(l, 5);
 
+	lua_pushvalue(l, 1);
+	const CUnitType *unittype = TriggerGetUnitType(l);
+	lua_pop(l, 1);
 	lua_pushvalue(l, 2);
 	int plynr = TriggerGetPlayer(l);
 	lua_pop(l, 1);
 	int q = LuaToNumber(l, 3);
-	lua_pushvalue(l, 1);
-	const CUnitType *unittype = TriggerGetUnitType(l);
-	lua_pop(l, 1);
-	if (!lua_istable(l, 4)) {
+
+	if (!lua_istable(l, 4) || !lua_istable(l, 5)) {
 		LuaError(l, "incorrect argument");
 	}
 	Vec2i pos1;
 	Vec2i pos2;
-	lua_rawgeti(l, 4, 1);
-	pos1.x = LuaToNumber(l, -1);
-	lua_pop(l, 1);
-	lua_rawgeti(l, 4, 2);
-	pos1.y = LuaToNumber(l, -1);
-	lua_pop(l, 1);
-	lua_rawgeti(l, 4, 3);
-	pos2.x = LuaToNumber(l, -1);
-	lua_pop(l, 1);
-	lua_rawgeti(l, 4, 4);
-	pos2.y = LuaToNumber(l, -1);
-	lua_pop(l, 1);
+	CclGetPos(l, &pos1.x, &pos1.y, 4);
+	CclGetPos(l, &pos2.x, &pos2.y, 5);
 
 	std::vector<CUnit *> table;
 
 	Select(pos1, pos2, table);
 
 	int s = 0;
-	for (size_t j = 0; j < table.size() && s < q; ++j) {
-		CUnit *unit = table[j];
+	for (std::vector<CUnit *>::iterator it = table.begin(); it != table.end() && s < q; ++it) {
+		CUnit &unit = **it;
 
 		if (unittype == ANY_UNIT
-			|| (unittype == ALL_FOODUNITS && !unit->Type->Building)
-			|| (unittype == ALL_BUILDINGS && unit->Type->Building)
-			|| unittype == unit->Type) {
-			if (plynr == -1 || plynr == unit->Player->Index) {
-				LetUnitDie(*unit);
+			|| (unittype == ALL_FOODUNITS && !unit.Type->Building)
+			|| (unittype == ALL_BUILDINGS && unit.Type->Building)
+			|| unittype == unit.Type) {
+			if ((plynr == -1 || plynr == unit.Player->Index) && unit.IsAlive()) {
+				LetUnitDie(unit);
 				++s;
 			}
 		}
@@ -985,6 +1000,44 @@ static int CclGetUnits(lua_State *l)
 		for (int i = 0; i < Players[plynr].GetUnitCount(); ++i) {
 			lua_pushnumber(l, UnitNumber(Players[plynr].GetUnit(i)));
 			lua_rawseti(l, -2, i + 1);
+		}
+	}
+	return 1;
+}
+
+/**
+**  Get a player's units in rectangle box specified with 2 coordinates
+**
+**  @param l  Lua state.
+**
+**  @return   Array of units.
+*/
+static int CclGetUnitsAroundUnit(lua_State *l)
+{
+	const int nargs = lua_gettop(l);
+	if (nargs != 2 && nargs != 3) {
+		LuaError(l, "incorrect argument\n");
+	}
+
+	const int slot = LuaToNumber(l, 1);
+	const CUnit &unit = UnitManager.GetSlotUnit(slot);
+	const int range = LuaToNumber(l, 2);
+	bool allUnits = false;
+	if (nargs == 3) {
+		allUnits = LuaToBoolean(l, 3);
+	}
+	lua_newtable(l);
+	std::vector<CUnit *> table;
+	if (allUnits) {
+		SelectAroundUnit(unit, range, table, HasNotSamePlayerAs(Players[PlayerNumNeutral]));
+	} else {
+		SelectAroundUnit(unit, range, table, HasSamePlayerAs(*unit.Player));
+	}
+	size_t n = 0;
+	for (size_t i = 0; i < table.size(); ++i) {
+		if (table[i]->IsAliveOnMap()) {
+			lua_pushnumber(l, UnitNumber(*table[i]));
+			lua_rawseti(l, -2, ++n);
 		}
 	}
 	return 1;
@@ -1028,18 +1081,43 @@ static int CclGetUnitVariable(lua_State *l)
 	Assert(nargs == 2 || nargs == 3);
 
 	lua_pushvalue(l, 1);
-	const CUnit *unit = CclGetUnit(l);
+	CUnit *unit = CclGetUnit(l);
+	if (unit == NULL) {
+		return 1;
+	}
+	UpdateUnitVariables(*unit);
 	lua_pop(l, 1);
 
 	const char *const value = LuaToString(l, 2);
 	if (!strcmp(value, "RegenerationRate")) {
 		lua_pushnumber(l, unit->Variable[HP_INDEX].Increase);
-	} else if (!strcmp(value, "Player")) {
-		lua_pushnumber(l, unit->Player->Index);
 	} else if (!strcmp(value, "Ident")) {
 		lua_pushstring(l, unit->Type->Ident.c_str());
 	} else if (!strcmp(value, "ResourcesHeld")) {
 		lua_pushnumber(l, unit->ResourcesHeld);
+	} else if (!strcmp(value, "GiveResourceType")) {
+		lua_pushnumber(l, unit->Type->GivesResource);
+	} else if (!strcmp(value, "CurrentResource")) {
+		lua_pushnumber(l, unit->CurrentResource);
+	} else if (!strcmp(value, "Name")) {
+		lua_pushstring(l, unit->Type->Name.c_str());
+	} else if (!strcmp(value, "PlayerType")) {
+		lua_pushinteger(l, unit->Player->Type);
+	} else if (!strcmp(value, "IndividualUpgrade")) {
+		LuaCheckArgs(l, 3);
+		std::string upgrade_ident = LuaToString(l, 3);
+		if (CUpgrade::Get(upgrade_ident)) {
+			lua_pushboolean(l, unit->IndividualUpgrades[CUpgrade::Get(upgrade_ident)->ID]);
+		} else {
+			LuaError(l, "Individual upgrade \"%s\" doesn't exist." _C_ upgrade_ident.c_str());
+		}
+		return 1;
+	} else if (!strcmp(value, "Active")) {
+		lua_pushboolean(l, unit->Active);
+		return 1;
+	} else if (!strcmp(value, "Idle")) {
+		lua_pushboolean(l, unit->IsIdle());
+		return 1;
 	} else {
 		int index = UnitTypeVar.VariableNameLookup[value];// User variables
 		if (index == -1) {
@@ -1075,40 +1153,74 @@ static int CclGetUnitVariable(lua_State *l)
 static int CclSetUnitVariable(lua_State *l)
 {
 	const int nargs = lua_gettop(l);
-	Assert(nargs == 3 || nargs == 4);
+	Assert(nargs >= 3 && nargs <= 5);
 
 	lua_pushvalue(l, 1);
 	CUnit *unit = CclGetUnit(l);
 	lua_pop(l, 1);
 	const char *const name = LuaToString(l, 2);
-	int value;
-	if (!strcmp(name, "RegenerationRate")) {
+	int value = 0;
+	if (!strcmp(name, "Player")) {
 		value = LuaToNumber(l, 3);
-		if (value > unit->Variable[HP_INDEX].Max) {
-			unit->Stats->Variables[HP_INDEX].Increase = unit->Variable[HP_INDEX].Max;
+		unit->AssignToPlayer(Players[value]);
+	} else if (!strcmp(name, "RegenerationRate")) {
+		value = LuaToNumber(l, 3);
+		unit->Variable[HP_INDEX].Increase = std::min(unit->Variable[HP_INDEX].Max, value);
+	} else if (!strcmp(name, "IndividualUpgrade")) {
+		LuaCheckArgs(l, 4);
+		std::string upgrade_ident = LuaToString(l, 3);
+		bool has_upgrade = LuaToBoolean(l, 4);
+		if (CUpgrade::Get(upgrade_ident)) {
+			if (has_upgrade && unit->IndividualUpgrades[CUpgrade::Get(upgrade_ident)->ID] == false) {
+				IndividualUpgradeAcquire(*unit, CUpgrade::Get(upgrade_ident));
+			} else if (!has_upgrade && unit->IndividualUpgrades[CUpgrade::Get(upgrade_ident)->ID]) {
+				IndividualUpgradeLost(*unit, CUpgrade::Get(upgrade_ident));
+			}
 		} else {
-			unit->Stats->Variables[HP_INDEX].Increase = value;
+			LuaError(l, "Individual upgrade \"%s\" doesn't exist." _C_ upgrade_ident.c_str());
 		}
+	} else if (!strcmp(name, "Active")) {
+		bool ai_active = LuaToBoolean(l, 3);
+		if (ai_active != unit->Active) {
+			if (ai_active) {
+				unit->Player->UnitTypesAiActiveCount[unit->Type->Slot]++;
+			} else {
+				unit->Player->UnitTypesAiActiveCount[unit->Type->Slot]--;
+				if (unit->Player->UnitTypesAiActiveCount[unit->Type->Slot] < 0) { // if unit AI active count is negative, something wrong happened
+					fprintf(stderr, "Player %d has a negative %s AI active count of %d.\n", unit->Player->Index, unit->Type->Ident.c_str(), unit->Player->UnitTypesAiActiveCount[unit->Type->Slot]);
+				}
+			}
+		}
+		unit->Active = ai_active;
 	} else {
 		const int index = UnitTypeVar.VariableNameLookup[name];// User variables
 		if (index == -1) {
 			LuaError(l, "Bad variable name '%s'\n" _C_ name);
 		}
 		value = LuaToNumber(l, 3);
-		if (nargs == 3) {
-			if (value > unit->Variable[index].Max) {
-				unit->Variable[index].Value = unit->Variable[index].Max;
+		bool stats = false;
+		if (nargs == 5) {
+			stats = LuaToBoolean(l, 5);
+		}
+		if (stats) { // stat variables
+			const char *const type = LuaToString(l, 4);
+			if (!strcmp(type, "Value")) {
+				unit->Stats->Variables[index].Value = std::min(unit->Stats->Variables[index].Max, value);
+			} else if (!strcmp(type, "Max")) {
+				unit->Stats->Variables[index].Max = value;
+			} else if (!strcmp(type, "Increase")) {
+				unit->Stats->Variables[index].Increase = value;
+			} else if (!strcmp(type, "Enable")) {
+				unit->Stats->Variables[index].Enable = value;
 			} else {
-				unit->Variable[index].Value = value;
+				LuaError(l, "Bad variable type '%s'\n" _C_ type);
 			}
+		} else if (nargs == 3) {
+			unit->Variable[index].Value = std::min(unit->Variable[index].Max, value);
 		} else {
 			const char *const type = LuaToString(l, 4);
 			if (!strcmp(type, "Value")) {
-				if (value > unit->Variable[index].Max) {
-					unit->Variable[index].Value = unit->Variable[index].Max;
-				} else {
-					unit->Variable[index].Value = value;
-				}
+				unit->Variable[index].Value = std::min(unit->Variable[index].Max, value);
 			} else if (!strcmp(type, "Max")) {
 				unit->Variable[index].Max = value;
 			} else if (!strcmp(type, "Increase")) {
@@ -1135,6 +1247,18 @@ static int CclSlotUsage(lua_State *l)
 	return 0;
 }
 
+static int CclSelectSingleUnit(lua_State *l)
+{
+	const int nargs = lua_gettop(l);
+	Assert(nargs == 1);
+	lua_pushvalue(l, 1);
+	CUnit *unit = CclGetUnit(l);
+	lua_pop(l, 1);
+	SelectSingleUnit(*unit);
+	SelectionChanged();
+	return 0;
+}
+
 /**
 **  Register CCL features for unit.
 */
@@ -1148,13 +1272,18 @@ void UnitCclRegister()
 	lua_register(Lua, "Unit", CclUnit);
 
 	lua_register(Lua, "MoveUnit", CclMoveUnit);
+	lua_register(Lua, "RemoveUnit", CclRemoveUnit);
 	lua_register(Lua, "CreateUnit", CclCreateUnit);
+	lua_register(Lua, "TransformUnit", CclTransformUnit);
+	lua_register(Lua, "DamageUnit", CclDamageUnit);
 	lua_register(Lua, "SetResourcesHeld", CclSetResourcesHeld);
+	lua_register(Lua, "SetTeleportDestination", CclSetTeleportDestination);
 	lua_register(Lua, "OrderUnit", CclOrderUnit);
 	lua_register(Lua, "KillUnit", CclKillUnit);
 	lua_register(Lua, "KillUnitAt", CclKillUnitAt);
 
 	lua_register(Lua, "GetUnits", CclGetUnits);
+	lua_register(Lua, "GetUnitsAroundUnit", CclGetUnitsAroundUnit);
 
 	// unit member access functions
 	lua_register(Lua, "GetUnitBoolFlag", CclGetUnitBoolFlag);
@@ -1162,6 +1291,8 @@ void UnitCclRegister()
 	lua_register(Lua, "SetUnitVariable", CclSetUnitVariable);
 
 	lua_register(Lua, "SlotUsage", CclSlotUsage);
+
+	lua_register(Lua, "SelectSingleUnit", CclSelectSingleUnit);
 }
 
 //@}

@@ -32,35 +32,53 @@
 
 //@{
 
-/*----------------------------------------------------------------------------
---  Includes
-----------------------------------------------------------------------------*/
-
-/*----------------------------------------------------------------------------
---  Defines
-----------------------------------------------------------------------------*/
-struct lua_State;
+#include <list>
+#include "network/netsockets.h"
 
 /*----------------------------------------------------------------------------
 --  Declarations
 ----------------------------------------------------------------------------*/
 
+struct lua_State;
+
+// Log data used in metaserver client
+struct CClientLog {
+	std::string entry;     // command itself
+};
+
+
+// Class representing meta server client structure
+class CMetaClient
+{
+public:
+	CMetaClient() : metaSocket(), metaPort(-1), lastRecvState(-1) {}
+	~CMetaClient();
+	void SetMetaServer(const std::string host, const int port);
+	int Init();
+	void Close();
+	int Send(const std::string cmd);
+	int Recv();
+	int GetLastRecvState() { return lastRecvState; }
+	int GetLogSize() { return events.size(); }
+	CClientLog *GetLastMessage() { return events.back(); }
+	int CreateGame(std::string desc, std::string map, std::string players);
+
+private:
+	CTCPSocket metaSocket;                     /// This is a TCP socket
+	std::string metaHost;                      /// Address of metaserver
+	int metaPort;                              /// Port of metaserver
+	std::list <CClientLog *> events;           /// All commands received from metaserver
+	int lastRecvState;                         /// Now many bytes have been received in last reply
+};
+
+
+
 /*----------------------------------------------------------------------------
 --  Variables
 ----------------------------------------------------------------------------*/
+// Metaserver itself
+extern CMetaClient MetaClient;
 
-extern int MetaServerInUse;
-
-extern std::string MasterHost;
-extern int MasterPort;
-
-extern int MetaInit();
-extern int MetaClose();
-extern int MetaServerOK(char *reply);
-extern int SendMetaCommand(const char *command, const char *format, ...);
-extern int RecvMetaReply(char **reply);
-extern int GetMetaParameter(char *reply, int pos, char **value);
-extern int CclSetMetaServer(lua_State *l);
 //@}
 
 #endif // !__MASTER_H__

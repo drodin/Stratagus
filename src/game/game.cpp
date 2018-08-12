@@ -10,8 +10,8 @@
 //
 /**@name game.cpp - The game set-up and creation. */
 //
-//      (c) Copyright 1998-2007 by Lutz Sammer, Andreas Arens, and
-//                                 Jimmy Salmon
+//      (c) Copyright 1998-2007 by Lutz Sammer, Andreas Arens,
+//      Jimmy Salmon and Andrettin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -56,6 +56,7 @@
 #include "missile.h"
 #include "netconnect.h"
 #include "network.h"
+#include "parameters.h"
 #include "pathfinder.h"
 #include "player.h"
 #include "replay.h"
@@ -64,6 +65,8 @@
 #include "sound.h"
 #include "sound_server.h"
 #include "spells.h"
+#include "tileset.h"
+#include "translate.h"
 #include "trigger.h"
 #include "ui.h"
 #include "unit.h"
@@ -71,6 +74,10 @@
 #include "unittype.h"
 #include "upgrade.h"
 #include "version.h"
+#include "video.h"
+
+
+extern void CleanGame();
 
 /*----------------------------------------------------------------------------
 --  Variables
@@ -83,12 +90,93 @@ GameResults GameResult;                      /// Outcome of the game
 std::string GameName;
 std::string FullGameName;
 
-bool UseHPForXp = false;              /// true if gain XP by dealing damage, false if by killing.
+unsigned long GameCycle;             /// Game simulation cycle counter
+unsigned long FastForwardCycle;      /// Cycle to fastforward to in a replay
 
+bool UseHPForXp = false;              /// true if gain XP by dealing damage, false if by killing.
 
 /*----------------------------------------------------------------------------
 --  Functions
 ----------------------------------------------------------------------------*/
+
+extern gcn::Gui *Gui;
+static std::vector<gcn::Container *> Containers;
+
+/**
+**  Save game settings.
+**
+**  @param file  Save file handle
+*/
+void SaveGameSettings(CFile &file)
+{
+	file.printf("\nGameSettings.NetGameType = %d\n", GameSettings.NetGameType);
+	for (int i = 0; i < PlayerMax - 1; ++i) {
+		file.printf("GameSettings.Presets[%d].PlayerColor = %d\n", i, GameSettings.Presets[i].PlayerColor);
+		file.printf("GameSettings.Presets[%d].AIScript = \"%s\"\n", i, GameSettings.Presets[i].AIScript.c_str());
+		file.printf("GameSettings.Presets[%d].Race = %d\n", i, GameSettings.Presets[i].Race);
+		file.printf("GameSettings.Presets[%d].Team = %d\n", i, GameSettings.Presets[i].Team);
+		file.printf("GameSettings.Presets[%d].Type = %d\n", i, GameSettings.Presets[i].Type);
+	}
+	file.printf("GameSettings.Resources = %d\n", GameSettings.Resources);
+	file.printf("GameSettings.Difficulty = %d\n", GameSettings.Difficulty);
+	file.printf("GameSettings.NumUnits = %d\n", GameSettings.NumUnits);
+	file.printf("GameSettings.Opponents = %d\n", GameSettings.Opponents);
+	file.printf("GameSettings.GameType = %d\n", GameSettings.GameType);
+	file.printf("GameSettings.NoFogOfWar = %s\n", GameSettings.NoFogOfWar ? "true" : "false");
+	file.printf("GameSettings.RevealMap = %d\n", GameSettings.RevealMap);
+	file.printf("GameSettings.MapRichness = %d\n", GameSettings.MapRichness);
+	file.printf("GameSettings.Inside = %s\n", GameSettings.Inside ? "true" : "false");
+	file.printf("\n");
+}
+
+void StartMap(const std::string &filename, bool clean)
+{
+	std::string nc, rc;
+
+	gcn::Widget *oldTop = Gui->getTop();
+	gcn::Container *container = new gcn::Container();
+	Containers.push_back(container);
+	container->setDimension(gcn::Rectangle(0, 0, Video.Width, Video.Height));
+	container->setOpaque(false);
+	Gui->setTop(container);
+
+	NetConnectRunning = 0;
+	InterfaceState = IfaceStateNormal;
+
+	//  Create the game.
+	DebugPrint("Creating game with map: %s\n" _C_ filename.c_str());
+	if (clean) {
+		CleanPlayers();
+	}
+	GetDefaultTextColors(nc, rc);
+
+	CreateGame(filename, &Map);
+
+	UI.StatusLine.Set(NameLine);
+	SetMessage("%s", _("Do it! Do it now!"));
+
+	//  Play the game.
+	GameMainLoop();
+
+	//  Clear screen
+	Video.ClearScreen();
+	Invalidate();
+
+	CleanGame();
+	InterfaceState = IfaceStateMenu;
+	SetDefaultTextColors(nc, rc);
+
+	Gui->setTop(oldTop);
+	Containers.erase(std::find(Containers.begin(), Containers.end(), container));
+	delete container;
+}
+
+void FreeAllContainers()
+{
+	for (size_t i = 0; i != Containers.size(); ++i) {
+		delete Containers[i];
+	}
+}
 
 /*----------------------------------------------------------------------------
 --  Map loading/saving
@@ -209,21 +297,56 @@ static void WriteMapPreview(const char *mapname, CMap &map)
 
 	png_write_info(png_ptr, info_ptr);
 
+	const int rectSize = 5; // size of rectange used for player start spots
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		unsigned char *pixels = new unsigned char[UI.Minimap.W * UI.Minimap.H * 3];
 		if (!pixels) {
 			fprintf(stderr, "Out of memory\n");
 			exit(1);
 		}
-#ifndef USE_GLES
-		glReadBuffer(GL_FRONT);
-#endif
-		glReadPixels(UI.Minimap.X, UI.Minimap.Y, UI.Minimap.W, UI.Minimap.H, GL_RGB, GL_UNSIGNED_BYTE, pixels);
+		// Copy GL map surface to pixel array
 		for (int i = 0; i < UI.Minimap.H; ++i) {
-			png_write_row(png_ptr, pixels + (UI.Minimap.H - 1 - i) * UI.Minimap.W * 3);
+			for (int j = 0; j < UI.Minimap.W; ++j) {
+				Uint32 c = ((Uint32 *)MinimapSurfaceGL)[j + i * UI.Minimap.W];
+				const int offset = (i * UI.Minimap.W + j) * 3;
+				pixels[offset + 0] = ((c & RMASK) >> RSHIFT);
+				pixels[offset + 1] = ((c & GMASK) >> GSHIFT);
+				pixels[offset + 2] = ((c & BMASK) >> BSHIFT);
+			}
+		}
+		// Add player start spots
+		for (int i = 0; i < PlayerMax - 1; ++i) {
+			if (Players[i].Type != PlayerNobody) {
+				for (int j = -rectSize / 2; j <= rectSize / 2; ++j) {
+					for (int k = -rectSize / 2; k <= rectSize / 2; ++k) {
+						const int miniMapX = Players[i].StartPos.x * UI.Minimap.W / map.Info.MapWidth;
+						const int miniMapY = Players[i].StartPos.y * UI.Minimap.H / map.Info.MapHeight;
+						if (miniMapX + j < 0 || miniMapX + j >= UI.Minimap.W) {
+							continue;
+						}
+						if (miniMapY + k < 0 || miniMapY + k >= UI.Minimap.H) {
+							continue;
+						}
+						const int offset = ((miniMapY + k) * UI.Minimap.H + miniMapX + j) * 3;
+						pixels[offset + 0] = ((Players[i].Color & RMASK) >> RSHIFT);
+						pixels[offset + 1] = ((Players[i].Color & GMASK) >> GSHIFT);
+						pixels[offset + 2] = ((Players[i].Color & BMASK) >> BSHIFT);
+					}
+				}
+			}
+		}
+		// Write everything in PNG
+		for (int i = 0; i < UI.Minimap.H; ++i) {
+			unsigned char *row = new unsigned char[UI.Minimap.W * 3];
+			memcpy(row, pixels + i * UI.Minimap.W * 3, UI.Minimap.W * 3);
+			png_write_row(png_ptr, row);
+			delete[] row;
 		}
 		delete[] pixels;
-	} else {
+	} else
+#endif
+	{
 		unsigned char *row = new unsigned char[UI.Minimap.W * 3];
 		const SDL_PixelFormat *fmt = MinimapSurface->format;
 		SDL_Surface *preview = SDL_CreateRGBSurface(SDL_SWSURFACE,
@@ -233,7 +356,6 @@ static void WriteMapPreview(const char *mapname, CMap &map)
 		SDL_LockSurface(preview);
 
 		SDL_Rect rect;
-		const unsigned int rectSize = 5;
 		for (int i = 0; i < PlayerMax - 1; ++i) {
 			if (Players[i].Type != PlayerNobody) {
 				rect.x = Players[i].StartPos.x * UI.Minimap.W / map.Info.MapWidth - rectSize / 2;
@@ -283,19 +405,16 @@ static void WriteMapPreview(const char *mapname, CMap &map)
 
 
 // Write the map presentation file
-static int WriteMapPresentation(const std::string &mapname, CMap &map, char *)
+static int WriteMapPresentation(const std::string &mapname, CMap &map)
 {
 	FileWriter *f = NULL;
-	int i;
-	int topplayer;
-	int numplayers;
-	//	char *mapsetupname;
+
 	const char *type[] = {"", "", "neutral", "nobody",
 						  "computer", "person", "rescue-passive", "rescue-active"
 						 };
 
-	numplayers = 0;
-	topplayer = PlayerMax - 2;
+	int numplayers = 0;
+	int topplayer = PlayerMax - 2;
 
 	try {
 		f = CreateFileWriter(mapname);
@@ -308,7 +427,7 @@ static int WriteMapPresentation(const std::string &mapname, CMap &map, char *)
 		while (topplayer > 0 && map.Info.PlayerType[topplayer] == PlayerNobody) {
 			--topplayer;
 		}
-		for (i = 0; i <= topplayer; ++i) {
+		for (int i = 0; i <= topplayer; ++i) {
 			f->printf("%s\"%s\"", (i ? ", " : ""), type[map.Info.PlayerType[i]]);
 			if (map.Info.PlayerType[i] == PlayerPerson) {
 				++numplayers;
@@ -320,11 +439,9 @@ static int WriteMapPresentation(const std::string &mapname, CMap &map, char *)
 				  map.Info.Description.c_str(), numplayers, map.Info.MapWidth, map.Info.MapHeight,
 				  map.Info.MapUID + 1);
 
-		//		mapsetupname = strrchr(mapsetup, '/');
-		//		if (!mapsetupname) {
-		//			mapsetupname = mapsetup;
-		//		}
-		//		f->printf("DefineMapSetup(GetCurrentLuaPath()..\"%s\")\n", mapsetupname);
+		if (map.Info.Filename.find(".sms") == std::string::npos && !map.Info.Filename.empty()) {
+			f->printf("DefineMapSetup(\"%s\")\n", map.Info.Filename.c_str());
+		}
 	} catch (const FileException &) {
 		fprintf(stderr, "ERROR: cannot write the map presentation\n");
 		delete f;
@@ -357,7 +474,7 @@ int WriteMapSetup(const char *mapSetup, CMap &map, int writeTerrain)
 
 		f->printf("-- player configuration\n");
 		for (int i = 0; i < PlayerMax; ++i) {
-			if (Players[i].Type == PlayerNobody) {
+			if (Map.Info.PlayerType[i] == PlayerNobody) {
 				continue;
 			}
 			f->printf("SetStartView(%d, %d, %d)\n", i, Players[i].StartPos.x, Players[i].StartPos.y);
@@ -384,20 +501,79 @@ int WriteMapSetup(const char *mapSetup, CMap &map, int writeTerrain)
 			f->printf("-- Tiles Map\n");
 			for (int i = 0; i < map.Info.MapHeight; ++i) {
 				for (int j = 0; j < map.Info.MapWidth; ++j) {
-					const int tile = map.Fields[j + i * map.Info.MapWidth].Tile;
-					int n;
-					for (n = 0; n < map.Tileset.NumTiles && tile != map.Tileset.Table[n]; ++n) {
-					}
-					const int value = map.Fields[j + i * map.Info.MapWidth].Value;
+					const CMapField &mf = map.Fields[j + i * map.Info.MapWidth];
+					const int tile = mf.getGraphicTile();
+					const int n = map.Tileset->findTileIndexByTile(tile);
+					const int value = mf.Value;
 					f->printf("SetTile(%3d, %d, %d, %d)\n", n, j, i, value);
 				}
 			}
 		}
 
-		f->printf("-- place units\n");
+		f->printf("\n-- set map default stat and map sound for unit types\n");
+		for (std::vector<CUnitType *>::size_type i = 0; i < UnitTypes.size(); ++i) {
+			const CUnitType &type = *UnitTypes[i];
+			for (unsigned int j = 0; j < MaxCosts; ++j) {
+				if (type.MapDefaultStat.Costs[j] != type.DefaultStat.Costs[j]) {
+					f->printf("SetMapStat(\"%s\", \"Costs\", %d, \"%s\")\n", type.Ident.c_str(), type.MapDefaultStat.Costs[j], DefaultResourceNames[j].c_str());
+				}
+			}
+			for (unsigned int j = 0; j < MaxCosts; ++j) {
+				if (type.MapDefaultStat.ImproveIncomes[j] != type.DefaultStat.ImproveIncomes[j]) {
+					f->printf("SetMapStat(\"%s\", \"ImproveProduction\", %d, \"%s\")\n", type.Ident.c_str(), type.MapDefaultStat.ImproveIncomes[j], DefaultResourceNames[j].c_str());
+				}
+			}
+			for (size_t j = 0; j < UnitTypeVar.GetNumberVariable(); ++j) {
+				if (type.MapDefaultStat.Variables[j] != type.DefaultStat.Variables[j]) {
+					f->printf("SetMapStat(\"%s\", \"%s\", %d, \"Value\")\n", type.Ident.c_str(), UnitTypeVar.VariableNameLookup[j], type.MapDefaultStat.Variables[j].Value);
+					f->printf("SetMapStat(\"%s\", \"%s\", %d, \"Max\")\n", type.Ident.c_str(), UnitTypeVar.VariableNameLookup[j], type.MapDefaultStat.Variables[j].Max);
+					f->printf("SetMapStat(\"%s\", \"%s\", %d, \"Enable\")\n", type.Ident.c_str(), UnitTypeVar.VariableNameLookup[j], type.MapDefaultStat.Variables[j].Enable);
+					f->printf("SetMapStat(\"%s\", \"%s\", %d, \"Increase\")\n", type.Ident.c_str(), UnitTypeVar.VariableNameLookup[j], type.MapDefaultStat.Variables[j].Increase);
+				}
+			}
+			
+			if (type.MapSound.Selected.Name != type.Sound.Selected.Name) {
+				f->printf("SetMapSound(\"%s\", \"%s\", \"selected\")\n", type.Ident.c_str(), type.MapSound.Selected.Name.c_str());
+			}
+			if (type.MapSound.Acknowledgement.Name != type.Sound.Acknowledgement.Name) {
+				f->printf("SetMapSound(\"%s\", \"%s\", \"acknowledge\")\n", type.Ident.c_str(), type.MapSound.Acknowledgement.Name.c_str());
+			}
+			if (type.MapSound.Attack.Name != type.Sound.Attack.Name) {
+				f->printf("SetMapSound(\"%s\", \"%s\", \"attack\")\n", type.Ident.c_str(), type.MapSound.Attack.Name.c_str());
+			}
+			if (type.MapSound.Build.Name != type.Sound.Build.Name) {
+				f->printf("SetMapSound(\"%s\", \"%s\", \"build\")\n", type.Ident.c_str(), type.MapSound.Build.Name.c_str());
+			}
+			if (type.MapSound.Ready.Name != type.Sound.Ready.Name) {
+				f->printf("SetMapSound(\"%s\", \"%s\", \"ready\")\n", type.Ident.c_str(), type.MapSound.Ready.Name.c_str());
+			}
+			if (type.MapSound.Repair.Name != type.Sound.Repair.Name) {
+				f->printf("SetMapSound(\"%s\", \"%s\", \"repair\")\n", type.Ident.c_str(), type.MapSound.Repair.Name.c_str());
+			}
+			for (unsigned int j = 0; j < MaxCosts; ++j) {
+				if (type.MapSound.Harvest[j].Name != type.Sound.Harvest[j].Name) {
+					f->printf("SetMapSound(\"%s\", \"%s\", \"harvest\", \"%s\")\n", type.Ident.c_str(), type.MapSound.Harvest[j].Name.c_str(), DefaultResourceNames[j].c_str());
+				}
+			}
+			if (type.MapSound.Help.Name != type.Sound.Help.Name) {
+				f->printf("SetMapSound(\"%s\", \"%s\", \"help\")\n", type.Ident.c_str(), type.MapSound.Help.Name.c_str());
+			}
+			if (type.MapSound.Dead[ANIMATIONS_DEATHTYPES].Name != type.Sound.Dead[ANIMATIONS_DEATHTYPES].Name) {
+				f->printf("SetMapSound(\"%s\", \"%s\", \"dead\")\n", type.Ident.c_str(), type.MapSound.Dead[ANIMATIONS_DEATHTYPES].Name.c_str());
+			}
+			int death;
+			for (death = 0; death < ANIMATIONS_DEATHTYPES; ++death) {
+				if (type.MapSound.Dead[death].Name != type.Sound.Dead[death].Name) {
+					f->printf("SetMapSound(\"%s\", \"%s\", \"dead\", \"%s\")\n", type.Ident.c_str(), type.MapSound.Dead[death].Name.c_str(), ExtraDeathTypes[death].c_str());
+				}
+			}
+		}
+		
+		f->printf("\n-- place units\n");
 		f->printf("if (MapUnitsInit ~= nil) then MapUnitsInit() end\n");
+		std::vector<CUnit *> teleporters;
 		for (CUnitManager::Iterator it = UnitManager.begin(); it != UnitManager.end(); ++it) {
-			CUnit &unit = **it;
+			const CUnit &unit = **it;
 			f->printf("unit = CreateUnit(\"%s\", %d, {%d, %d})\n",
 					  unit.Type->Ident.c_str(),
 					  unit.Player->Index,
@@ -405,10 +581,21 @@ int WriteMapSetup(const char *mapSetup, CMap &map, int writeTerrain)
 			if (unit.Type->GivesResource) {
 				f->printf("SetResourcesHeld(unit, %d)\n", unit.ResourcesHeld);
 			}
+			if (!unit.Active) { //Active is true by default
+				f->printf("SetUnitVariable(unit, \"Active\", false)\n");
+			}
+			if (unit.Type->BoolFlag[TELEPORTER_INDEX].value && unit.Goal) {
+				teleporters.push_back(*it);
+			}
+		}
+		f->printf("\n\n");
+		for (std::vector<CUnit *>::iterator it = teleporters.begin(); it != teleporters.end(); ++it) {
+			CUnit &unit = **it;
+			f->printf("SetTeleportDestination(%d, %d)\n", UnitNumber(unit), UnitNumber(*unit.Goal));
 		}
 		f->printf("\n\n");
 	} catch (const FileException &) {
-		fprintf(stderr, "Can't save map setup : `%s' \n", mapSetup);
+		fprintf(stderr, "Can't save map setup : '%s' \n", mapSetup);
 		delete f;
 		return -1;
 	}
@@ -428,29 +615,27 @@ int WriteMapSetup(const char *mapSetup, CMap &map, int writeTerrain)
 */
 int SaveStratagusMap(const std::string &mapName, CMap &map, int writeTerrain)
 {
-	char mapSetup[PATH_MAX];
-	char previewName[PATH_MAX];
-	char *setupExtension;
-	char *previewExtension;
-
 	if (!map.Info.MapWidth || !map.Info.MapHeight) {
 		fprintf(stderr, "%s: invalid Stratagus map\n", mapName.c_str());
 		ExitFatal(-1);
 	}
 
+	char mapSetup[PATH_MAX];
 	strcpy_s(mapSetup, sizeof(mapSetup), mapName.c_str());
-	setupExtension = strstr(mapSetup, ".smp");
+	char *setupExtension = strstr(mapSetup, ".smp");
 	if (!setupExtension) {
-		fprintf(stderr, "%s: invalid Statagus map filename\n", mapName.c_str());
+		fprintf(stderr, "%s: invalid Stratagus map filename\n", mapName.c_str());
+		return -1;
 	}
 
+	char previewName[PATH_MAX];
 	strcpy_s(previewName, sizeof(previewName), mapName.c_str());
-	previewExtension = strstr(previewName, ".smp");
+	char *previewExtension = strstr(previewName, ".smp");
 	memcpy(previewExtension, ".png\0", 5 * sizeof(char));
 	WriteMapPreview(previewName, map);
 
 	memcpy(setupExtension, ".sms", 4 * sizeof(char));
-	if (WriteMapPresentation(mapName, map, mapSetup) == -1) {
+	if (WriteMapPresentation(mapName, map) == -1) {
 		return -1;
 	}
 
@@ -466,10 +651,8 @@ int SaveStratagusMap(const std::string &mapName, CMap &map, int writeTerrain)
 */
 static void LoadMap(const std::string &filename, CMap &map)
 {
-	const char *tmp;
 	const char *name = filename.c_str();
-
-	tmp = strrchr(name, '.');
+	const char *tmp = strrchr(name, '.');
 	if (tmp) {
 #ifdef USE_ZLIB
 		if (!strcmp(tmp, ".gz")) {
@@ -645,7 +828,7 @@ static void GameTypeManVsMachine()
 }
 
 /**
-**  Man vs Machine whith Humans on a Team
+**  Man vs Machine with Humans on a Team
 */
 static void GameTypeManTeamVsMachine()
 {
@@ -696,10 +879,17 @@ void CreateGame(const std::string &filename, CMap *map)
 
 	InitPlayers();
 
-	if (Map.Info.Filename.empty() && !filename.empty()) {
-		char path[PATH_MAX];
+	if (IsNetworkGame()) {
+		// if is a network game, it is necessary to reinitialize the syncrand
+		// variables before beginning to load the map, due to random map
+		// generation
+		SyncHash = 0;
+		InitSyncRand();
+	}
 
-		LibraryFileName(filename.c_str(), path, sizeof(path));
+	if (Map.Info.Filename.empty() && !filename.empty()) {
+		const std::string path = LibraryFileName(filename.c_str());
+
 		if (strcasestr(filename.c_str(), ".smp")) {
 			LuaLoadFile(path);
 		}
@@ -724,6 +914,7 @@ void CreateGame(const std::string &filename, CMap *map)
 		//
 		InitUnitTypes(1);
 		LoadMap(filename, *map);
+		ApplyUpgrades();
 	}
 	CclCommand("if (MapLoaded ~= nil) then MapLoaded() end");
 
@@ -733,8 +924,7 @@ void CreateGame(const std::string &filename, CMap *map)
 	InitSyncRand();
 
 	if (IsNetworkGame()) { // Prepare network play
-		DebugPrint("Client setup: Calling InitNetwork2\n");
-		InitNetwork2();
+		NetworkOnStartGame();
 	} else {
 		const std::string &localPlayerName = Parameters::Instance.LocalPlayerName;
 
@@ -814,8 +1004,6 @@ void CreateGame(const std::string &filename, CMap *map)
 	LoadUnitTypes();
 	LoadDecorations();
 
-	InitSelections();
-
 	InitUserInterface();
 	UI.Load();
 
@@ -836,11 +1024,6 @@ void CreateGame(const std::string &filename, CMap *map)
 	// Spells
 	//
 	InitSpells();
-
-	//
-	// Init units' groups
-	//
-	InitGroups();
 
 	//
 	// Init players?
@@ -878,7 +1061,7 @@ void CreateGame(const std::string &filename, CMap *map)
 	UI.SelectedViewport->Center(Map.TilePosToMapPixelPos_Center(ThisPlayer->StartPos));
 
 	//
-	// Various hacks wich must be done after the map is loaded.
+	// Various hacks which must be done after the map is loaded.
 	//
 	// FIXME: must be done after map is loaded
 	InitPathfinder();
@@ -910,6 +1093,8 @@ void CreateGame(const std::string &filename, CMap *map)
 void InitSettings()
 {
 	for (int i = 0; i < PlayerMax; ++i) {
+		GameSettings.Presets[i].PlayerColor = i;
+		GameSettings.Presets[i].AIScript = "ai-passive";
 		GameSettings.Presets[i].Race = SettingsPresetMapDefault;
 		GameSettings.Presets[i].Team = SettingsPresetMapDefault;
 		GameSettings.Presets[i].Type = SettingsPresetMapDefault;
@@ -946,6 +1131,7 @@ void CleanGame()
 	EndReplayLog();
 	CleanMessages();
 
+	RestoreColorCyclingSurface();
 	CleanGame_Lua();
 	CleanTriggers();
 	CleanAi();
@@ -953,12 +1139,12 @@ void CleanGame()
 	CleanMissiles();
 	CleanUnits();
 	CleanSelections();
-	CleanTilesets();
 	Map.Clean();
 	CleanReplayLog();
 	FreePathfinder();
 	CursorBuilding = NULL;
 	UnitUnderCursor = NULL;
+	GameEstablishing = false;
 }
 
 /**
@@ -968,9 +1154,7 @@ void CleanGame()
 */
 static int CclSetGameName(lua_State *l)
 {
-	int args;
-
-	args = lua_gettop(l);
+	const int args = lua_gettop(l);
 	if (args > 1 || (args == 1 && (!lua_isnil(l, 1) && !lua_isstring(l, 1)))) {
 		LuaError(l, "incorrect argument");
 	}
@@ -982,22 +1166,18 @@ static int CclSetGameName(lua_State *l)
 		std::string path = Parameters::Instance.GetUserDirectory() + "/" + GameName;
 		makedir(path.c_str(), 0777);
 	}
-
 	return 0;
 }
 
 static int CclSetFullGameName(lua_State *l)
 {
-	int args;
-
-	args = lua_gettop(l);
+	const int args = lua_gettop(l);
 	if (args > 1 || (args == 1 && (!lua_isnil(l, 1) && !lua_isstring(l, 1)))) {
 		LuaError(l, "incorrect argument");
 	}
 	if (args == 1 && !lua_isnil(l, 1)) {
 		FullGameName = lua_tostring(l, 1);
 	}
-
 	return 0;
 }
 
@@ -1177,11 +1357,8 @@ static int CclSetSpeeds(lua_State *l)
 */
 static int CclDefineDefaultIncomes(lua_State *l)
 {
-	int i;
-	int args;
-
-	args = lua_gettop(l);
-	for (i = 0; i < MaxCosts && i < args; ++i) {
+	const int args = lua_gettop(l);
+	for (int i = 0; i < MaxCosts && i < args; ++i) {
 		DefaultIncomes[i] = LuaToNumber(l, i + 1);
 	}
 	return 0;
@@ -1194,12 +1371,10 @@ static int CclDefineDefaultIncomes(lua_State *l)
 */
 static int CclDefineDefaultActions(lua_State *l)
 {
-	unsigned int args;
-
 	for (unsigned int i = 0; i < MaxCosts; ++i) {
 		DefaultActions[i].clear();
 	}
-	args = lua_gettop(l);
+	const unsigned int args = lua_gettop(l);
 	for (unsigned int i = 0; i < MaxCosts && i < args; ++i) {
 		DefaultActions[i] = LuaToString(l, i + 1);
 	}
@@ -1213,12 +1388,10 @@ static int CclDefineDefaultActions(lua_State *l)
 */
 static int CclDefineDefaultResourceNames(lua_State *l)
 {
-	unsigned int args;
-
 	for (unsigned int i = 0; i < MaxCosts; ++i) {
 		DefaultResourceNames[i].clear();
 	}
-	args = lua_gettop(l);
+	const unsigned int args = lua_gettop(l);
 	for (unsigned int i = 0; i < MaxCosts && i < args; ++i) {
 		DefaultResourceNames[i] = LuaToString(l, i + 1);
 	}
@@ -1254,7 +1427,7 @@ static int CclDefineDefaultResourceAmounts(lua_State *l)
 */
 static int CclDefineDefaultResourceMaxAmounts(lua_State *l)
 {
-	int args = std::min<int>(lua_gettop(l), MaxCosts);
+	const int args = std::min<int>(lua_gettop(l), MaxCosts);
 
 	for (int i = 0; i < args; ++i) {
 		DefaultResourceMaxAmounts[i] = LuaToNumber(l, i + 1);
@@ -1337,16 +1510,13 @@ static int CclSetMenuRace(lua_State *l)
 */
 static int CclSavedGameInfo(lua_State *l)
 {
-	const char *value;
-
 	LuaCheckArgs(l, 1);
 	if (!lua_istable(l, 1)) {
 		LuaError(l, "incorrect argument");
 	}
 
-	lua_pushnil(l);
-	while (lua_next(l, 1)) {
-		value = LuaToString(l, -2);
+	for (lua_pushnil(l); lua_next(l, 1); lua_pop(l, 1)) {
+		const char *value = LuaToString(l, -2);
 
 		if (!strcmp(value, "SaveFile")) {
 			if (strcpy_s(CurrentMapPath, sizeof(CurrentMapPath), LuaToString(l, -1)) != 0) {
@@ -1365,7 +1535,6 @@ static int CclSavedGameInfo(lua_State *l)
 		} else {
 			LuaError(l, "Unsupported tag: %s" _C_ value);
 		}
-		lua_pop(l, 1);
 	}
 	return 0;
 }
@@ -1422,7 +1591,6 @@ void LuaRegisterModules()
 	SelectionCclRegister();
 	SoundCclRegister();
 	SpellCclRegister();
-	TilesetCclRegister();
 	TriggerCclRegister();
 	UnitCclRegister();
 	UnitTypeCclRegister();

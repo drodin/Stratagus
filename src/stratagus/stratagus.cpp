@@ -10,8 +10,8 @@
 //
 /**@name stratagus.cpp - The main file. */
 //
-//      (c) Copyright 1998-2011 by Lutz Sammer, Francois Beerten,
-//                                 Jimmy Salmon and Pali Rohár
+//      (c) Copyright 1998-2015 by Lutz Sammer, Francois Beerten,
+//                                 Jimmy Salmon, Pali Rohár and cybermind
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -40,12 +40,12 @@
 **
 ** Any help to improve this documention is welcome. If you didn't
 ** understand something or you found an error or a wrong spelling
-** or wrong grammer please write an email (including a patch :).
+** or wrong grammar please write an email (including a patch :).
 **
-** @section Informations Informations
+** @section Information Information
 **
-** Visit the https://launchpad.net/stratagus web page for the latest news and
-** <A HREF="../index.html">Stratagus Info</A> for other documentations.
+** Visit the https://github.com/Wargus/stratagus web page for the latest news and
+** <A HREF="../index.html">Stratagus Info</A> for other documentation.
 **
 ** @section Modules Modules
 **
@@ -169,18 +169,6 @@ extern void beos_init(int argc, char **argv);
 
 #endif
 
-#ifndef _MSC_VER
-#include <unistd.h>
-#endif
-#ifdef __CYGWIN__
-#include <getopt.h>
-#endif
-#if defined(_MSC_VER) || defined(__MINGW32__)
-extern char *optarg;
-extern int optind;
-extern int getopt(int argc, char *const *argv, const char *opt);
-#endif
-
 #ifdef MAC_BUNDLE
 #define Button ButtonOSX
 #include <Carbon/Carbon.h>
@@ -201,6 +189,7 @@ extern int getopt(int argc, char *const *argv, const char *opt);
 #include "map.h"
 #include "netconnect.h"
 #include "network.h"
+#include "parameters.h"
 #include "player.h"
 #include "replay.h"
 #include "results.h"
@@ -213,55 +202,32 @@ extern int getopt(int argc, char *const *argv, const char *opt);
 #include "version.h"
 #include "video.h"
 #include "widgets.h"
+#include "util.h"
 
-#ifdef DEBUG
 #include "missile.h" //for FreeBurningBuildingFrames
+
+#ifdef USE_STACKTRACE
+#include <stdexcept>
+#include <stacktrace/call_stack.hpp>
+#include <stacktrace/stack_exception.hpp>
 #endif
 
 #include <stdlib.h>
 #include <stdio.h>
 
+#ifdef USE_WIN32
+#include <windows.h>
+#include <dbghelp.h>
+#endif
 
 #if defined(USE_WIN32) && ! defined(NO_STDIO_REDIRECT)
+#include "windows.h"
 #define REDIRECT_OUTPUT
 #endif
 
-
-extern void CleanGame();
-
-void Parameters::SetDefaultValues()
-{
-	applicationName = "stratagus";
-	luaStartFilename = "scripts/stratagus.lua";
-	luaEditorStartFilename = "scripts/editor.lua";
-	SetUserDirectory();
-}
-
-void Parameters::SetUserDirectory()
-{
-#ifdef USE_WIN32
-	UserDirectory = getenv("APPDATA");
-#elif defined(ANDROID)
-	UserDirectory = StratagusLibPath;
-#else
-	UserDirectory = getenv("HOME");
+#if defined(USE_WIN32) && ! defined(REDIRECT_OUTPUT)
+#include "SetupConsole_win32.h"
 #endif
-
-	if (!UserDirectory.empty()) {
-		UserDirectory += "/";
-	}
-
-#ifdef USE_WIN32
-	UserDirectory += "Stratagus";
-#elif defined(USE_MAC)
-	UserDirectory += "Library/Stratagus";
-#else
-	UserDirectory += ".stratagus";
-#endif
-}
-
-/* static */ Parameters Parameters::Instance;
-
 
 /*----------------------------------------------------------------------------
 --  Variables
@@ -270,45 +236,18 @@ void Parameters::SetUserDirectory()
 std::string StratagusLibPath;        /// Path for data directory
 
 /// Name, Version, Copyright
-const char NameLine[] = NAME " V" VERSION ", " COPYRIGHT;
+const char NameLine[] = NAME " v" VERSION ", " COPYRIGHT;
 
 std::string CliMapName;          /// Filename of the map given on the command line
-static std::vector<gcn::Container *> Containers;
 std::string MenuRace;
 
-/*============================================================================
-==  DISPLAY
-============================================================================*/
-
-unsigned long GameCycle;             /// Game simulation cycle counter
-unsigned long FastForwardCycle;      /// Cycle to fastforward to in a replay
+bool EnableDebugPrint;           /// if enabled, print the debug messages
+bool EnableAssert;               /// if enabled, halt on assertion failures
+bool EnableUnitDebug;            /// if enabled, a unit info dump will be created
 
 /*============================================================================
 ==  MAIN
 ============================================================================*/
-
-void PrintLocation(const char *file, int line, const char *funcName)
-{
-	fprintf(stdout, "%s:%d: %s: ", file, line, funcName);
-}
-
-#ifdef DEBUG
-
-void AbortAt(const char *file, int line, const char *funcName, const char *conditionStr)
-{
-	fprintf(stderr, "Assertion failed at %s:%d: %s: %s\n", file, line, funcName, conditionStr);
-	abort();
-}
-
-void PrintOnStdOut(const char *format, ...)
-{
-	va_list valist;
-	va_start(valist, format);
-	vprintf(format, valist);
-	va_end(valist);
-}
-
-#endif
 
 /**
 **  Pre menu setup.
@@ -343,7 +282,6 @@ void PreMenuSetup()
 */
 static int MenuLoop()
 {
-	char buf[1024];
 	int status;
 
 	initGuichan();
@@ -353,59 +291,16 @@ static int MenuLoop()
 	Invalidate();
 
 	ButtonUnderCursor = -1;
+	OldButtonUnderCursor = -1;
 	CursorState = CursorStatePoint;
 	GameCursor = UI.Point.Cursor;
 
 	// FIXME delete this when switching to full guichan GUI
-	LibraryFileName("scripts/guichan.lua", buf, sizeof(buf));
-	status = LuaLoadFile(buf);
+	const std::string filename = LibraryFileName("scripts/guichan.lua");
+	status = LuaLoadFile(filename);
 
 	// We clean up later in Exit
 	return status;
-}
-
-extern gcn::Gui *Gui;
-
-void StartMap(const std::string &filename, bool clean)
-{
-	std::string nc, rc;
-
-	gcn::Widget *oldTop = Gui->getTop();
-	gcn::Container *container = new gcn::Container();
-	Containers.push_back(container);
-	container->setDimension(gcn::Rectangle(0, 0, Video.Width, Video.Height));
-	container->setOpaque(false);
-	Gui->setTop(container);
-
-	NetConnectRunning = 0;
-	InterfaceState = IfaceStateNormal;
-
-	//  Create the game.
-	DebugPrint("Creating game with map: %s\n" _C_ filename.c_str());
-	if (clean) {
-		CleanPlayers();
-	}
-	GetDefaultTextColors(nc, rc);
-
-	CreateGame(filename.c_str(), &Map);
-
-	UI.StatusLine.Set(NameLine);
-	SetMessage("%s", _("Do it! Do it now!"));
-
-	//  Play the game.
-	GameMainLoop();
-
-	//  Clear screen
-	Video.ClearScreen();
-	Invalidate();
-
-	CleanGame();
-	InterfaceState = IfaceStateMenu;
-	SetDefaultTextColors(nc, rc);
-
-	Gui->setTop(oldTop);
-	Containers.erase(std::find(Containers.begin(), Containers.end(), container));
-	delete container;
 }
 
 //----------------------------------------------------------------------------
@@ -431,6 +326,9 @@ static void PrintHeader()
 #ifdef USE_THEORA
 		"THEORA "
 #endif
+#ifdef USE_FLUIDSYNTH
+		"FLUIDSYNTH "
+#endif
 #ifdef USE_MIKMOD
 		"MIKMOD "
 #endif
@@ -446,6 +344,9 @@ static void PrintHeader()
 #ifdef USE_WIN32
 		"WIN32 "
 #endif
+#ifdef USE_LINUX
+		"LINUX "
+#endif
 #ifdef USE_BSD
 		"BSD "
 #endif
@@ -455,8 +356,8 @@ static void PrintHeader()
 #ifdef USE_MAC
 		"MAC "
 #endif
-#ifdef USE_MAEMO
-		"MAEMO "
+#ifdef USE_X11
+		"X11 "
 #endif
 #ifdef USE_TOUCHSCREEN
 		"TOUCHSCREEN "
@@ -466,7 +367,7 @@ static void PrintHeader()
 	fprintf(stdout,
 			"%s\n  written by Lutz Sammer, Fabrice Rossi, Vladi Shabanski, Patrice Fortier,\n"
 			"  Jon Gabrielson, Andreas Arens, Nehal Mistry, Jimmy Salmon, Pali Rohar,\n"
-			"  and others.\n"
+			"  cybermind and others.\n"
 			"\t" HOMEPAGE "\n"
 			"Compile options %s",
 			NameLine, CompileOptions.c_str());
@@ -501,19 +402,16 @@ void Exit(int err)
 
 	StopMusic();
 	QuitSound();
-	NetworkQuit();
+	NetworkQuitGame();
 
 	ExitNetwork1();
-#ifdef DEBUG
 	CleanModules();
 	FreeBurningBuildingFrames();
 	FreeSounds();
 	FreeGraphics();
 	FreePlayerColors();
 	FreeButtonStyles();
-	for (size_t i = 0; i < Containers.size(); ++i) {
-		delete Containers[i];
-	}
+	FreeAllContainers();
 	freeGuichan();
 	DebugPrint("Frames %lu, Slow frames %d = %ld%%\n" _C_
 			   FrameCounter _C_ SlowFrameCounter _C_
@@ -521,7 +419,6 @@ void Exit(int err)
 	lua_settop(Lua, 0);
 	lua_close(Lua);
 	DeInitVideo();
-#endif
 
 	fprintf(stdout, "%s", _("Thanks for playing Stratagus.\n"));
 	exit(err);
@@ -535,6 +432,9 @@ void Exit(int err)
 */
 void ExitFatal(int err)
 {
+#ifdef USE_STACKTRACE
+	throw stacktrace::stack_runtime_error((const char*)err);
+#endif
 	exit(err);
 }
 
@@ -546,26 +446,37 @@ static void Usage()
 	PrintHeader();
 	printf(
 		"\n\nUsage: %s [OPTIONS] [map.smp|map.smp.gz]\n"
+		"\t-a\t\tEnables asserts check in engine code (for debugging)\n"
 		"\t-c file.lua\tConfiguration start file (default stratagus.lua)\n"
 		"\t-d datapath\tPath to stratagus data (default current directory)\n"
 		"\t-D depth\tVideo mode depth = pixel per point\n"
 		"\t-e\t\tStart editor (instead of game)\n"
 		"\t-E file.lua\tEditor configuration start file (default editor.lua)\n"
 		"\t-F\t\tFull screen video mode\n"
+		"\t-G \"options\"\tGame options (passed to game scripts)\n"
 		"\t-h\t\tHelp shows this page\n"
+		"\t-i\t\tEnables unit info dumping into log (for debugging)\n"
 		"\t-I addr\t\tNetwork address to use\n"
 		"\t-l\t\tDisable command log\n"
-		"\t-L lag\t\tNetwork lag in # frames (default 10 = 333ms)\n"
-		"\t-n server\tNetwork server host preset\n"
 		"\t-N name\t\tName of the player\n"
+#if defined(USE_OPENGL) || defined(USE_GLES)
 		"\t-o\t\tDo not use OpenGL or OpenGL ES 1.1\n"
 		"\t-O\t\tUse OpenGL or OpenGL ES 1.1\n"
+#endif
+		"\t-p\t\tEnables debug messages printing in console\n"
 		"\t-P port\t\tNetwork port to use\n"
 		"\t-s sleep\tNumber of frames for the AI to sleep before it starts\n"
 		"\t-S speed\tSync speed (100 = 30 frames/s)\n"
-		"\t-U update\tNetwork update rate in # frames (default 5=6x per s)\n"
+		"\t-u userpath\tPath where stratagus saves preferences, log and savegame\n"
 		"\t-v mode\t\tVideo mode resolution in format <xres>x<yres>\n"
 		"\t-W\t\tWindowed video mode\n"
+#if defined(USE_OPENGL) || defined(USE_GLES)
+		"\t-x idx\t\tControls fullscreen scaling if your graphics card supports shaders.\n"\
+		"\t  \t\tPass a number to select a shader in your shaders directory by index (starting at 0).\n"\
+		"\t  \t\tYou can also use Ctrl+Alt+/ to cycle between these scaling algorithms at runtime.\n"
+		"\t  \t\tPass -1 to force old-school nearest neighbour scaling without shaders\n"\
+		"\t-Z mode\t\tGame resolution <xres>x<yres> (scaled to -v output resolution with OpenGL).\n"
+#endif
 		"map is relative to StratagusLibPath=datapath, use ./map for relative to cwd\n",
 		Parameters::Instance.applicationName.c_str());
 }
@@ -591,17 +502,12 @@ static void CleanupOutput()
 
 static void RedirectOutput()
 {
-	char path[MAX_PATH];
-	int pathlen;
+	std::string path = Parameters::Instance.GetUserDirectory();
 
-	pathlen = GetModuleFileName(NULL, path, sizeof(path));
-	while (pathlen > 0 && path[pathlen] != '\\') {
-		--pathlen;
-	}
-	path[pathlen] = '\0';
+	makedir(path.c_str(), 0777);
 
-	stdoutFile = std::string(path) + "\\stdout.txt";
-	stderrFile = std::string(path) + "\\stderr.txt";
+	stdoutFile = path + "\\stdout.txt";
+	stderrFile = path + "\\stderr.txt";
 
 	if (!freopen(stdoutFile.c_str(), "w", stdout)) {
 		printf("freopen stdout failed");
@@ -615,10 +521,18 @@ static void RedirectOutput()
 
 void ParseCommandLine(int argc, char **argv, Parameters &parameters)
 {
+	char *sep;
 	for (;;) {
-		switch (getopt(argc, argv, "c:d:D:eE:FhI:lL:n:N:oOP:s:S:U:v:W?")) {
+		switch (getopt(argc, argv, "ac:d:D:eE:FG:hiI:lN:oOP:ps:S:u:v:Wx:Z:?-")) {
+			case 'a':
+				EnableAssert = true;
+				continue;
 			case 'c':
 				parameters.luaStartFilename = optarg;
+				if (strlen(optarg) > 4 &&
+				    !(strstr(optarg, ".lua") == optarg + strlen(optarg) - 4)) {
+					parameters.luaStartFilename += ".lua";
+				}
 				continue;
 			case 'd': {
 				StratagusLibPath = optarg;
@@ -641,36 +555,41 @@ void ParseCommandLine(int argc, char **argv, Parameters &parameters)
 				VideoForceFullScreen = 1;
 				Video.FullScreen = 1;
 				continue;
+			case 'G':
+				parameters.luaScriptArguments = optarg;
+				continue;
+			case 'i':
+				EnableUnitDebug = true;
+				continue;
 			case 'I':
-				NetworkAddr = optarg;
+				CNetworkParameter::Instance.localHost = optarg;
 				continue;
 			case 'l':
 				CommandLogDisabled = true;
 				continue;
-			case 'L':
-				NetworkLag = atoi(optarg);
-				if (!NetworkLag) {
-					fprintf(stderr, "%s: zero lag not supported\n", argv[0]);
-					Usage();
-					ExitFatal(-1);
-				}
-				continue;
-			case 'n':
-				NetworkArg = optarg;
-				continue;
 			case 'N':
 				parameters.LocalPlayerName = optarg;
 				continue;
+#if defined(USE_OPENGL) || defined(USE_GLES)
 			case 'o':
 				ForceUseOpenGL = 1;
 				UseOpenGL = 0;
+				if (ZoomNoResize) {
+					fprintf(stderr, "Error: -Z only works with OpenGL enabled\n");
+					Usage();
+					ExitFatal(-1);
+				}
 				continue;
 			case 'O':
 				ForceUseOpenGL = 1;
 				UseOpenGL = 1;
 				continue;
+#endif
 			case 'P':
-				NetworkPort = atoi(optarg);
+				CNetworkParameter::Instance.localPort = atoi(optarg);
+				continue;
+			case 'p':
+				EnableDebugPrint = true;
 				continue;
 			case 's':
 				AiSleepCycles = atoi(optarg);
@@ -678,11 +597,53 @@ void ParseCommandLine(int argc, char **argv, Parameters &parameters)
 			case 'S':
 				VideoSyncSpeed = atoi(optarg);
 				continue;
-			case 'U':
-				NetworkUpdates = atoi(optarg);
+			case 'u':
+				Parameters::Instance.SetUserDirectory(optarg);
 				continue;
 			case 'v': {
-				char *sep = strchr(optarg, 'x');
+				sep = strchr(optarg, 'x');
+				if (!sep || !*(sep + 1)) {
+					fprintf(stderr, "%s: incorrect format of video mode resolution -- '%s'\n", argv[0], optarg);
+					Usage();
+					ExitFatal(-1);
+				}
+				Video.ViewportHeight = atoi(sep + 1);
+				*sep = 0;
+				Video.ViewportWidth = atoi(optarg);
+				if (!Video.ViewportHeight || !Video.ViewportWidth) {
+					fprintf(stderr, "%s: incorrect format of video mode resolution -- '%sx%s'\n", argv[0], optarg, sep + 1);
+					Usage();
+					ExitFatal(-1);
+				}
+#if defined(USE_OPENGL) || defined(USE_GLES)
+				if (!ZoomNoResize) {
+					Video.Height = Video.ViewportHeight;
+					Video.Width = Video.ViewportWidth;
+				}
+#else
+				{
+					Video.Height = Video.ViewportHeight;
+					Video.Width = Video.ViewportWidth;
+				}
+#endif
+				continue;
+			}
+			case 'W':
+				VideoForceFullScreen = 1;
+				Video.FullScreen = 0;
+				continue;
+#if defined(USE_OPENGL) || defined(USE_GLES)
+			case 'x':
+				Video.ShaderIndex = atoi(optarg);
+				if (atoi(optarg) == -1) {
+					GLShaderPipelineSupported = false;
+				}
+				continue;
+			case 'Z':
+				ForceUseOpenGL = 1;
+				UseOpenGL = 1;
+				ZoomNoResize = 1;
+				sep = strchr(optarg, 'x');
 				if (!sep || !*(sep + 1)) {
 					fprintf(stderr, "%s: incorrect format of video mode resolution -- '%s'\n", argv[0], optarg);
 					Usage();
@@ -691,17 +652,8 @@ void ParseCommandLine(int argc, char **argv, Parameters &parameters)
 				Video.Height = atoi(sep + 1);
 				*sep = 0;
 				Video.Width = atoi(optarg);
-				if (!Video.Height || !Video.Width) {
-					fprintf(stderr, "%s: incorrect format of video mode resolution -- '%sx%s'\n", argv[0], optarg, sep + 1);
-					Usage();
-					ExitFatal(-1);
-				}
 				continue;
-			}
-			case 'W':
-				VideoForceFullScreen = 1;
-				Video.FullScreen = 0;
-				continue;
+#endif
 			case -1:
 				break;
 			case '?':
@@ -714,7 +666,7 @@ void ParseCommandLine(int argc, char **argv, Parameters &parameters)
 	}
 
 	if (argc - optind > 1) {
-		fprintf(stderr, "too many files\n");
+		fprintf(stderr, "too many map files. if you meant to pass game arguments, these go after '--'\n");
 		Usage();
 		ExitFatal(-1);
 	}
@@ -725,25 +677,26 @@ void ParseCommandLine(int argc, char **argv, Parameters &parameters)
 		while ((index = CliMapName.find('\\')) != std::string::npos) {
 			CliMapName[index] = '/';
 		}
-		--argc;
 	}
 }
 
-std::string GetLocalPlayerNameFromEnv()
+#ifdef USE_WIN32
+static LONG WINAPI CreateDumpFile(EXCEPTION_POINTERS *ExceptionInfo)
 {
-	//  Default player name to username on unix systems.
-#if defined(USE_WIN32) || defined(USE_MAEMO) || defined(ANDROID)
-	return "Anonymous";
-#else
-	const char *userName = getenv("USER");
-
-	if (userName) {
-		return userName;
-	} else {
-		return "Anonymous";
-	}
-#endif
+	HANDLE hFile = CreateFile("crash.dmp", GENERIC_READ | GENERIC_WRITE,	FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE,
+		NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL,	NULL);
+	MINIDUMP_EXCEPTION_INFORMATION mei;
+	mei.ThreadId = GetCurrentThreadId();
+	mei.ClientPointers = TRUE;
+	mei.ExceptionPointers = ExceptionInfo;
+	MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), hFile, MiniDumpNormal, &mei, NULL, NULL);
+	fprintf(stderr, "Stratagus crashed!\n");
+	fprintf(stderr, "A mini dump file \"crash.dmp\" has been created in the Stratagus folder.\n");
+	fprintf(stderr, "Please send it to our bug tracker: https://github.com/Wargus/stratagus/issues\n");
+	fprintf(stderr, "and tell us what caused this bug to occur.\n");
+	return EXCEPTION_EXECUTE_HANDLER;
 }
+#endif
 
 /**
 **  The main program: initialise, parse options and arguments.
@@ -751,21 +704,18 @@ std::string GetLocalPlayerNameFromEnv()
 **  @param argc  Number of arguments.
 **  @param argv  Vector of arguments.
 */
-#ifdef ANDROID
-int mainStratagus(int argc, char **argv)
-#else
-int main(int argc, char **argv)
-#endif
+int stratagusMain(int argc, char **argv)
 {
-#ifdef REDIRECT_OUTPUT
-	RedirectOutput();
-#endif
-
 #ifdef USE_BEOS
 	//  Parse arguments for BeOS
 	beos_init(argc, argv);
 #endif
-
+#ifdef USE_WIN32
+	SetUnhandledExceptionFilter(CreateDumpFile);
+#endif
+#if defined(USE_WIN32) && ! defined(REDIRECT_OUTPUT)
+	SetupConsole();
+#endif
 	//  Setup some defaults.
 #ifndef MAC_BUNDLE
 	StratagusLibPath = ".";
@@ -781,10 +731,16 @@ int main(int argc, char **argv)
 	Assert(pathPtr);
 	StratagusLibPath = pathPtr;
 #endif
-
+#ifdef USE_STACKTRACE
+	try {
+#endif
 	Parameters &parameters = Parameters::Instance;
 	parameters.SetDefaultValues();
-	parameters.LocalPlayerName = GetLocalPlayerNameFromEnv();
+	parameters.SetLocalPlayerNameFromEnv();
+
+#ifdef REDIRECT_OUTPUT
+	RedirectOutput();
+#endif
 
 	if (argc > 0) {
 		parameters.applicationName = argv[0];
@@ -807,7 +763,7 @@ int main(int argc, char **argv)
 	// Initialise AI module
 	InitAiModule();
 
-	LoadCcl(parameters.luaStartFilename);
+	LoadCcl(parameters.luaStartFilename, parameters.luaScriptArguments);
 
 	PrintHeader();
 	PrintLicense();
@@ -833,7 +789,7 @@ int main(int argc, char **argv)
 
 	// Init player data
 	ThisPlayer = NULL;
-	//Don't clear the Players strucure as it would erase the allowed units.
+	//Don't clear the Players structure as it would erase the allowed units.
 	// memset(Players, 0, sizeof(Players));
 	NumPlayers = 0;
 
@@ -843,6 +799,16 @@ int main(int argc, char **argv)
 	MenuLoop();
 
 	Exit(0);
+#ifdef USE_STACKTRACE
+	} catch (const std::exception &e) {
+		fprintf(stderr, "Stratagus crashed!\n");
+		fprintf(stderr, "Please send this call stack to our bug tracker: https://github.com/Wargus/stratagus/issues\n");
+		fprintf(stderr, "and tell us what caused this bug to occur.\n");
+		fprintf(stderr, " === exception state traceback === \n");
+		fprintf(stderr, "%s", e.what());
+		exit(1);
+	}
+#endif
 	return 0;
 }
 

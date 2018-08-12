@@ -45,6 +45,7 @@
 #include "unittype.h"
 #include "unit.h"
 #include "unit_find.h"
+#include "upgrade.h"
 #include "video.h"
 
 /*----------------------------------------------------------------------------
@@ -66,7 +67,7 @@ extern CUnit *CclGetUnitFromRef(lua_State *l);
 */
 static CPlayer *CclGetPlayer(lua_State *l)
 {
-	return &Players[(int)LuaToNumber(l, -1)];
+	return &Players[LuaToNumber(l, -1)];
 }
 
 /**
@@ -94,6 +95,7 @@ void CPlayer::Load(lua_State *l)
 	const int args = lua_gettop(l);
 
 	this->Units.resize(0);
+	this->FreeWorkers.resize(0);
 
 	// j = 0 represent player Index.
 	for (int j = 1; j < args; ++j) {
@@ -120,17 +122,10 @@ void CPlayer::Load(lua_State *l)
 				LuaError(l, "Unsupported tag: %s" _C_ value);
 			}
 		} else if (!strcmp(value, "race")) {
-			unsigned int i;
-
-			value = LuaToString(l, j + 1);
-			for (i = 0; i < PlayerRaces.Count; ++i) {
-				if (!strcmp(value, PlayerRaces.Name[i].c_str())) {
-					this->Race = i;
-					break;
-				}
-			}
-			if (i == PlayerRaces.Count) {
-				LuaError(l, "Unsupported race: %s" _C_ value);
+			const char *raceName = LuaToString(l, j + 1);
+			this->Race = PlayerRaces.GetRaceIndexByName(raceName);
+			if (this->Race == -1) {
+				LuaError(l, "Unsupported race: %s" _C_ raceName);
 			}
 		} else if (!strcmp(value, "ai-name")) {
 			this->AiName = LuaToString(l, j + 1);
@@ -164,29 +159,17 @@ void CPlayer::Load(lua_State *l)
 				}
 			}
 		} else if (!strcmp(value, "start")) {
-			if (!lua_istable(l, j + 1) || lua_rawlen(l, j + 1) != 2) {
-				LuaError(l, "incorrect argument");
-			}
-			lua_rawgeti(l, j + 1, 1);
-			this->StartPos.x = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, j + 1, 2);
-			this->StartPos.y = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			CclGetPos(l, &this->StartPos.x, &this->StartPos.y, j + 1);
 		} else if (!strcmp(value, "resources")) {
 			if (!lua_istable(l, j + 1)) {
 				LuaError(l, "incorrect argument");
 			}
 			const int subargs = lua_rawlen(l, j + 1);
 			for (int k = 0; k < subargs; ++k) {
-				lua_rawgeti(l, j + 1, k + 1);
-				value = LuaToString(l, -1);
-				lua_pop(l, 1);
+				value = LuaToString(l, j + 1, k + 1);
 				++k;
 				const int resId = GetResourceIdByName(l, value);
-				lua_rawgeti(l, j + 1, k + 1);
-				this->Resources[resId] = LuaToNumber(l, -1);
-				lua_pop(l, 1);
+				this->Resources[resId] = LuaToNumber(l, j + 1, k + 1);
 			}
 		} else if (!strcmp(value, "stored-resources")) {
 			if (!lua_istable(l, j + 1)) {
@@ -194,15 +177,11 @@ void CPlayer::Load(lua_State *l)
 			}
 			const int subargs = lua_rawlen(l, j + 1);
 			for (int k = 0; k < subargs; ++k) {
-				lua_rawgeti(l, j + 1, k + 1);
-				value = LuaToString(l, -1);
-				lua_pop(l, 1);
+				value = LuaToString(l, j + 1, k + 1);
 				++k;
 
 				const int resId = GetResourceIdByName(l, value);
-				lua_rawgeti(l, j + 1, k + 1);
-				this->StoredResources[resId] = LuaToNumber(l, -1);
-				lua_pop(l, 1);
+				this->StoredResources[resId] = LuaToNumber(l, j + 1, k + 1);
 			}
 		} else if (!strcmp(value, "max-resources")) {
 			if (!lua_istable(l, j + 1)) {
@@ -210,14 +189,10 @@ void CPlayer::Load(lua_State *l)
 			}
 			const int subargs = lua_rawlen(l, j + 1);
 			for (int k = 0; k < subargs; ++k) {
-				lua_rawgeti(l, j + 1, k + 1);
-				value = LuaToString(l, -1);
-				lua_pop(l, 1);
+				value = LuaToString(l, j + 1, k + 1);
 				++k;
 				const int resId = GetResourceIdByName(l, value);
-				lua_rawgeti(l, j + 1, k + 1);
-				this->MaxResources[resId] = LuaToNumber(l, -1);
-				lua_pop(l, 1);
+				this->MaxResources[resId] = LuaToNumber(l, j + 1, k + 1);
 			}
 		} else if (!strcmp(value, "last-resources")) {
 			if (!lua_istable(l, j + 1)) {
@@ -225,14 +200,10 @@ void CPlayer::Load(lua_State *l)
 			}
 			const int subargs = lua_rawlen(l, j + 1);
 			for (int k = 0; k < subargs; ++k) {
-				lua_rawgeti(l, j + 1, k + 1);
-				value = LuaToString(l, -1);
-				lua_pop(l, 1);
+				value = LuaToString(l, j + 1, k + 1);
 				++k;
 				const int resId = GetResourceIdByName(l, value);
-				lua_rawgeti(l, j + 1, k + 1);
-				this->LastResources[resId] = LuaToNumber(l, -1);
-				lua_pop(l, 1);
+				this->LastResources[resId] = LuaToNumber(l, j + 1, k + 1);
 			}
 		} else if (!strcmp(value, "incomes")) {
 			if (!lua_istable(l, j + 1)) {
@@ -240,15 +211,11 @@ void CPlayer::Load(lua_State *l)
 			}
 			const int subargs = lua_rawlen(l, j + 1);
 			for (int k = 0; k < subargs; ++k) {
-				lua_rawgeti(l, j + 1, k + 1);
-				value = LuaToString(l, -1);
-				lua_pop(l, 1);
+				value = LuaToString(l, j + 1, k + 1);
 				++k;
 
 				const int resId = GetResourceIdByName(l, value);
-				lua_rawgeti(l, j + 1, k + 1);
-				this->Incomes[resId] = LuaToNumber(l, -1);
-				lua_pop(l, 1);
+				this->Incomes[resId] = LuaToNumber(l, j + 1, k + 1);
 			}
 		} else if (!strcmp(value, "revenue")) {
 			if (!lua_istable(l, j + 1)) {
@@ -256,15 +223,11 @@ void CPlayer::Load(lua_State *l)
 			}
 			const int subargs = lua_rawlen(l, j + 1);
 			for (int k = 0; k < subargs; ++k) {
-				lua_rawgeti(l, j + 1, k + 1);
-				value = LuaToString(l, -1);
-				lua_pop(l, 1);
+				value = LuaToString(l, j + 1, k + 1);
 				++k;
 
 				const int resId = GetResourceIdByName(l, value);
-				lua_rawgeti(l, j + 1, k + 1);
-				this->Revenue[resId] = LuaToNumber(l, -1);
-				lua_pop(l, 1);
+				this->Revenue[resId] = LuaToNumber(l, j + 1, k + 1);
 			}
 		} else if (!strcmp(value, "ai-enabled")) {
 			this->AiEnabled = true;
@@ -301,9 +264,7 @@ void CPlayer::Load(lua_State *l)
 				LuaError(l, "Wrong number of total-resources: %d" _C_ subargs);
 			}
 			for (int k = 0; k < subargs; ++k) {
-				lua_rawgeti(l, j + 1, k + 1);
-				this->TotalResources[k] = LuaToNumber(l, -1);
-				lua_pop(l, 1);
+				this->TotalResources[k] = LuaToNumber(l, j + 1, k + 1);
 			}
 		} else if (!strcmp(value, "speed-resource-harvest")) {
 			if (!lua_istable(l, j + 1)) {
@@ -314,9 +275,7 @@ void CPlayer::Load(lua_State *l)
 				LuaError(l, "Wrong number of speed-resource-harvest: %d" _C_ subargs);
 			}
 			for (int k = 0; k < subargs; ++k) {
-				lua_rawgeti(l, j + 1, k + 1);
-				this->SpeedResourcesHarvest[k] = LuaToNumber(l, -1);
-				lua_pop(l, 1);
+				this->SpeedResourcesHarvest[k] = LuaToNumber(l, j + 1, k + 1);
 			}
 		} else if (!strcmp(value, "speed-resource-return")) {
 			if (!lua_istable(l, j + 1)) {
@@ -327,9 +286,7 @@ void CPlayer::Load(lua_State *l)
 				LuaError(l, "Wrong number of speed-resource-harvest: %d" _C_ subargs);
 			}
 			for (int k = 0; k < subargs; ++k) {
-				lua_rawgeti(l, j + 1, k + 1);
-				this->SpeedResourcesReturn[k] = LuaToNumber(l, -1);
-				lua_pop(l, 1);
+				this->SpeedResourcesReturn[k] = LuaToNumber(l, j + 1, k + 1);
 			}
 		} else if (!strcmp(value, "speed-build")) {
 			this->SpeedBuild = LuaToNumber(l, j + 1);
@@ -343,15 +300,9 @@ void CPlayer::Load(lua_State *l)
 			if (!lua_istable(l, j + 1) || lua_rawlen(l, j + 1) != 3) {
 				LuaError(l, "incorrect argument");
 			}
-			lua_rawgeti(l, j + 1, 1);
-			const int r = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, j + 1, 2);
-			const int g = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, j + 1, 3);
-			const int b = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			const int r = LuaToNumber(l, j + 1, 1);
+			const int g = LuaToNumber(l, j + 1, 2);
+			const int b = LuaToNumber(l, j + 1, 3);
 			this->Color = Video.MapRGB(TheScreen->format, r, g, b);
 		} else if (!strcmp(value, "timers")) {
 			if (!lua_istable(l, j + 1)) {
@@ -362,9 +313,7 @@ void CPlayer::Load(lua_State *l)
 				LuaError(l, "Wrong upgrade timer length: %d" _C_ subargs);
 			}
 			for (int k = 0; k < subargs; ++k) {
-				lua_rawgeti(l, j + 1, k + 1);
-				this->UpgradeTimers.Upgrades[k] = LuaToNumber(l, -1);
-				lua_pop(l, 1);
+				this->UpgradeTimers.Upgrades[k] = LuaToNumber(l, j + 1, k + 1);
 			}
 		} else {
 			LuaError(l, "Unsupported tag: %s" _C_ value);
@@ -425,10 +374,8 @@ static int CclGetThisPlayer(lua_State *l)
 */
 static int CclSetThisPlayer(lua_State *l)
 {
-	int plynr;
-
 	LuaCheckArgs(l, 1);
-	plynr = LuaToNumber(l, 1);
+	int plynr = LuaToNumber(l, 1);
 	ThisPlayer = &Players[plynr];
 
 	lua_pushnumber(l, plynr);
@@ -456,10 +403,8 @@ static int CclSetMaxSelectable(lua_State *l)
 */
 static int CclSetAllPlayersUnitLimit(lua_State *l)
 {
-	int i;
-
 	LuaCheckArgs(l, 1);
-	for (i = 0; i < PlayerMax; ++i) {
+	for (int i = 0; i < PlayerMax; ++i) {
 		Players[i].UnitLimit = LuaToNumber(l, 1);
 	}
 
@@ -474,10 +419,8 @@ static int CclSetAllPlayersUnitLimit(lua_State *l)
 */
 static int CclSetAllPlayersBuildingLimit(lua_State *l)
 {
-	int i;
-
 	LuaCheckArgs(l, 1);
-	for (i = 0; i < PlayerMax; ++i) {
+	for (int i = 0; i < PlayerMax; ++i) {
 		Players[i].BuildingLimit = LuaToNumber(l, 1);
 	}
 
@@ -492,10 +435,8 @@ static int CclSetAllPlayersBuildingLimit(lua_State *l)
 */
 static int CclSetAllPlayersTotalUnitLimit(lua_State *l)
 {
-	int i;
-
 	LuaCheckArgs(l, 1);
-	for (i = 0; i < PlayerMax; ++i) {
+	for (int i = 0; i < PlayerMax; ++i) {
 		Players[i].TotalUnitLimit = LuaToNumber(l, 1);
 	}
 
@@ -512,14 +453,10 @@ static int CclSetAllPlayersTotalUnitLimit(lua_State *l)
 */
 static int CclSetDiplomacy(lua_State *l)
 {
-	int plynr;
-	int base;
-	const char *state;
-
 	LuaCheckArgs(l, 3);
-	base = LuaToNumber(l, 1);
-	plynr = LuaToNumber(l, 3);
-	state = LuaToString(l, 2);
+	const int base = LuaToNumber(l, 1);
+	const int plynr = LuaToNumber(l, 3);
+	const char *state = LuaToString(l, 2);
 
 	if (!strcmp(state, "allied")) {
 		SendCommandDiplomacy(base, DiplomacyAllied, plynr);
@@ -530,7 +467,6 @@ static int CclSetDiplomacy(lua_State *l)
 	} else if (!strcmp(state, "enemy")) {
 		SendCommandDiplomacy(base, DiplomacyEnemy, plynr);
 	}
-
 	return 0;
 }
 
@@ -555,15 +491,11 @@ static int CclDiplomacy(lua_State *l)
 */
 static int CclSetSharedVision(lua_State *l)
 {
-	int plynr;
-	int base;
-	bool shared;
-
 	LuaCheckArgs(l, 3);
 
-	base = LuaToNumber(l, 1);
-	shared = LuaToBoolean(l, 2);
-	plynr = LuaToNumber(l, 3);
+	const int base = LuaToNumber(l, 1);
+	const bool shared = LuaToBoolean(l, 2);
+	const int plynr = LuaToNumber(l, 3);
 
 	SendCommandSharedVision(base, shared, plynr);
 
@@ -583,47 +515,30 @@ static int CclSharedVision(lua_State *l)
 }
 
 /**
-**  Define race names
+**  Define race names in addition to those already there.
 **
 **  @param l  Lua state.
 */
-static int CclDefineRaceNames(lua_State *l)
+static int CclDefineNewRaceNames(lua_State *l)
 {
-	int i;
-	int j;
-	int k;
-	int args;
-	int subargs;
-	const char *value;
-
-	PlayerRaces.Count = 0;
-	args = lua_gettop(l);
-	for (j = 0; j < args; ++j) {
-		value = LuaToString(l, j + 1);
+	int args = lua_gettop(l);
+	for (int j = 0; j < args; ++j) {
+		const char *value = LuaToString(l, j + 1);
 		if (!strcmp(value, "race")) {
 			++j;
 			if (!lua_istable(l, j + 1)) {
 				LuaError(l, "incorrect argument");
 			}
-			subargs = lua_rawlen(l, j + 1);
-			i = PlayerRaces.Count++;
-			PlayerRaces.Name[i].clear();
-			PlayerRaces.Display[i].clear();
-			PlayerRaces.Visible[i] = false;
-			for (k = 0; k < subargs; ++k) {
-				lua_rawgeti(l, j + 1, k + 1);
-				value = LuaToString(l, -1);
-				lua_pop(l, 1);
+			int subargs = lua_rawlen(l, j + 1);
+			int i = PlayerRaces.Count++;
+			for (int k = 0; k < subargs; ++k) {
+				value = LuaToString(l, j + 1, k + 1);
 				if (!strcmp(value, "name")) {
 					++k;
-					lua_rawgeti(l, j + 1, k + 1);
-					PlayerRaces.Name[i] = LuaToString(l, -1);
-					lua_pop(l, 1);
+					PlayerRaces.Name[i] = LuaToString(l, j + 1, k + 1);
 				} else if (!strcmp(value, "display")) {
 					++k;
-					lua_rawgeti(l, j + 1, k + 1);
-					PlayerRaces.Display[i] = LuaToString(l, -1);
-					lua_pop(l, 1);
+					PlayerRaces.Display[i] = LuaToString(l, j + 1, k + 1);
 				} else if (!strcmp(value, "visible")) {
 					PlayerRaces.Visible[i] = 1;
 				} else {
@@ -634,8 +549,18 @@ static int CclDefineRaceNames(lua_State *l)
 			LuaError(l, "Unsupported tag: %s" _C_ value);
 		}
 	}
-
 	return 0;
+}
+
+/**
+** Define race names
+**
+** @param l Lua state.
+*/
+static int CclDefineRaceNames(lua_State *l)
+{
+	PlayerRaces.Clean();
+	return CclDefineNewRaceNames(l);
 }
 
 /**
@@ -652,9 +577,7 @@ static int CclDefinePlayerColors(lua_State *l)
 
 	const int args = lua_rawlen(l, 1);
 	for (int i = 0; i < args; ++i) {
-		lua_rawgeti(l, 1, i + 1);
-		PlayerColorNames[i / 2] = LuaToString(l, -1);
-		lua_pop(l, 1);
+		PlayerColorNames[i / 2] = LuaToString(l, 1, i + 1);
 		++i;
 		lua_rawgeti(l, 1, i + 1);
 		if (!lua_istable(l, -1)) {
@@ -666,16 +589,8 @@ static int CclDefinePlayerColors(lua_State *l)
 		}
 		for (int j = 0; j < numcolors; ++j) {
 			lua_rawgeti(l, -1, j + 1);
-			if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 3) {
-				LuaError(l, "incorrect argument");
-			}
-			lua_rawgeti(l, -1, 1);
-			lua_rawgeti(l, -2, 2);
-			lua_rawgeti(l, -3, 3);
-			PlayerColorsRGB[i / 2][j].R = LuaToNumber(l, -3);
-			PlayerColorsRGB[i / 2][j].G = LuaToNumber(l, -2);
-			PlayerColorsRGB[i / 2][j].B = LuaToNumber(l, -1);
-			lua_pop(l, 3 + 1);
+			PlayerColorsRGB[i / 2][j].Parse(l);
+			lua_pop(l, 1);
 		}
 	}
 
@@ -760,11 +675,16 @@ static int CclGetPlayerData(lua_State *l)
 		lua_pushnumber(l, p->MaxResources[resId]);
 		return 1;
 	} else if (!strcmp(data, "UnitTypesCount")) {
-		CUnitType *type;
-
 		LuaCheckArgs(l, 3);
-		type = CclGetUnitType(l);
+		CUnitType *type = CclGetUnitType(l);
+		Assert(type);
 		lua_pushnumber(l, p->UnitTypesCount[type->Slot]);
+		return 1;
+	} else if (!strcmp(data, "UnitTypesAiActiveCount")) {
+		LuaCheckArgs(l, 3);
+		CUnitType *type = CclGetUnitType(l);
+		Assert(type);
+		lua_pushnumber(l, p->UnitTypesAiActiveCount[type->Slot]);
 		return 1;
 	} else if (!strcmp(data, "AiEnabled")) {
 		lua_pushboolean(l, p->AiEnabled);
@@ -838,6 +758,28 @@ static int CclGetPlayerData(lua_State *l)
 	} else if (!strcmp(data, "SpeedResearch")) {
 		lua_pushnumber(l, p->SpeedResearch);
 		return 1;
+	} else if (!strcmp(data, "Allow")) {
+		LuaCheckArgs(l, 3);
+		const char *ident = LuaToString(l, 3);
+		if (!strncmp(ident, "unit-", 5)) {
+			int id = UnitTypeIdByIdent(ident);
+			if (UnitIdAllowed(Players[p->Index], id) > 0) {
+				lua_pushstring(l, "A");
+			} else if (UnitIdAllowed(Players[p->Index], id) == 0) {
+				lua_pushstring(l, "F");
+			}
+		} else if (!strncmp(ident, "upgrade-", 8)) {
+			if (UpgradeIdentAllowed(Players[p->Index], ident) == 'A') {
+				lua_pushstring(l, "A");
+			} else if (UpgradeIdentAllowed(Players[p->Index], ident) == 'R') {
+				lua_pushstring(l, "R");
+			} else if (UpgradeIdentAllowed(Players[p->Index], ident) == 'F') {
+				lua_pushstring(l, "F");
+			}
+		} else {
+			DebugPrint(" wrong ident %s\n" _C_ ident);
+		}
+		return 1;
 	} else {
 		LuaError(l, "Invalid field: %s" _C_ data);
 	}
@@ -852,32 +794,21 @@ static int CclGetPlayerData(lua_State *l)
 */
 static int CclSetPlayerData(lua_State *l)
 {
-	CPlayer *p;
-	const char *data;
-
 	if (lua_gettop(l) < 3) {
 		LuaError(l, "incorrect argument");
 	}
 	lua_pushvalue(l, 1);
-	p = CclGetPlayer(l);
+	CPlayer *p = CclGetPlayer(l);
 	lua_pop(l, 1);
-	data = LuaToString(l, 2);
+	const char *data = LuaToString(l, 2);
 
 	if (!strcmp(data, "Name")) {
 		p->SetName(LuaToString(l, 3));
 	} else if (!strcmp(data, "RaceName")) {
-		unsigned int i;
-		const char *racename;
+		const char *racename = LuaToString(l, 3);
+		p->Race = PlayerRaces.GetRaceIndexByName(racename);
 
-		racename = LuaToString(l, 3);
-		p->Race = 0;
-		for (i = 0; i < PlayerRaces.Count; ++i) {
-			if (!strcmp(racename, PlayerRaces.Name[i].c_str())) {
-				p->Race = i;
-				break;
-			}
-		}
-		if (i == PlayerRaces.Count)	{
+		if (p->Race == -1) {
 			LuaError(l, "invalid race name '%s'" _C_ racename);
 		}
 	} else if (!strcmp(data, "Resources")) {
@@ -921,13 +852,13 @@ static int CclSetPlayerData(lua_State *l)
 	} else if (!strcmp(data, "TotalKills")) {
 		p->TotalKills = LuaToNumber(l, 3);
 	} else if (!strcmp(data, "SpeedResourcesHarvest")) {
-		LuaCheckArgs(l, 3);
+		LuaCheckArgs(l, 4);
 
 		const std::string res = LuaToString(l, 3);
 		const int resId = GetResourceIdByName(l, res.c_str());
 		p->SpeedResourcesHarvest[resId] = LuaToNumber(l, 4);
 	} else if (!strcmp(data, "SpeedResourcesReturn")) {
-		LuaCheckArgs(l, 3);
+		LuaCheckArgs(l, 4);
 
 		const std::string res = LuaToString(l, 3);
 		const int resId = GetResourceIdByName(l, res.c_str());
@@ -937,9 +868,26 @@ static int CclSetPlayerData(lua_State *l)
 	} else if (!strcmp(data, "SpeedTrain")) {
 		p->SpeedTrain = LuaToNumber(l, 3);
 	} else if (!strcmp(data, "SpeedUpgrade")) {
-		p->SpeedTrain = LuaToNumber(l, 3);
+		p->SpeedUpgrade = LuaToNumber(l, 3);
 	} else if (!strcmp(data, "SpeedResearch")) {
 		p->SpeedResearch = LuaToNumber(l, 3);
+	} else if (!strcmp(data, "Allow")) {
+		LuaCheckArgs(l, 4);
+		const char *ident = LuaToString(l, 3);
+		const std::string acquire = LuaToString(l, 4);
+
+		if (!strncmp(ident, "upgrade-", 8)) {
+			if (acquire == "R" && UpgradeIdentAllowed(*p, ident) != 'R') {
+				UpgradeAcquire(*p, CUpgrade::Get(ident));
+			} else if (acquire == "F" || acquire == "A") {
+				if (UpgradeIdentAllowed(*p, ident) == 'R') {
+					UpgradeLost(*p, CUpgrade::Get(ident)->ID);
+				}
+				AllowUpgradeId(*p, UpgradeIdByIdent(ident), acquire[0]);
+			}
+		} else {
+			LuaError(l, " wrong ident %s\n" _C_ ident);
+		}
 	} else {
 		LuaError(l, "Invalid field: %s" _C_ data);
 	}
@@ -992,6 +940,7 @@ void PlayerCclRegister()
 	lua_register(Lua, "SharedVision", CclSharedVision);
 
 	lua_register(Lua, "DefineRaceNames", CclDefineRaceNames);
+	lua_register(Lua, "DefineNewRaceNames", CclDefineRaceNames);
 	lua_register(Lua, "DefinePlayerColors", CclDefinePlayerColors);
 	lua_register(Lua, "DefinePlayerColorIndex", CclDefinePlayerColorIndex);
 

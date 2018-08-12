@@ -37,10 +37,14 @@
 #include "stratagus.h"
 
 #include "map.h"
+#include "settings.h"
+#include "tileset.h"
 #include "unit.h"
 #include "unit_find.h"
 
 #include "pathfinder.h"
+
+#include <stdio.h>
 
 /*----------------------------------------------------------------------------
 --  Declarations
@@ -60,7 +64,7 @@ struct Open {
 };
 
 //for 32 bit signed int
-inline int MyAbs(int x) { return (x ^ (x >> 31)) - (x >> 31); }
+inline int32_t MyAbs(int32_t x) { return (x ^ (x >> 31)) - (x >> 31); }
 
 /// heuristic cost function for a*
 static inline int AStarCosts(const Vec2i &pos, const Vec2i &goalPos)
@@ -124,7 +128,7 @@ static const int CacheNotSet = -5;
 #ifdef ASTAR_PROFILE
 
 #include <map>
-#ifndef __unix
+#ifdef USE_WIN32
 #include <windows.h>
 #else
 
@@ -450,7 +454,7 @@ static inline int AStarAddNode(const Vec2i &pos, int o, int costs)
 **  Can be further optimised knowing that the new cost MUST BE LOWER
 **  than the old one.
 */
-static void AStarReplaceNode(int pos, int)
+static void AStarReplaceNode(int pos)
 {
 	ProfileBegin("AStarReplaceNode");
 
@@ -459,8 +463,7 @@ static void AStarReplaceNode(int pos, int)
 	// Remove the outdated node
 	node = OpenSet[pos];
 	OpenSetSize--;
-	//memmove(&OpenSet[pos], &OpenSet[pos+1], sizeof(Open) * (OpenSetSize-pos));
-	memcpy(&OpenSet[pos], &OpenSet[pos + 1], sizeof(Open) * (OpenSetSize - pos));
+	memmove(&OpenSet[pos], &OpenSet[pos+1], sizeof(Open) * (OpenSetSize-pos));
 
 	// Re-add the node with the new cost
 	AStarAddNode(node.pos, node.O, node.Costs);
@@ -513,7 +516,6 @@ static int CostMoveToCallBack_Default(unsigned int index, const CUnit &unit)
 	int cost = 0;
 	const int mask = unit.Type->MovementMask;
 	const CUnitTypeFinder unit_finder((UnitTypeType)unit.Type->UnitType);
-	const unsigned int player_index = unit.Player->Index;
 
 	// verify each tile of the unit.
 	int h = unit.Type->TileHeight;
@@ -523,7 +525,7 @@ static int CostMoveToCallBack_Default(unsigned int index, const CUnit &unit)
 		int i = w;
 		do {
 			const int flag = mf->Flags & mask;
-			if (flag && (AStarKnowUnseenTerrain || mf->IsExplored(player_index))) {
+			if (flag && (AStarKnowUnseenTerrain || mf->playerInfo.IsExplored(*unit.Player))) {
 				if (flag & ~(MapFieldLandUnit | MapFieldAirUnit | MapFieldSeaUnit)) {
 					// we can't cross fixed units and other unpassable things
 					return -1;
@@ -538,21 +540,26 @@ static int CostMoveToCallBack_Default(unsigned int index, const CUnit &unit)
 					// moving unit are crossable
 					cost += AStarMovingUnitCrossingCost;
 				} else {
-					// for non moving unit Always Fail unless goal is unit
+					// for non moving unit Always Fail unless goal is unit, or unit can attack the target
 					if (&unit != goal) {
+						if (goal->Player->IsEnemy(unit) && unit.IsAgressive() && CanTarget(*unit.Type, *goal->Type)
+							&& goal->Variable[UNHOLYARMOR_INDEX].Value == 0 && goal->IsVisibleAsGoal(*unit.Player)) {
+								cost += 2 * AStarMovingUnitCrossingCost;
+						} else {
 						// FIXME: Need support for moving a fixed unit to add cost
-						return -1;
+							return -1;
+						}
 						//cost += AStarFixedUnitCrossingCost;
 					}
 				}
 			}
 			// Add cost of crossing unknown tiles if required
-			if (!AStarKnowUnseenTerrain && !mf->IsExplored(player_index)) {
+			if (!AStarKnowUnseenTerrain && !mf->playerInfo.IsExplored(*unit.Player)) {
 				// Tend against unknown tiles.
 				cost += AStarUnknownTerrainCost;
 			}
 			// Add tile movement cost
-			cost += mf->Cost;
+			cost += mf->getCost();
 			++mf;
 		} while (--i);
 		index += AStarMapWidth;
@@ -589,7 +596,8 @@ public:
 		unit(unit), goal_reachable(goal_reachable)
 	{}
 
-	void operator()(int offset) const {
+	void operator()(int offset) const
+	{
 		if (CostMoveTo(offset, unit) >= 0) {
 			AStarMatrix[offset].InGoal = 1;
 			*goal_reachable = true;
@@ -608,22 +616,26 @@ class MinMaxRangeVisitor
 public:
 	explicit MinMaxRangeVisitor(const T &func) : func(func), minrange(0), maxrange(0) {}
 
-	void SetGoal(Vec2i goalTopLeft, Vec2i goalBottomRight) {
+	void SetGoal(Vec2i goalTopLeft, Vec2i goalBottomRight)
+	{
 		this->goalTopLeft = goalTopLeft;
 		this->goalBottomRight = goalBottomRight;
 	}
 
-	void SetRange(int minrange, int maxrange) {
+	void SetRange(int minrange, int maxrange)
+	{
 		this->minrange = minrange;
 		this->maxrange = maxrange;
 	}
 
-	void SetUnitSize(const Vec2i &tileSize) {
+	void SetUnitSize(const Vec2i &tileSize)
+	{
 		this->unitExtraTileSize.x = tileSize.x - 1;
 		this->unitExtraTileSize.y = tileSize.y - 1;
 	}
 
-	void Visit() const {
+	void Visit() const
+	{
 		TopHemicycle();
 		TopHemicycleNoMinRange();
 		Center();
@@ -632,12 +644,14 @@ public:
 	}
 
 private:
-	int GetMaxOffsetX(int dy, int range) const {
+	int GetMaxOffsetX(int dy, int range) const
+	{
 		return isqrt(square(range + 1) - square(dy) - 1);
 	}
 
 	// Distance are computed between bottom of unit and top of goal
-	void TopHemicycle() const {
+	void TopHemicycle() const
+	{
 		const int miny = std::max(0, goalTopLeft.y - maxrange - unitExtraTileSize.y);
 		const int maxy = std::min(goalTopLeft.y - minrange - unitExtraTileSize.y, goalTopLeft.y - 1 - unitExtraTileSize.y);
 		for (int y = miny; y <= maxy; ++y) {
@@ -653,7 +667,8 @@ private:
 		}
 	}
 
-	void HemiCycleRing(int y, int offsetminx, int offsetmaxx) const {
+	void HemiCycleRing(int y, int offsetminx, int offsetmaxx) const
+	{
 		const int minx = std::max(0, goalTopLeft.x - offsetmaxx - unitExtraTileSize.x);
 		const int maxx = std::min(Map.Info.MapWidth - 1 - unitExtraTileSize.x, goalBottomRight.x + offsetmaxx);
 		Vec2i mpos(minx, y);
@@ -667,7 +682,8 @@ private:
 		}
 	}
 
-	void TopHemicycleNoMinRange() const {
+	void TopHemicycleNoMinRange() const
+	{
 		const int miny = std::max(0, goalTopLeft.y - (minrange - 1) - unitExtraTileSize.y);
 		const int maxy = goalTopLeft.y - 1 - unitExtraTileSize.y;
 		for (int y = miny; y <= maxy; ++y) {
@@ -678,7 +694,8 @@ private:
 		}
 	}
 
-	void Center() const {
+	void Center() const
+	{
 		const int miny = std::max(0, goalTopLeft.y - unitExtraTileSize.y);
 		const int maxy = std::min<int>(Map.Info.MapHeight - 1 - unitExtraTileSize.y, goalBottomRight.y);
 		const int minx = std::max(0, goalTopLeft.x - maxrange - unitExtraTileSize.x);
@@ -708,7 +725,8 @@ private:
 		}
 	}
 
-	void BottomHemicycleNoMinRange() const {
+	void BottomHemicycleNoMinRange() const
+	{
 		const int miny = goalBottomRight.y + 1;
 		const int maxy = std::min(Map.Info.MapHeight - 1 - unitExtraTileSize.y, goalBottomRight.y + (minrange - 1));
 
@@ -720,7 +738,8 @@ private:
 		}
 	}
 
-	void BottomHemicycle() const {
+	void BottomHemicycle() const
+	{
 		const int miny = std::max(goalBottomRight.y + minrange, goalBottomRight.y + 1);
 		const int maxy = std::min(Map.Info.MapHeight - 1 - unitExtraTileSize.y, goalBottomRight.y + maxrange);
 		for (int y = miny; y <= maxy; ++y) {
@@ -846,7 +865,7 @@ static int AStarSavePath(const Vec2i &startPos, const Vec2i &endPos, char *path,
 */
 static int AStarFindSimplePath(const Vec2i &startPos, const Vec2i &goal, int gw, int gh,
 							   int, int, int minrange, int maxrange,
-							   char *path, int, const CUnit &unit)
+							   char *path, const CUnit &unit)
 {
 	ProfileBegin("AStarFindSimplePath");
 	// At exact destination point already
@@ -904,7 +923,7 @@ int AStarFindPath(const Vec2i &startPos, const Vec2i &goalPos, int gw, int gh,
 
 	//  Check for simple cases first
 	int ret = AStarFindSimplePath(startPos, goalPos, gw, gh, tilesizex, tilesizey,
-								  minrange, maxrange, path, pathlen, unit);
+								  minrange, maxrange, path, unit);
 	if (ret != PF_FAILED) {
 		ProfileEnd("AStarFindPath");
 		return ret;
@@ -1045,7 +1064,7 @@ int AStarFindPath(const Vec2i &startPos, const Vec2i &goalPos, int gw, int gh,
 				} else {
 					costToGoal = AStarCosts(endPos, goalPos);
 					AStarMatrix[eo].CostToGoal = costToGoal;
-					AStarReplaceNode(j, AStarMatrix[eo].CostFromStart + costToGoal);
+					AStarReplaceNode(j);
 				}
 				// we don't have to add this point to the close set
 			}

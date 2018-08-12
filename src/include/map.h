@@ -84,14 +84,11 @@
 
 #include <string>
 
-#ifndef __TILESET_H__
-#include "tileset.h"
-#endif
-
 #ifndef __MAP_TILE_H__
 #include "tile.h"
 #endif
 
+#include "color.h"
 #include "vec2i.h"
 
 /*----------------------------------------------------------------------------
@@ -101,6 +98,7 @@
 class CGraphic;
 class CPlayer;
 class CFile;
+class CTileset;
 class CUnit;
 class CUnitType;
 
@@ -110,24 +108,6 @@ class CUnitType;
 
 #define MaxMapWidth  256  /// max map width supported
 #define MaxMapHeight 256  /// max map height supported
-
-// Not used until now:
-#define MapFieldSpeedMask 0x0007  /// Move faster on this tile
-
-#define MapFieldHuman 0x0008  /// Human is owner of the field (walls)
-
-#define MapFieldLandAllowed  0x0010  /// Land units allowed
-#define MapFieldCoastAllowed 0x0020  /// Coast (transporter) units allowed
-#define MapFieldWaterAllowed 0x0040  /// Water units allowed
-#define MapFieldNoBuilding   0x0080  /// No buildings allowed
-
-#define MapFieldUnpassable 0x0100  /// Field is movement blocked
-//#define MapFieldWall       0x0200  /// defined in tileset.h
-
-#define MapFieldLandUnit 0x1000  /// Land unit on field
-#define MapFieldAirUnit  0x2000  /// Air unit on field
-#define MapFieldSeaUnit  0x4000  /// Water unit on field
-#define MapFieldBuilding 0x8000  /// Building on field
 
 /*----------------------------------------------------------------------------
 --  Map info structure
@@ -139,11 +119,13 @@ class CUnitType;
 class CMapInfo
 {
 public:
-	bool IsPointOnMap(int x, int y) const {
+	bool IsPointOnMap(int x, int y) const
+	{
 		return (x >= 0 && y >= 0 && x < MapWidth && y < MapHeight);
 	}
 
-	bool IsPointOnMap(const Vec2i &pos) const {
+	bool IsPointOnMap(const Vec2i &pos) const
+	{
 		return IsPointOnMap(pos.x, pos.y);
 	}
 
@@ -167,15 +149,30 @@ public:
 class CMap
 {
 public:
-	inline unsigned int getIndex(int x, int y) const {
+	CMap();
+	~CMap();
+
+	unsigned int getIndex(int x, int y) const
+	{
 		return x + y * this->Info.MapWidth;
 	}
-
-	unsigned int getIndex(const Vec2i &pos) const {
+	unsigned int getIndex(const Vec2i &pos) const
+	{
 		return getIndex(pos.x, pos.y);
 	}
-	inline CMapField *Field(unsigned int index) const {
+
+	CMapField *Field(unsigned int index) const
+	{
 		return &this->Fields[index];
+	}
+	/// Get the MapField at location x,y
+	CMapField *Field(int x, int y) const
+	{
+		return &this->Fields[x + y * this->Info.MapWidth];
+	}
+	CMapField *Field(const Vec2i &pos) const
+	{
+		return Field(pos.x, pos.y);
 	}
 
 	/// Alocate and initialise map table.
@@ -186,8 +183,11 @@ public:
 	void Clean();
 	/// Cleanup memory for fog of war tables
 	void CleanFogOfWar();
-	/// Remove wood/rock from the map.
-	void ClearTile(unsigned short type, const Vec2i &pos);
+
+	/// Remove wood from the map.
+	void ClearWoodTile(const Vec2i &pos);
+	/// Remove rock from the map.
+	void ClearRockTile(const Vec2i &pos);
 
 	/// convert map pixelpos coordonates into tilepos
 	Vec2i MapPixelPosToTilePos(const PixelPos &mapPos) const;
@@ -196,57 +196,8 @@ public:
 	/// convert tilepos coordonates into map pixel pos (take the center of the tile)
 	PixelPos TilePosToMapPixelPos_Center(const Vec2i &tilePos) const;
 
-	/**
-	**  Find out if a field is seen (By player, or by shared vision)
-	**  This function will return > 1 with no fog of war.
-	**
-	**  @param player  Player to check for.
-	**  @param index   flat tile index adress.
-	**
-	**  @return        0 unexplored, 1 explored, > 1 visible.
-	*/
-	unsigned short IsTileVisible(const CPlayer &player, const unsigned int index) const;
-
-	/// Check if a field flags.
-	bool CheckMask(const unsigned int index, const int mask) const {
-		return (this->Fields[index].Flags & mask) != 0;
-	}
-
-	bool CheckMask(const Vec2i &pos, int mask) const {
-		return CheckMask(getIndex(pos), mask);
-	}
-
-	/// Check if a field for the user is explored.
-	bool IsFieldExplored(const CPlayer &player, const unsigned int index) const;
-
-	/// Check if a field for the user is visible.
-	bool IsFieldVisible(const CPlayer &player, const unsigned int index) const {
-		return IsTileVisible(player, index) > 1;
-	}
-
-	unsigned short IsTileVisible(const CPlayer &player, const Vec2i &pos) const {
-		return IsTileVisible(player, getIndex(pos));
-	}
-
-	/// Check if a field for the user is explored.
-	bool IsFieldExplored(const CPlayer &player, const Vec2i &pos) {
-		Assert(Info.IsPointOnMap(pos));
-		return IsFieldExplored(player, getIndex(pos));
-	}
-
-	/// Check if a field for the user is visible.
-	bool IsFieldVisible(const CPlayer &player, const Vec2i &pos) {
-		return IsTileVisible(player, getIndex(pos)) > 1;
-	}
-
 	/// Mark a tile as seen by the player.
-	void MarkSeenTile(const unsigned int index);
-
-	/// Mark a tile as seen by the player.
-	void MarkSeenTile(const Vec2i &pos) {
-		Assert(Info.IsPointOnMap(pos));
-		MarkSeenTile(getIndex(pos));
-	}
+	void MarkSeenTile(CMapField &mf);
 
 	/// Regenerate the forest.
 	void RegenerateForest();
@@ -254,18 +205,6 @@ public:
 	void Reveal();
 	/// Save the map.
 	void Save(CFile &file) const;
-
-	/// Get the MapField at location x,y
-	inline CMapField *Field(int x, int y) const {
-		return &this->Fields[x + y * this->Info.MapWidth];
-	}
-	CMapField *Field(const Vec2i &pos) const {
-		return Field(pos.x, pos.y);
-	}
-
-	// return true if there is the specified (terrain) resource on map.
-	bool IsTerrainResourceOnMap(const Vec2i &pos, int resource) const;
-	bool IsTerrainResourceOnMap(const Vec2i &pos) const;
 
 	//
 	// Wall
@@ -275,7 +214,7 @@ public:
 	/// Set wall on field.
 	void RemoveWall(const Vec2i &pos);
 	/// Set wall on field.
-	void SetWall(const Vec2i &pos, int humanwall);
+	void SetWall(const Vec2i &pos, bool humanwall);
 
 	/// Returns true, if wall on the map tile field
 	bool WallOnMap(const Vec2i &pos) const;
@@ -283,45 +222,6 @@ public:
 	bool HumanWallOnMap(const Vec2i &pos) const;
 	/// Returns true, if orc wall on the map tile field
 	bool OrcWallOnMap(const Vec2i &pos) const;
-
-
-	//
-	//  Tile type.
-	//
-
-	/// Returns true, if water on the map tile field
-	bool WaterOnMap(const unsigned int index) const {
-		return CheckMask(index, MapFieldWaterAllowed);
-	};
-
-	/**
-	**  Water on map tile.
-	**
-	**  @param pos  map tile position.
-	**
-	**  @return    True if water, false otherwise.
-	*/
-	bool WaterOnMap(const Vec2i &pos) const {
-		Assert(Info.IsPointOnMap(pos));
-		return WaterOnMap(getIndex(pos));
-	}
-
-	/// Returns true, if coast on the map tile field
-	bool CoastOnMap(const unsigned int index) const {
-		return CheckMask(index, MapFieldCoastAllowed);
-	};
-
-	/**
-	**  Coast on map tile.
-	**
-	**  @param pos  map tile position.
-	**
-	**  @return    True if coast, false otherwise.
-	*/
-	bool CoastOnMap(const Vec2i &pos) const {
-		Assert(Info.IsPointOnMap(pos));
-		return CoastOnMap(getIndex(pos));
-	}
 
 	//UnitCache
 
@@ -334,7 +234,8 @@ public:
 	void Clamp(Vec2i &pos) const;
 
 	//Warning: we expect typical usage as xmin = x - range
-	void FixSelectionArea(Vec2i &minpos, Vec2i &maxpos) {
+	void FixSelectionArea(Vec2i &minpos, Vec2i &maxpos)
+	{
 		minpos.x = std::max<short>(0, minpos.x);
 		minpos.y = std::max<short>(0, minpos.y);
 
@@ -343,41 +244,6 @@ public:
 	}
 
 private:
-
-	/// Returns true, if forest on the map tile field
-	bool ForestOnMap(const unsigned int index) const {
-		return CheckMask(index, MapFieldForest);
-	}
-
-	/**
-	**  Forest on map tile.
-	**
-	**  @param pos  map tile position.
-	**
-	**  @return    True if forest, false otherwise.
-	*/
-	bool ForestOnMap(const Vec2i &pos) const {
-		Assert(Info.IsPointOnMap(pos));
-		return ForestOnMap(getIndex(pos));
-	}
-
-	/// Returns true, if rock on the map tile field
-	bool RockOnMap(const unsigned int index) const {
-		return CheckMask(index, MapFieldRocks);
-	}
-
-	/**
-	**  Rock on map tile.
-	**
-	**  @param pos  map tile position.
-	**
-	**  @return    True if rock, false otherwise.
-	*/
-	bool RockOnMap(const Vec2i &pos) const {
-		Assert(Info.IsPointOnMap(pos));
-		return RockOnMap(getIndex(pos));
-	}
-
 	/// Build tables for fog of war
 	void InitFogOfWar();
 
@@ -389,13 +255,11 @@ private:
 	/// Regenerate the forest.
 	void RegenerateForestTile(const Vec2i &pos);
 
-
 public:
 	CMapField *Fields;              /// fields on map
-
 	bool NoFogOfWar;           /// fog of war disabled
 
-	CTileset Tileset;          /// tileset data
+	CTileset *Tileset;          /// tileset data
 	std::string TileModelsFileName; /// lua filename that loads all tilemodels
 	CGraphic *TileGraphic;     /// graphic for all the tiles
 	static CGraphic *FogGraphic;      /// graphic for fog of war
@@ -413,8 +277,8 @@ extern char CurrentMapPath[1024]; /// Path to the current map
 
 /// Contrast of fog of war
 extern int FogOfWarOpacity;
-/// RGB triplet (0-255) of fog of war color
-extern int FogOfWarColor[3];
+/// fog of war color
+extern CColor FogOfWarColor;
 /// Forest regeneration
 extern int ForestRegeneration;
 /// Flag must reveal the map
@@ -482,12 +346,11 @@ extern void MapFixSeenWallNeighbors(const Vec2i &pos);
 extern void MapFixWallTile(const Vec2i &pos);
 
 //
-// in script_map.c
+// in script_map.cpp
 //
 /// Set a tile
-extern void SetTile(int tile, const Vec2i &pos, int value = 0);
-
-inline void SetTile(int tile, int x, int y, int value = 0)
+extern void SetTile(unsigned int tile, const Vec2i &pos, int value = 0);
+inline void SetTile(unsigned int tile, int x, int y, int value = 0)
 {
 	const Vec2i pos(x, y);
 	SetTile(tile, pos, value);
@@ -530,7 +393,7 @@ void MapUnmarkUnitSight(CUnit &unit);
 /// Can a unit with 'mask' enter the field
 inline bool CanMoveToMask(const Vec2i &pos, int mask)
 {
-	return !Map.CheckMask(pos, mask);
+	return !Map.Field(pos)->CheckMask(mask);
 }
 
 /// Handle Marking and Unmarking of radar vision

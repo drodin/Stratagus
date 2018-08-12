@@ -39,7 +39,6 @@
 #include "particle.h"
 #include "pathfinder.h"
 #include "player.h"
-#include "tileset.h"
 #include "unit.h"
 #include "unittype.h"
 #include "ui.h"
@@ -244,7 +243,6 @@ void CViewport::DrawMapBackgroundInViewport() const
 	int sy = this->MapPos.y;
 	int dy = this->TopLeftPos.y - this->Offset.y;
 	const int map_max = Map.Info.MapWidth * Map.Info.MapHeight;
-	unsigned short int tile;
 
 	while (sy  < 0) {
 		sy++;
@@ -253,14 +251,6 @@ void CViewport::DrawMapBackgroundInViewport() const
 	sy *=  Map.Info.MapWidth;
 
 	while (dy <= ey && sy  < map_max) {
-
-		/*
-			if (sy / Map.Info.MapWidth < 0) {
-				sy += Map.Info.MapWidth;
-				dy += PixelTileSize.y;
-				continue;
-			}
-		*/
 		int sx = this->MapPos.x + sy;
 		int dx = this->TopLeftPos.x - this->Offset.x;
 		while (dx <= ex && (sx - sy < Map.Info.MapWidth)) {
@@ -269,49 +259,14 @@ void CViewport::DrawMapBackgroundInViewport() const
 				dx += PixelTileSize.x;
 				continue;
 			}
-
+			const CMapField &mf = Map.Fields[sx];
+			unsigned short int tile;
 			if (ReplayRevealMap) {
-				tile = Map.Fields[sx].Tile;
+				tile = mf.getGraphicTile();
 			} else {
-				tile = Map.Fields[sx].SeenTile;
+				tile = mf.playerInfo.SeenTile;
 			}
 			Map.TileGraphic->DrawFrameClip(tile, dx, dy);
-
-#ifdef DEBUG
-#ifdef DEBUGMAPDRAW
-			int my_mask = 0;
-			unsigned int color = 0;
-			if (Map.CheckMask(sx, MapFieldUnpassable)) {
-				my_mask = 1;
-			}
-			if (Map.CheckMask(sx, MapFieldNoBuilding)) {
-				my_mask |= 2;
-			}
-			switch (my_mask) {
-				case 1://tile only Unpassable
-					color = 0xFF0000;
-					break;
-				case 2://tile only NoBuilding
-					color = 0x00FF00;
-					break;
-				case 3://tile Unpassable and NoBuilding
-					color = 0xFF;
-					break;
-				default:
-					break;
-			}
-
-			Video.DrawHLineClip(color, dx, dy, PixelTileSize.x);
-			Video.DrawVLineClip(color, dx, dy, PixelTileSize.y);
-			if (0 && my_mask) {
-				CLabel label(GetSmallFont());
-				label.Draw(dx + 2, dy + 2, tile);
-				label.Draw(dx + 2, dy + GetSmallFont()->Height() + 4,
-						   Map.Fields[sx].TilesetTile);
-
-			}
-#endif
-#endif
 			++sx;
 			dx += PixelTileSize.x;
 		}
@@ -335,10 +290,10 @@ static void ShowUnitName(const CViewport &vp, PixelPos pos, CUnit *unit, bool hi
 	int height = font.Height() + 6;
 	CLabel label(font, "white", "red");
 	int x;
-	int y = std::min<int>(pos.y + 10, vp.BottomRightPos.y - 1 - height);
+	int y = std::min<int>(GameCursor->G->Height + pos.y + 10, vp.BottomRightPos.y - 1 - height);
 	const CPlayer *tplayer = ThisPlayer;
 
-	if (unit) {
+	if (unit && unit->IsAliveOnMap()) {
 		int backgroundColor;
 		if (unit->Player->Index == (*tplayer).Index) {
 			backgroundColor = Video.MapRGB(TheScreen->format, 0, 0, 252);
@@ -350,14 +305,14 @@ static void ShowUnitName(const CViewport &vp, PixelPos pos, CUnit *unit, bool hi
 			backgroundColor = Video.MapRGB(TheScreen->format, 176, 176, 176);
 		}
 		width = font.getWidth(unit->Type->Name) + 10;
-		x = std::min<int>(pos.x, vp.BottomRightPos.x - 1 - width);
+		x = std::min<int>(GameCursor->G->Width + pos.x, vp.BottomRightPos.x - 1 - width);
 		Video.FillTransRectangle(backgroundColor, x, y, width, height, 128);
 		Video.DrawRectangle(ColorWhite, x, y, width, height);
 		label.DrawCentered(x + width / 2, y + 3, unit->Type->Name);
 	} else if (hidden) {
 		const std::string str("Unrevealed terrain");
 		width = font.getWidth(str) + 10;
-		x = std::min<int>(pos.x, vp.BottomRightPos.x - 1 - width);
+		x = std::min<int>(GameCursor->G->Width + pos.x, vp.BottomRightPos.x - 1 - width);
 		Video.FillTransRectangle(ColorBlue, x, y, width, height, 128);
 		Video.DrawRectangle(ColorWhite, x, y, width, height);
 		label.DrawCentered(x + width / 2, y + 3, str);
@@ -377,24 +332,67 @@ void CViewport::Draw() const
 
 	CurrentViewport = this;
 	{
+		// Now we need to sort units, missiles, particles by draw level and draw them
 		std::vector<CUnit *> unittable;
 		std::vector<Missile *> missiletable;
+		std::vector<CParticle *> particletable;
 
-		// We find and sort units after draw level.
 		FindAndSortUnits(*this, unittable);
 		const size_t nunits = unittable.size();
 		FindAndSortMissiles(*this, missiletable);
 		const size_t nmissiles = missiletable.size();
+		ParticleManager.prepareToDraw(*this, particletable);
+		const size_t nparticles = particletable.size();
+
 		size_t i = 0;
 		size_t j = 0;
+		size_t k = 0;
 
-		while (i < nunits && j < nmissiles) {
-			if (unittable[i]->Type->DrawLevel <= missiletable[j]->Type->DrawLevel) {
-				unittable[i]->Draw(*this);
-				++i;
+
+		while ((i < nunits && j < nmissiles) || (i < nunits && k < nparticles)
+			   || (j < nmissiles && k < nparticles)) {
+			if (i == nunits) {
+				if (missiletable[j]->Type->DrawLevel < particletable[k]->getDrawLevel()) {
+					missiletable[j]->DrawMissile(*this);
+					++j;
+				} else {
+					particletable[k]->draw();
+					++k;
+				}
+			} else if (j == nmissiles) {
+				if (unittable[i]->Type->DrawLevel < particletable[k]->getDrawLevel()) {
+					unittable[i]->Draw(*this);
+					++i;
+				} else {
+					particletable[k]->draw();
+					++k;
+				}
+			} else if (k == nparticles) {
+				if (unittable[i]->Type->DrawLevel < missiletable[j]->Type->DrawLevel) {
+					unittable[i]->Draw(*this);
+					++i;
+				} else {
+					missiletable[j]->DrawMissile(*this);
+					++j;
+				}
 			} else {
-				missiletable[j]->DrawMissile(*this);
-				++j;
+				if (unittable[i]->Type->DrawLevel <= missiletable[j]->Type->DrawLevel) {
+					if (unittable[i]->Type->DrawLevel < particletable[k]->getDrawLevel()) {
+						unittable[i]->Draw(*this);
+						++i;
+					} else {
+						particletable[k]->draw();
+						++k;
+					}
+				} else {
+					if (missiletable[j]->Type->DrawLevel < particletable[k]->getDrawLevel()) {
+						missiletable[j]->DrawMissile(*this);
+						++j;
+					} else {
+						particletable[k]->draw();
+						++k;
+					}
+				}
 			}
 		}
 		for (; i < nunits; ++i) {
@@ -403,9 +401,11 @@ void CViewport::Draw() const
 		for (; j < nmissiles; ++j) {
 			missiletable[j]->DrawMissile(*this);
 		}
+		for (; k < nparticles; ++k) {
+			particletable[k]->draw();
+		}
+		ParticleManager.endDraw();
 	}
-
-	ParticleManager.draw(*this);
 
 	this->DrawMapFogOfWar();
 
@@ -416,7 +416,7 @@ void CViewport::Draw() const
 	if (!Preference.ShowOrders) {
 	} else if (Preference.ShowOrders < 0
 			   || (ShowOrdersCount >= GameCycle) || (KeyModifiers & ModifierShift)) {
-		for (int i = 0; i < NumSelected; ++i) {
+		for (size_t i = 0; i != Selected.size(); ++i) {
 			ShowOrder(*Selected[i]);
 		}
 	}
@@ -426,10 +426,12 @@ void CViewport::Draw() const
 	//
 	if (CursorOn == CursorOnMap && Preference.ShowNameDelay && (ShowNameDelay < GameCycle) && (GameCycle < ShowNameTime)) {
 		const Vec2i tilePos = this->ScreenToTilePos(CursorScreenPos);
-		if (UI.MouseViewport->IsInsideMapArea(CursorScreenPos)
-			&& (Map.IsFieldVisible(*ThisPlayer, tilePos) || ReplayRevealMap)) {
+		const bool isMapFieldVisile = Map.Field(tilePos)->playerInfo.IsTeamVisible(*ThisPlayer);
+
+		if (UI.MouseViewport->IsInsideMapArea(CursorScreenPos) && UnitUnderCursor
+			&& ((isMapFieldVisile && !UnitUnderCursor->Type->BoolFlag[ISNOTSELECTABLE_INDEX].value) || ReplayRevealMap)) {
 			ShowUnitName(*this, CursorScreenPos, UnitUnderCursor);
-		} else if (!Map.IsFieldVisible(*ThisPlayer, tilePos)) {
+		} else if (!isMapFieldVisile) {
 			ShowUnitName(*this, CursorScreenPos, NULL, true);
 		}
 	}
