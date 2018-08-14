@@ -101,8 +101,6 @@
 */
 #define _C_  ,    /// Debug , to simulate vararg macros
 
-#ifndef ANDROID // {
-
 extern void PrintLocation(const char *file, int line, const char *funcName);
 
 /// Print function in debug macros
@@ -126,23 +124,6 @@ extern void PrintOnStdOut(const char *format, ...);
 */
 #define DebugPrint(args) \
 	do { if (EnableDebugPrint) { PrintFunction(); PrintOnStdOut(args); } } while (0)
-
-#else // }{ ANDROID
-#include <android/log.h>
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "Stratagus", __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "Stratagus", __VA_ARGS__)
-#define PrintFunction() \
-	do { LOGI("%s:%d: ", __FILE__, __LINE__); } while (0)
-
-#define Assert(cond) \
-	do { if (!(cond)) { LOGE("Assertion failed at %s:%d: %s\n", __FILE__, __LINE__, #cond); }} while (0)
-
-#define DebugPrint(args) \
-	do { PrintFunction(); LOGI(args); } while (0)
-
-#define RefsAssert(cond) \
-	do { if (!(cond)) { LOGE("Assertion failed at %s:%d\n", __FILE__, __LINE__); }} while (0)
-#endif // } !ANDROID
 
 /*============================================================================
 ==  Definitions
