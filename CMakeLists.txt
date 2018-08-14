@@ -644,13 +644,6 @@ if(WIN32 AND MSVC AND NOT CMAKE_PREFIX_PATH)
   set(CMAKE_PREFIX_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../dependencies)
 endif()
 
-option(CMAKE_VERBOSE_MAKEFILE "Verbose makefile" ON)
-
-# If CMAKE_DEBUG_POSTFIX is emtpy Hunter will initialize with 'd'.
-# We have to explicitly set DEBUG_POSTFIX to simplify library
-# load from Java code.
-set_target_properties(stratagus PROPERTIES DEBUG_POSTFIX "")
-
 # Find all libraries
 
 option(ENABLE_STATIC "Compile Stratagus as static executable" OFF)
@@ -689,6 +682,11 @@ find_package(OpenGL)
 find_package(OpenGLES)
 if(!ANDROID)
 find_package(SDL_gles)
+else()
+	set(SDLGLES_FOUND true)
+	set(SDLGLES_TYPE "Native")
+	set(SDLGLES_INCLUDE_DIR "")
+	set(SDLGLES_LIBRARY "")
 endif()
 
 find_package(Sqlite)
@@ -738,7 +736,7 @@ option(ENABLE_USEGAMEDIR "Place all files created by Stratagus(logs, savegames) 
 option(ENABLE_MULTIBUILD "Compile Stratagus on all CPU cores simltaneously in MSVC" ON)
 
 if(NOT WITH_RENDERER)
-	if(OPENGL_FOUND AND FALSE)
+	if(OPENGL_FOUND)
 		set(WITH_RENDERER "OpenGL")
 	elseif(OPENGLES_FOUND AND SDLGLES_FOUND)
 		set(WITH_RENDERER "OpenGLES")
@@ -1117,9 +1115,7 @@ else()
 	list(APPEND CLEAN_FILES version-generated.h)
 endif()
 
-if(ANDROID)
-    set(TOLUA++_APP "toluapp")
-endif()
+find_program (TOLUA++_APP NAMES toluapp tolua++)
 
 add_custom_command(OUTPUT tolua.cpp
 	COMMAND ${TOLUA++_APP} ARGS -L stratagus.lua -o ${CMAKE_CURRENT_BINARY_DIR}/tolua.cpp stratagus.pkg
@@ -1131,15 +1127,19 @@ add_custom_command(OUTPUT tolua.cpp
 
 if(ANDROID)
 add_library(stratagus SHARED ${stratagus_SRCS} ${stratagus_HDRS})
-list(APPEND stratagus_LIBS jnigraphics)
 target_link_libraries(stratagus PUBLIC ${stratagus_LIBS})
 else()
 add_executable(stratagus WIN32 ${stratagus_SRCS} ${stratagus_HDRS})
 target_link_libraries(stratagus ${stratagus_LIBS})
 endif()
 
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-	set_target_properties(stratagus PROPERTIES OUTPUT_NAME stratagus-dbg)
+# If CMAKE_DEBUG_POSTFIX is emtpy Hunter will initialize with 'd'.
+# We have to explicitly set DEBUG_POSTFIX to simplify library
+# load from Java code.
+if(ANDROID)
+set_target_properties(stratagus PROPERTIES DEBUG_POSTFIX "")
+else()
+set_target_properties(stratagus PROPERTIES DEBUG_POSTFIX "-dbg")
 endif()
 
 if(WIN32 AND MINGW AND ENABLE_STATIC)

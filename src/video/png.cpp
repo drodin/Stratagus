@@ -343,18 +343,22 @@ void SaveScreenshotPNG(const char *name)
 #if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		unsigned char* pixels = new unsigned char[Video.ViewportWidth * Video.ViewportHeight * 3];
+#ifdef USE_OPENGL
 		if (GLShaderPipelineSupported) {
 			// switch to real display
 			glBindFramebuffer(GL_FRAMEBUFFER_EXT, 0);
 		}
+#endif
 #ifdef USE_OPENGL
 		glReadBuffer(GL_FRONT);
 #endif
 		glReadPixels(0, 0, Video.ViewportWidth, Video.ViewportHeight, GL_RGB, GL_UNSIGNED_BYTE, pixels);
+#ifdef USE_OPENGL
 		if (GLShaderPipelineSupported) {
 			// switch back to framebuffer
 			glBindFramebuffer(GL_FRAMEBUFFER_EXT, fullscreenFramebuffer);
 		}
+#endif
 		for (int i = 0; i < Video.ViewportHeight; ++i) {
 			png_write_row(png_ptr, &pixels[(Video.ViewportHeight - 1 - i) * Video.ViewportWidth * 3]);
 		}

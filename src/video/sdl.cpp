@@ -532,17 +532,15 @@ void InitVideoSdl()
 #if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 #ifdef USE_GLES_NATIVE
-		flags |= SDL_OPENGLES;
+		flags |= SDL_WINDOW_OPENGL | SDL_GL_DOUBLEBUFFER;
 #endif
 #ifdef USE_OPENGL
-		flags |= SDL_OPENGL | SDL_GL_DOUBLEBUFFER;
+		flags |= SDL_WINDOW_OPENGL | SDL_GL_DOUBLEBUFFER;
 #endif
 	}
 #endif
 
-	if (true || !Video.Width || !Video.Height) {
-		Video.ViewportWidth = Video.Width;
-		Video.ViewportHeight = Video.Height;
+	if (!Video.Width || !Video.Height) {
 		Video.Width = 640;
 		Video.Height = 480;
 	}
@@ -815,7 +813,7 @@ void Invalidate()
 
 // Switch to the shader currently stored in Video.ShaderIndex without changing it
 void SwitchToShader() {
-#if defined(USE_OPENGL) || defined(USE_GLES)
+#ifdef USE_OPENGL
 	if (TheScreen && UseOpenGL && GLShaderPipelineSupported) {
 		LoadShaders(0, NULL);
 	}
@@ -1029,11 +1027,15 @@ void RealizeVideoMemory()
 		eglSwapBuffers(eglDisplay, eglSurface);
 #endif
 #if defined(USE_OPENGL) || defined(USE_GLES_NATIVE)
+#ifdef USE_OPENGL
 		if (GLShaderPipelineSupported) {
 			RenderFramebufferToScreen();
 		} else {
+#endif
 			SDL_GL_SwapWindow(TheWindow);
+#ifdef USE_OPENGL
 		}
+#endif
 #endif
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	} else

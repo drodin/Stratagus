@@ -288,7 +288,7 @@ extern void RenderFramebufferToScreen() {
 	glTexCoord2f(0, 1 - heightRel);
 	glVertex2i(0, Video.ViewportHeight);
 	glEnd();
-	SDL_GL_SwapBuffers();
+	SDL_GL_SwapWindow(TheWindow);
 	glUseProgram(0); // Disable shaders again, and render to framebuffer again
 	glBindFramebuffer(GL_FRAMEBUFFER_EXT, fullscreenFramebuffer);
 }

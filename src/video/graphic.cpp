@@ -1184,7 +1184,7 @@ static void MakeTextures2(CGraphic *g, GLuint texture, CUnitColors *colors,
 	unsigned char *tex = new unsigned char[w * h * 4];
 	memset(tex, 0, w * h * 4);
 	unsigned char alpha;
-	if (!!SDL_GetSurfaceAlphaMod(g->Surface, &alpha) {
+	if (!!SDL_GetSurfaceAlphaMod(g->Surface, &alpha)) {
 		alpha = 0xff;
 	}
 

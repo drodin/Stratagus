@@ -53,6 +53,12 @@ else()
 		set(CMAKE_PREFIX_PATH ${ORIGINAL_CMAKE_PREFIX_PATH})
 		# TODO: EGL
 
+	elseif(ANDROID)
+
+		find_path(OPENGLES_INCLUDE_DIR GLES/gl.h)
+		find_library(OPENGLES_GL_LIBRARY GLESv1_CM)
+		find_library(OPENGLES_EGL_LIBRARY EGL)
+
 	else()
 
 		find_path(OPENGLES_INCLUDE_DIR GLES/gl.h
