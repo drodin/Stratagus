@@ -10,6 +10,7 @@ android {
         targetSdkVersion 28
         externalNativeBuild {
             cmake {
+                targets "stratagus"
                 arguments   '-DANDROID_STL=c++_static',
                             '-DANDROID_STUDIO=1',
                             '-DCMAKE_VERBOSE_MAKEFILE=1',
