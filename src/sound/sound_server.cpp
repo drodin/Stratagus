@@ -134,7 +134,7 @@ static int ConvertToStereo32(const char *src, char *dest, int frequency,
 
 	SDL_ConvertAudio(&acvt);
 
-	return acvt.len_mult * bytes;
+	return acvt.len_cvt;
 }
 
 /**
