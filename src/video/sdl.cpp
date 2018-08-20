@@ -469,6 +469,9 @@ void InitVideoSdl()
 	Uint32 flags = 0;
 
 	if (SDL_WasInit(SDL_INIT_VIDEO) == 0) {
+#ifdef ANDROID
+		SDL_SetHint(SDL_HINT_ANDROID_SEPARATE_MOUSE_AND_TOUCH, "1");
+#endif
 //Wyrmgus start
 //#ifndef USE_WIN32
 //Wyrmgus end
@@ -828,6 +831,30 @@ void SwitchToShader() {
 */
 static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
 {
+#ifdef ANDROID
+	switch (event.type) {
+        case SDL_FINGERDOWN:
+            if (event.tfinger.fingerId) {
+                InputMouseButtonRelease(callbacks, SDL_GetTicks(), SDL_BUTTON_LEFT);
+                InputMouseButtonPress(callbacks, SDL_GetTicks(), SDL_BUTTON_MIDDLE);
+            } else {
+			    InputMouseMove(callbacks, SDL_GetTicks(), event.tfinger.x * Video.ViewportWidth, event.tfinger.y * Video.ViewportHeight);
+                InputMouseButtonPress(callbacks, SDL_GetTicks(), SDL_BUTTON_LEFT);
+            }
+            break;
+        case SDL_FINGERUP:
+            if (event.tfinger.fingerId) {
+                InputMouseButtonRelease(callbacks, SDL_GetTicks(), SDL_BUTTON_MIDDLE);
+            } else {
+                InputMouseMove(callbacks, SDL_GetTicks(), event.tfinger.x * Video.ViewportWidth, event.tfinger.y * Video.ViewportHeight);
+                InputMouseButtonRelease(callbacks, SDL_GetTicks(), SDL_BUTTON_LEFT);
+            }
+            break;
+        case SDL_FINGERMOTION:
+            if (!event.tfinger.fingerId)
+                InputMouseMove(callbacks, SDL_GetTicks(), event.tfinger.x * Video.ViewportWidth, event.tfinger.y * Video.ViewportHeight);
+            break;
+#else
 #if (defined(USE_OPENGL) || defined(USE_GLES))
 	// Scale mouse-coordinates to viewport
 	if (ZoomNoResize && (event.type & (SDL_MOUSEBUTTONUP | SDL_MOUSEBUTTONDOWN | SDL_MOUSEMOTION))) {
@@ -837,7 +864,7 @@ static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
 #endif
 	switch (event.type) {
 		case SDL_MOUSEBUTTONDOWN:
-			InputMouseButtonPress(callbacks, SDL_GetTicks(), event.button.button);
+		    InputMouseButtonPress(callbacks, SDL_GetTicks(), event.button.button);
 			break;
 
 		case SDL_MOUSEBUTTONUP:
@@ -866,6 +893,7 @@ static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
 			}
 			break;
 
+#endif
 		case SDL_WINDOWEVENT:
 			switch (event.window.event) {
 				case SDL_WINDOWEVENT_ENTER:

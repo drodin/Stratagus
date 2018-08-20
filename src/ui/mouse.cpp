@@ -886,7 +886,12 @@ void RestrictCursorToMinimap()
 static void MouseScrollMap(const PixelPos &pos)
 {
 	const int speed = (KeyModifiers & ModifierControl) ? UI.MouseScrollSpeedControl : UI.MouseScrollSpeedDefault;
+#ifndef ANDROID
 	const PixelDiff diff(pos - CursorStartScreenPos);
+#else
+	const PixelDiff diff(CursorStartScreenPos - pos);
+    CursorStartScreenPos = pos;
+#endif
 
 	UI.MouseViewport->Set(UI.MouseViewport->MapPos, UI.MouseViewport->Offset + speed * diff);
 	UI.MouseWarpPos = CursorStartScreenPos;
@@ -2013,7 +2018,7 @@ void UIHandleButtonUp(unsigned button)
 					num = SelectUnitsInRectangle(pos0, pos1);
 				}
 			}
-#ifdef USE_TOUCHSCREEN
+#if defined(USE_TOUCHSCREEN) && !defined(ANDROID)
 			// On touch screen select single unit only when long click is detected
 			// This fix problem with emulating right mouse button as long left click on touch screens
 		} else if (button == 0x1000001) {

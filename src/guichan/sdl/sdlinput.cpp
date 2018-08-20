@@ -8,7 +8,7 @@
  *
  * Copyright (c) 2004, 2005 darkbits                        Js_./
  * Per Larsson a.k.a finalman                          _RqZ{a<^_aa
- * Olof Naessén a.k.a jansem/yakslem                _asww7!uY`>  )\a//
+ * Olof Naessï¿½n a.k.a jansem/yakslem                _asww7!uY`>  )\a//
  *                                                 _Qhm`] _f "'c  1!5m
  * Visit: http://guichan.darkbits.org             )Qk<P ` _: :+' .'  "{[
  *                                               .)j(] .d_/ '-(  P .   S
@@ -58,6 +58,10 @@
 #include <assert.h>
 #include "guichan/sdl/sdlinput.h"
 #include "guichan/exception.h"
+#ifdef ANDROID
+#include "stratagus.h"
+#include "video.h"
+#endif
 
 namespace gcn
 {
@@ -143,6 +147,49 @@ namespace gcn
               mKeyInputQueue.push(keyInput);
               break;
 
+#ifdef ANDROID
+          case SDL_FINGERDOWN:
+              mMouseDown = true;
+              if (event.tfinger.fingerId) {
+                  mouseInput = mMouseInputQueue.front();
+                  mouseInput.setButton(convertMouseButton(SDL_BUTTON_MIDDLE));
+              } else {
+                  mouseInput.x = event.tfinger.x * Video.ViewportWidth;
+                  mouseInput.y = event.tfinger.y * Video.ViewportHeight;
+                  mouseInput.setButton(convertMouseButton(SDL_BUTTON_LEFT));
+              }
+              mouseInput.setType(MouseInput::PRESS);
+              mouseInput.setTimeStamp(SDL_GetTicks());
+              mMouseInputQueue.push(mouseInput);
+              break;
+
+          case SDL_FINGERUP:
+              mMouseDown = false;
+              if (event.tfinger.fingerId) {
+                  mouseInput = mMouseInputQueue.front();
+                  mouseInput.setButton(convertMouseButton(SDL_BUTTON_MIDDLE));
+              } else {
+                  mouseInput.x = event.tfinger.x * Video.ViewportWidth;
+                  mouseInput.y = event.tfinger.y * Video.ViewportHeight;
+                  mouseInput.setButton(convertMouseButton(SDL_BUTTON_LEFT));
+              }
+              mouseInput.setType(MouseInput::RELEASE);
+              mouseInput.setTimeStamp(SDL_GetTicks());
+              mMouseInputQueue.push(mouseInput);
+              break;
+
+          case SDL_FINGERMOTION:
+              if (event.tfinger.fingerId)
+                  break;
+              mouseInput.x = event.tfinger.x * Video.ViewportWidth;
+              mouseInput.y = event.tfinger.y * Video.ViewportHeight;
+              mouseInput.setButton(MouseInput::EMPTY);
+              mouseInput.setType(MouseInput::MOTION);
+              mouseInput.setTimeStamp(SDL_GetTicks());
+              mMouseInputQueue.push(mouseInput);
+              break;
+#else
+
           case SDL_MOUSEBUTTONDOWN:
               mMouseDown = true;
               mouseInput.x = event.button.x;
@@ -184,6 +231,7 @@ namespace gcn
               mouseInput.setTimeStamp(SDL_GetTicks());
               mMouseInputQueue.push(mouseInput);
               break;
+#endif
 
           case SDL_WINDOWEVENT:
               /*
