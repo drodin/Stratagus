@@ -1,13 +1,13 @@
 apply plugin: 'com.android.application'
 
 android {
-    compileSdkVersion 28
-    buildToolsVersion "28.0.1"
+    compileSdkVersion 30
+    ndkVersion '18.1.5063045'
 
     defaultConfig {
         applicationId "com.drodin.stratagus"
         minSdkVersion 14
-        targetSdkVersion 28
+        targetSdkVersion 30
         externalNativeBuild {
             cmake {
                 targets "stratagus"
@@ -30,6 +30,7 @@ android {
     externalNativeBuild {
         cmake {
             path "../../CMakeLists.txt"
+            version "3.10.2"
         }
     }
 }
