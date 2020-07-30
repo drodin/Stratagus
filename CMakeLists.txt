@@ -675,7 +675,7 @@ endif()
 # Options for compiling
 
 if(WIN32)
-	option(ENABLE_STDIO_REDIRECT "Redirect Stratagus console output to files on Windows" OFF)
+	option(ENABLE_STDIO_REDIRECT "Redirect Stratagus console output to files on Windows" ON)
 	option(ENABLE_NSIS "Create Stratagus Window NSIS Installer" OFF)
 endif()
 
@@ -1082,7 +1082,11 @@ add_custom_command(OUTPUT tolua.cpp
 	VERBATIM
 )
 
-add_executable(stratagus WIN32 ${stratagus_SRCS} ${stratagus_HDRS})
+if (ENABLE_STDIO_REDIRECT)
+   add_executable(stratagus WIN32 ${stratagus_SRCS} ${stratagus_HDRS})
+else ()
+   add_executable(stratagus ${stratagus_SRCS} ${stratagus_HDRS})
+endif ()
 target_link_libraries(stratagus ${stratagus_LIBS})
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -1269,3 +1273,14 @@ endif()
 ########### clean files ###############
 
 set_directory_properties(PROPERTIES ADDITIONAL_MAKE_CLEAN_FILES "${CLEAN_FILES}")
+
+# uninstall target
+if(NOT TARGET uninstall)
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake_uninstall.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
+        IMMEDIATE @ONLY)
+
+    add_custom_target(uninstall
+        COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake)
+endif()
