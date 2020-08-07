@@ -656,14 +656,19 @@ set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules ${CMAKE_MODULE_P
 
 hunter_add_package(Lua)
 find_package(Lua CONFIG REQUIRED)
+set(LUA_LIBRARIES Lua::lua_lib)
 hunter_add_package(PNG)
 find_package(PNG CONFIG REQUIRED)
+set(PNG_LIBRARIES PNG::png)
 hunter_add_package(SDL2)
 find_package(SDL2 CONFIG REQUIRED)
+set(SDL2_LIBRARY SDL2::SDL2)
 hunter_add_package(toluapp)
 find_package(toluapp CONFIG REQUIRED)
+set(TOLUA++_LIBRARY toluapp::toluapp)
 hunter_add_package(ZLIB)
 find_package(ZLIB CONFIG REQUIRED)
+set(ZLIB_LIBRARIES ZLIB::zlib)
 
 if(WIN32)
 	find_package(MakeNSIS)
@@ -676,8 +681,10 @@ find_package(Mikmod)
 find_package(MNG)
 hunter_add_package(libogg)
 find_package(libogg CONFIG)
+set(OGG_LIBRARY libogg::ogg)
 hunter_add_package(vorbis)
 find_package(vorbis CONFIG)
+set(OGG_LIBRARY vorbis::vorbis)
 set(OGGVORBIS_FOUND true)
 find_package(Theora)
 
@@ -768,7 +775,7 @@ endif()
 
 add_definitions(${PNG_DEFINITIONS} -DUSE_ZLIB -DPIXMAPS=\"${PIXMAPSDIRABS}\")
 include_directories(${LUA_INCLUDE_DIR} ${PNG_INCLUDE_DIR} ${SDL2_INCLUDE_DIR} ${TOLUA++_INCLUDE_DIR} ${ZLIB_INCLUDE_DIRS})
-set(stratagus_LIBS ${stratagus_LIBS} Lua::lua_lib PNG::png SDL2::SDL2 toluapp::toluapp ZLIB::zlib)
+set(stratagus_LIBS ${stratagus_LIBS} ${LUA_LIBRARIES} ${PNG_LIBRARIES} ${SDL2_LIBRARY} ${TOLUA++_LIBRARY} ${ZLIB_LIBRARIES})
 
 if(WIN32 AND NOT ENABLE_STDIO_REDIRECT)
 	add_definitions(-DNO_STDIO_REDIRECT)
@@ -809,7 +816,7 @@ endif()
 if(WITH_OGGVORBIS AND OGGVORBIS_FOUND)
 	add_definitions(-DUSE_VORBIS)
 	include_directories(${OGGVORBIS_INCLUDE_DIR})
-	set(stratagus_LIBS ${stratagus_LIBS} libogg::ogg vorbis::vorbis)
+	set(stratagus_LIBS ${stratagus_LIBS} ${OGG_LIBRARY} ${VORBIS_LIBRARY})
 endif()
 
 if(WITH_THEORA AND THEORA_FOUND)
@@ -1139,13 +1146,15 @@ endif ()
 target_link_libraries(stratagus ${stratagus_LIBS})
 endif()
 
-# If CMAKE_DEBUG_POSTFIX is emtpy Hunter will initialize with 'd'.
-# We have to explicitly set DEBUG_POSTFIX to simplify library
-# load from Java code.
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 if(ANDROID)
-set_target_properties(stratagus PROPERTIES DEBUG_POSTFIX "")
+	# If CMAKE_DEBUG_POSTFIX is emtpy Hunter will initialize with 'd'.
+	# We have to explicitly set DEBUG_POSTFIX to simplify library
+	# load from Java code.
+	set_target_properties(stratagus PROPERTIES DEBUG_POSTFIX "")
 else()
-set_target_properties(stratagus PROPERTIES DEBUG_POSTFIX "-dbg")
+	set_target_properties(stratagus PROPERTIES OUTPUT_NAME stratagus-dbg)
+endif()
 endif()
 
 if(WIN32 AND MINGW AND ENABLE_STATIC)
@@ -1175,6 +1184,13 @@ set(metaserver_HDRS
 )
 
 source_group(metaserver FILES ${metaserver_SRCS} ${metaserver_HDRS})
+
+hunter_add_package(sqlite3)
+find_package(sqlite3 CONFIG)
+if (sqlite3_FOUND)
+	set(SQLITE_FOUND true)
+	set(SQLITE_LIBRARIES sqlite3::sqlite3)
+endif()
 
 if(SQLITE_FOUND)
 	add_executable(metaserver ${metaserver_SRCS} ${metaserver_HDRS})
