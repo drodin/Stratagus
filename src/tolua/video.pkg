@@ -11,17 +11,13 @@ class CVideo
 public:
 	int Width;
 	int Height;
-	int ViewportWidth;
-	int ViewportHeight;
 	int Depth;
-	int ShaderIndex;
 	bool FullScreen;
 	bool ResizeScreen(int width, int height);
 };
 
 CVideo Video;
 void ToggleFullScreen(void);
-void SwitchToShader(void);
 
 class CGraphic
 {
@@ -31,6 +27,7 @@ public:
 	static void Free(CGraphic *);
 	void Load();
 	void Resize(int w, int h);
+        void SetPaletteColor(int idx, int r, int g, int b);
 };
 
 class CPlayerColorGraphic : public CGraphic
@@ -53,3 +50,20 @@ class CColor {
 void SetColorCycleAll(bool value);
 void ClearAllColorCyclingRange();
 void AddColorCyclingRange(unsigned int startColorIndex, unsigned int endColorIndex);
+
+class Mng
+{
+public:
+        Mng();
+        bool Load(const std::string name);
+        void Draw(int x, int y);
+        void Reset();
+}
+
+class Movie
+{
+public:
+        Movie();
+        bool Load(const std::string name, int w, int h);
+        bool IsPlaying();
+}

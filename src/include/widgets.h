@@ -34,7 +34,9 @@
 #include <guichan/gsdl.h>
 #include "font.h"
 
+#include "keylistener.h"
 #include "luacallback.h"
+#include "mouselistener.h"
 
 
 extern bool GuichanActive;
@@ -43,37 +45,26 @@ void initGuichan();
 void freeGuichan();
 void handleInput(const SDL_Event *event);
 
-class LuaActionListener : public gcn::ActionListener
+class LuaActionListener : public gcn::ActionListener, public gcn::KeyListener, public gcn::MouseListener
 {
 	LuaCallback callback;
 public:
 	LuaActionListener(lua_State *lua, lua_Object function);
 	virtual void action(const std::string &eventId);
+	virtual bool keyPress(const gcn::Key&);
+	virtual bool keyRelease(const gcn::Key&);
+	virtual void hotKeyPress(const gcn::Key&);
+	virtual void hotKeyRelease(const gcn::Key&);
+	virtual void mouseIn();
+	virtual void mouseOut();
+	virtual void mousePress(int, int, int);
+	virtual void mouseRelease(int, int, int);
+	virtual void mouseClick(int, int, int, int);
+	virtual void mouseWheelUp(int, int);
+	virtual void mouseWheelDown(int, int);
+	virtual void mouseMotion(int, int);
 	virtual ~LuaActionListener();
 };
-
-#if defined(USE_OPENGL) || defined(USE_GLES)
-class MyOpenGLGraphics : public gcn::Graphics
-{
-public:
-	virtual void _beginDraw();
-	virtual void _endDraw();
-
-	virtual void drawImage(const gcn::Image *image, int srcX, int srcY,
-						   int dstX, int dstY, int width, int height);
-
-	virtual void drawPoint(int x, int y);
-	virtual void drawLine(int x1, int y1, int x2, int y2);
-	virtual void drawRectangle(const gcn::Rectangle &rectangle);
-	virtual void fillRectangle(const gcn::Rectangle &rectangle);
-
-	virtual void setColor(const gcn::Color &color) { mColor = color; }
-	virtual const gcn::Color &getColor() { return mColor; }
-
-private:
-	gcn::Color mColor;
-};
-#endif
 
 class ImageWidget : public gcn::Icon
 {

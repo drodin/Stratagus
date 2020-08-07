@@ -32,6 +32,8 @@
 
 //@{
 
+#include "SDL.h"
+#include "guichan.h"
 #ifdef USE_VORBIS
 
 /*----------------------------------------------------------------------------
@@ -81,6 +83,35 @@ struct OggData {
 #endif
 };
 
+#ifdef USE_THEORA
+class Movie : public gcn::Image
+{
+public:
+    Movie() : rect(NULL), yuv_overlay(NULL), surface(NULL), need_data(true), start_time(0),
+              is_dirty(true), Width(0), Height(0), data(NULL), f(NULL) {};
+    ~Movie();
+    bool Load(const std::string &filename, int w, int h);
+    bool IsPlaying() const { return is_dirty; }
+
+    //guichan
+    virtual void *_getData() const;
+    virtual int getWidth() const { return Width; }
+    virtual int getHeight() const { return Height; }
+    virtual bool isDirty() const { return is_dirty; }
+
+    int Width;
+    int Height;
+    SDL_Surface *surface;
+    CFile *f;
+    mutable bool is_dirty;
+    mutable bool need_data;
+    mutable Uint32 start_time;
+    mutable OggData *data;
+    mutable SDL_Rect *rect;
+    mutable SDL_Texture *yuv_overlay;
+};
+#endif
+
 /*----------------------------------------------------------------------------
 --  Variables
 ----------------------------------------------------------------------------*/
@@ -96,6 +127,23 @@ extern int OggGetNextPage(ogg_page *page, ogg_sync_state *sync, CFile *f);
 extern int VorbisProcessData(OggData *data, char *buffer);
 
 #endif // USE_VORBIS
+
+#ifndef USE_THEORA
+/// empty class for lua scripts
+class Movie : public gcn::Image
+{
+public:
+    Movie() {};
+    ~Movie() {};
+    bool Load(const std::string &filename, int w, int h) { return false; };
+    bool IsPlaying() const { return false; };
+    //guichan
+    virtual void *_getData() const { return NULL; };
+    virtual int getWidth() const { return 0; };
+    virtual int getHeight() const { return 0; };
+    virtual bool isDirty() const { return false; };
+};
+#endif
 
 /// Play a movie file
 extern int PlayMovie(const std::string &name);

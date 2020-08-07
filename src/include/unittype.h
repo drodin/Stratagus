@@ -171,7 +171,9 @@ enum {
 	ORGANIC_INDEX,					/// Organic unit (used for death coil spell)
 	SIDEATTACK_INDEX,
 	SKIRMISHER_INDEX,
+	ALWAYSTHREAT_INDEX,				/// Unit always considered as threat for auto targeting algorihm, useful for unit without main attack ability, but which can cast spells (f.e. defiler in SC:BW)
 	NOFRIENDLYFIRE_INDEX,           /// Unit accepts friendly fire for splash attacks
+	MAINFACILITY_INDEX,				/// Unit is a main building (Town Hall f. ex.)
 	NBARALREADYDEFINED
 };
 
@@ -506,6 +508,9 @@ public:
 	int ShadowHeight;                                     /// Shadow sprite height
 	int ShadowOffsetX;                                    /// Shadow horizontal offset
 	int ShadowOffsetY;                                    /// Shadow vertical offset
+	char ShadowScale;                                     /// Shadow scale-down factor
+	char ShadowSpriteFrame;                               /// If > 0, the shadow is a simple sprite without
+	                                                      /// directions and this selects which frame to use
 	PixelPos MissileOffsets[UnitSides][MaxAttackPos];     /// Attack offsets for missiles
 
 	CAnimations *Animations;        /// Animation scripts

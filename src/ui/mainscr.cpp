@@ -432,11 +432,11 @@ static void DrawUnitInfo_portrait(const CUnit &unit)
 			type.Portrait.Mngs[type.Portrait.CurrMng]->Reset();
 			// FIXME: should be configurable
 			if (type.Portrait.CurrMng == 0) {
-				type.Portrait.CurrMng = (SyncRand() % (type.Portrait.Num - 1)) + 1;
+				type.Portrait.CurrMng = (MyRand() % (type.Portrait.Num - 1)) + 1;
 				type.Portrait.NumIterations = 1;
 			} else {
 				type.Portrait.CurrMng = 0;
-				type.Portrait.NumIterations = SyncRand() % 16 + 1;
+				type.Portrait.NumIterations = MyRand() % 16 + 1;
 			}
 		}
 		return;
@@ -1149,10 +1149,9 @@ static void InfoPanel_draw_multiple_selection()
 		}
 	}
 	if (Selected.size() > UI.SelectedButtons.size()) {
-		char buf[22];
 
-		sprintf(buf, "+%lu", (long unsigned int)(Selected.size() - UI.SelectedButtons.size()));
-		CLabel(*UI.MaxSelectedFont).Draw(UI.MaxSelectedTextX, UI.MaxSelectedTextY, buf);
+		const std::string number_str = "+" + std::to_string(Selected.size() - UI.SelectedButtons.size());
+		CLabel(*UI.MaxSelectedFont).Draw(UI.MaxSelectedTextX, UI.MaxSelectedTextY, number_str.c_str());
 	}
 }
 

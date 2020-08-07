@@ -94,7 +94,9 @@ static const char NORANDOMPLACING_KEY[] = "NoRandomPlacing";
 static const char ORGANIC_KEY[] = "organic";
 static const char SIDEATTACK_KEY[] = "SideAttack";
 static const char SKIRMISHER_KEY[] = "Skirmisher";
+static const char ALWAYSTHREAT_KEY[] = "AlwaysThreat";
 static const char NOFRIENDLYFIRE_KEY[] = "NoFriendlyFire";
+static const char MAINFACILITY_KEY[] = "MainFacility";
 
 // names of the variable.
 static const char HITPOINTS_KEY[] = "HitPoints";
@@ -153,7 +155,7 @@ CUnitTypeVar::CBoolKeys::CBoolKeys()
 							   BUILDERLOST_KEY, CANHARVEST_KEY, HARVESTER_KEY, SELECTABLEBYRECTANGLE_KEY,
 							   ISNOTSELECTABLE_KEY, DECORATION_KEY, INDESTRUCTIBLE_KEY, TELEPORTER_KEY, SHIELDPIERCE_KEY,
 							   SAVECARGO_KEY, NONSOLID_KEY, WALL_KEY, NORANDOMPLACING_KEY, ORGANIC_KEY, SIDEATTACK_KEY, SKIRMISHER_KEY,
-							   NOFRIENDLYFIRE_KEY
+							   ALWAYSTHREAT_KEY, NOFRIENDLYFIRE_KEY, MAINFACILITY_KEY
 							  };
 
 	for (int i = 0; i < NBARALREADYDEFINED; ++i) {
@@ -436,6 +438,7 @@ static void UpdateDefaultBoolFlags(CUnitType &type)
 **
 **  @param l  Lua state.
 */
+static const std::string shadowMarker = std::string("MARKER");
 static int CclDefineUnitType(lua_State *l)
 {
 	LuaCheckArgs(l, 2);
@@ -485,7 +488,22 @@ static int CclDefineUnitType(lua_State *l)
 				CGraphic::Free(type->Sprite);
 				type->Sprite = NULL;
 			}
+			if (type->ShadowFile == shadowMarker) {
+				type->ShadowFile = type->File;
+				if (type->ShadowWidth == 0 && type->ShadowHeight == 0) {
+					type->ShadowWidth = type->Width;
+					type->ShadowHeight = type->Height;
+				}
+			}
 		} else if (!strcmp(value, "Shadow")) {
+			// default to same spritemap as unit
+			if (type->File.length() > 0) {
+				type->ShadowFile = type->File;
+				type->ShadowWidth = type->Width;
+				type->ShadowHeight = type->Height;
+			} else {
+				type->ShadowFile = shadowMarker;
+			}
 			if (!lua_istable(l, -1)) {
 				LuaError(l, "incorrect argument");
 			}
@@ -504,6 +522,10 @@ static int CclDefineUnitType(lua_State *l)
 					lua_rawgeti(l, -1, k + 1);
 					CclGetPos(l, &type->ShadowOffsetX, &type->ShadowOffsetY);
 					lua_pop(l, 1);
+				} else if (!strcmp(value, "sprite-frame")) {
+					type->ShadowSpriteFrame = LuaToNumber(l, -1, k + 1);
+				} else if (!strcmp(value, "scale")) {
+					type->ShadowScale = LuaToNumber(l, -1, k + 1);
 				} else {
 					LuaError(l, "Unsupported shadow tag: %s" _C_ value);
 				}

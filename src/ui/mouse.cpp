@@ -1028,7 +1028,7 @@ void UIHandleMouseMove(const PixelPos &cursorPos)
 			CMapField &mf = *Map.Field(tilePos);
 			for (int i = 0; i < PlayerMax; ++i) {
 				if (mf.playerInfo.IsExplored(Players[i])
-					&& (i == ThisPlayer->Index || Players[i].IsBothSharedVision(*ThisPlayer))) {
+					&& (i == ThisPlayer->Index || Players[i].HasMutualSharedVisionWith(*ThisPlayer))) {
 					show = true;
 					break;
 				}
@@ -1628,10 +1628,6 @@ static void UISelectStateButtonDown(unsigned)
 static void UIHandleButtonDown_OnMap(unsigned button)
 {
 	Assert(UI.MouseViewport);
-#ifdef USE_TOUCHSCREEN
-	// Detect double left click
-	const bool doubleLeftButton = MouseButtons & (LeftButton << MouseDoubleShift);
-#endif
 	if ((MouseButtons & LeftButton) && UI.SelectedViewport != UI.MouseViewport) {
 		UI.SelectedViewport = UI.MouseViewport;
 		DebugPrint("selected viewport changed to %ld.\n" _C_
@@ -1640,12 +1636,6 @@ static void UIHandleButtonDown_OnMap(unsigned button)
 
 	// to redraw the cursor immediately (and avoid up to 1 sec delay
 	if (CursorBuilding) {
-#ifdef USE_TOUCHSCREEN
-		// On touch screen is building started with double left click
-		if (!doubleLeftButton) {
-			return;
-		}
-#endif
 		// Possible Selected[0] was removed from map
 		// need to make sure there is a unit to build
 		if (Selected[0] && (MouseButtons & LeftButton)
@@ -1680,11 +1670,7 @@ static void UIHandleButtonDown_OnMap(unsigned button)
 		if (!Selected.empty() && Selected[0]->Player == ThisPlayer && CursorState == CursorStatePoint) {
 			CursorState = CursorStatePieMenu;
 		}
-#ifdef USE_TOUCHSCREEN
-	} else if (doubleLeftButton) {
-#else
 	} else if (MouseButtons & RightButton) {
-#endif
 		if (!GameObserve && !GamePaused && !GameEstablishing && UI.MouseViewport->IsInsideMapArea(CursorScreenPos)) {
 			CUnit *unit;
 			// FIXME: Rethink the complete chaos of coordinates here
@@ -1736,6 +1722,7 @@ static void UIHandleButtonDown_OnButton(unsigned button)
 {
 	// clicked on info panel - selection shown
 	if (Selected.size() > 1 && ButtonAreaUnderCursor == ButtonAreaSelected) {
+		PlayGameSound(GameSounds.Click.Sound, MaxSampleVolume);
 		DoSelectionButtons(ButtonUnderCursor, button);
 	} else if ((MouseButtons & LeftButton)) {
 		//  clicked on menu button
@@ -1773,6 +1760,7 @@ static void UIHandleButtonDown_OnButton(unsigned button)
 					const COrder_Train &order = *static_cast<COrder_Train *>(Selected[0]->Orders[ButtonUnderCursor]);
 
 					DebugPrint("Cancel slot %d %s\n" _C_ ButtonUnderCursor _C_ order.GetUnitType().Ident.c_str());
+					PlayGameSound(GameSounds.Click.Sound, MaxSampleVolume);
 					SendCommandCancelTraining(*Selected[0], ButtonUnderCursor, &order.GetUnitType());
 				}
 			}
@@ -1781,6 +1769,7 @@ static void UIHandleButtonDown_OnButton(unsigned button)
 			if (!GameObserve && !GamePaused && !GameEstablishing && ThisPlayer->IsTeamed(*Selected[0])) {
 				if (ButtonUnderCursor == 0 && Selected.size() == 1) {
 					DebugPrint("Cancel upgrade %s\n" _C_ Selected[0]->Type->Ident.c_str());
+					PlayGameSound(GameSounds.Click.Sound, MaxSampleVolume);
 					SendCommandCancelUpgradeTo(*Selected[0]);
 				}
 			}
@@ -1789,6 +1778,7 @@ static void UIHandleButtonDown_OnButton(unsigned button)
 			if (!GameObserve && !GamePaused && !GameEstablishing && ThisPlayer->IsTeamed(*Selected[0])) {
 				if (ButtonUnderCursor == 0 && Selected.size() == 1) {
 					DebugPrint("Cancel research %s\n" _C_ Selected[0]->Type->Ident.c_str());
+					PlayGameSound(GameSounds.Click.Sound, MaxSampleVolume);
 					SendCommandCancelResearch(*Selected[0]);
 				}
 			}
@@ -1809,6 +1799,7 @@ static void UIHandleButtonDown_OnButton(unsigned button)
 							Assert(uins->Boarded);
 							const int flush = !(KeyModifiers & ModifierShift);
 							if (ThisPlayer->IsTeamed(*Selected[0]) || uins->Player == ThisPlayer) {
+								PlayGameSound(GameSounds.Click.Sound, MaxSampleVolume);
 								SendCommandUnload(*Selected[0], Selected[0]->tilePos, uins, flush);
 							}
 						}
@@ -1818,6 +1809,7 @@ static void UIHandleButtonDown_OnButton(unsigned button)
 			}
 		} else if (ButtonAreaUnderCursor == ButtonAreaButton) {
 			if (!GameObserve && !GamePaused && !GameEstablishing && ThisPlayer->IsTeamed(*Selected[0])) {
+				PlayGameSound(GameSounds.Click.Sound, MaxSampleVolume);
 				OldButtonUnderCursor = ButtonUnderCursor;
 			}
 		}
@@ -1851,15 +1843,6 @@ void UIHandleButtonDown(unsigned button)
 		ActionDraw();
 		return;
 	}
-
-#ifdef USE_TOUCHSCREEN
-	// If we are moving with stylus/finger,
-	// left button on touch screen devices is still clicked
-	// Ignore handle if left button is long cliked
-	if (longLeftButton) {
-		return;
-	}
-#endif
 
 	static bool OldShowSightRange;
 	static bool OldShowReactionRange;
@@ -2063,13 +2046,7 @@ void UIHandleButtonUp(unsigned button)
 					num = SelectUnitsInRectangle(pos0, pos1);
 				}
 			}
-#ifdef USE_TOUCHSCREEN
-			// On touch screen select single unit only when long click is detected
-			// This fix problem with emulating right mouse button as long left click on touch screens
-		} else if (button == 0x1000001) {
-#else
 		} else {
-#endif
 			//
 			// Select single unit
 			//
