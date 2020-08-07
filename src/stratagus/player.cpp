@@ -139,7 +139,7 @@
 **
 **  CPlayer::SharedVision
 **
-**    A bit field which contains shared vision for this player.
+**    Contains shared vision for this player.
 **    Shared vision only works when it's activated both ways. Really.
 **
 **  CPlayer::StartX CPlayer::StartY
@@ -334,6 +334,14 @@ int PlayerColorIndexCount;
 ----------------------------------------------------------------------------*/
 
 /**
+**  Change revelation type
+*/
+void CPlayer::SetRevelationType(const RevealTypes type)
+{
+	CPlayer::RevelationFor = type;
+}
+
+/**
 **  Clean up the PlayerRaces names.
 */
 void PlayerRace::Clean()
@@ -379,6 +387,7 @@ void InitPlayers()
 void CleanPlayers()
 {
 	ThisPlayer = NULL;
+	CPlayer::RevealedPlayers.clear();
 	for (unsigned int i = 0; i < PlayerMax; ++i) {
 		Players[i].Clear();
 	}
@@ -415,6 +424,25 @@ void SavePlayers(CFile &file)
 	file.printf("SetThisPlayer(%d)\n\n", ThisPlayer->Index);
 }
 
+/**
+ **	Add/remove players to/from list of revealed players
+ */
+void CPlayer::SetRevealed(const bool revealed)
+{
+	if (revealed == this->IsRevealed()) {
+		return;
+	}
+	this->isRevealed = revealed;
+	
+	std::vector<const CPlayer *> &revealedPlayers = CPlayer::RevealedPlayers;
+	if (revealed) {
+		revealedPlayers.push_back(this);
+	} else {
+		/// Remove element from vector;
+		revealedPlayers.erase(std::remove(revealedPlayers.begin(), revealedPlayers.end(), this), 
+							  revealedPlayers.end());
+	}
+}
 
 void CPlayer::Save(CFile &file) const
 {
@@ -445,7 +473,7 @@ void CPlayer::Save(CFile &file) const
 	}
 	file.printf("\", \"shared-vision\", \"");
 	for (int j = 0; j < PlayerMax; ++j) {
-		file.printf("%c", (p.SharedVision & (1 << j)) ? 'X' : '_');
+		file.printf("%c", (p.SharedVision.find(j) != p.SharedVision.end()) ? 'X' : '_');
 	}
 	file.printf("\",\n  \"start\", {%d, %d},\n", p.StartPos.x, p.StartPos.y);
 
@@ -503,6 +531,9 @@ void CPlayer::Save(CFile &file) const
 	// TotalNumUnits done by load units.
 	// NumBuildings done by load units.
 
+	if (p.IsRevealed()) {
+		file.printf(" \"revealed\",");
+	}
 	file.printf(" \"supply\", %d,", p.Supply);
 	file.printf(" \"unit-limit\", %d,", p.UnitLimit);
 	file.printf(" \"building-limit\", %d,", p.BuildingLimit);
@@ -522,6 +553,9 @@ void CPlayer::Save(CFile &file) const
 	file.printf("\n  \"total-razings\", %d,", p.TotalRazings);
 	file.printf("\n  \"total-kills\", %d,", p.TotalKills);
 
+	if (p.LostMainFacilityTimer != 0) {
+		file.printf("\n  \"lost-main-facility-timer\", %d,", p.LostMainFacilityTimer);
+	}
 	file.printf("\n  \"speed-resource-harvest\", {");
 	for (int j = 0; j < MaxCosts; ++j) {
 		if (j) {
@@ -715,6 +749,8 @@ void CPlayer::Init(/* PlayerTypes */ int type)
 	} else {
 		this->AiEnabled = false;
 	}
+	this->LostMainFacilityTimer = 0;
+	this->isRevealed = false;
 	++NumPlayers;
 }
 
@@ -744,7 +780,7 @@ void CPlayer::Clear()
 	Team = 0;
 	Enemy = 0;
 	Allied = 0;
-	SharedVision = 0;
+	SharedVision.clear();
 	StartPos.x = 0;
 	StartPos.y = 0;
 	memset(Resources, 0, sizeof(Resources));
@@ -772,6 +808,7 @@ void CPlayer::Clear()
 	memset(TotalResources, 0, sizeof(TotalResources));
 	TotalRazings = 0;
 	TotalKills = 0;
+	this->LostMainFacilityTimer = 0;
 	Color = 0;
 	UpgradeTimers.Clear();
 	for (int i = 0; i < MaxCosts; ++i) {
@@ -782,6 +819,7 @@ void CPlayer::Clear()
 	SpeedTrain = SPEEDUP_FACTOR;
 	SpeedUpgrade = SPEEDUP_FACTOR;
 	SpeedResearch = SPEEDUP_FACTOR;
+	this->isRevealed = false;
 }
 
 
@@ -1163,7 +1201,18 @@ void PlayersEachCycle()
 {
 	for (int player = 0; player < NumPlayers; ++player) {
 		CPlayer &p = Players[player];
-
+		if (CPlayer::IsRevelationEnabled()) {
+			if (p.LostMainFacilityTimer && !p.IsRevealed() && p.LostMainFacilityTimer < ((int) GameCycle)) {
+				p.SetRevealed(true);
+				for (int j = 0; j < NumPlayers; ++j) {
+					if (player != j && Players[j].Type != PlayerNobody) {
+						Players[j].Notify(_("%s has not rebuilt their base and is being revealed!"), p.Name.c_str());
+					} else {
+						Players[j].Notify("%s", _("You have not rebuilt your base and have been revealed!"));
+					}
+				}
+			}
+		}
 		if (p.AiEnabled) {
 			AiEachCycle(p);
 		}
@@ -1205,15 +1254,12 @@ void GraphicPlayerPixels(CPlayer &player, const CGraphic &sprite)
 {
 	Assert(PlayerColorIndexCount);
 
-	//SDL_LockSurface(sprite.Surface);
+	Assert(SDL_MUSTLOCK(sprite.Surface) == 0);
 	std::vector<SDL_Color> sdlColors(player.UnitColors.Colors.begin(), player.UnitColors.Colors.end());
 	SDL_SetPaletteColors(sprite.Surface->format->palette, &sdlColors[0], PlayerColorIndexStart, PlayerColorIndexCount);
 	if (sprite.SurfaceFlip) {
-		//SDL_LockSurface(sprite.SurfaceFlip);
 		SDL_SetPaletteColors(sprite.SurfaceFlip->format->palette, &sdlColors[0], PlayerColorIndexStart, PlayerColorIndexCount);
-		//SDL_UnlockSurface(sprite.SurfaceFlip);
 	}
-	//SDL_UnlockSurface(sprite.Surface);
 }
 
 /**
@@ -1365,12 +1411,12 @@ void CPlayer::SetDiplomacyCrazyWith(const CPlayer &player)
 
 void CPlayer::ShareVisionWith(const CPlayer &player)
 {
-	this->SharedVision |= (1 << player.Index);
+	this->SharedVision.insert(player.Index);
 }
 
 void CPlayer::UnshareVisionWith(const CPlayer &player)
 {
-	this->SharedVision &= ~(1 << player.Index);
+	this->SharedVision.erase(player.Index);
 }
 
 
@@ -1409,40 +1455,40 @@ bool CPlayer::IsAllied(const CUnit &unit) const
 
 bool CPlayer::IsVisionSharing() const
 {
-	return SharedVision != 0;
+	return !this->SharedVision.empty();
 }
 
 /**
 **  Check if the player shares vision with the player
 */
-bool CPlayer::IsSharedVision(const CPlayer &player) const
+bool CPlayer::HasSharedVisionWith(const CPlayer &player) const
 {
-	return (SharedVision & (1 << player.Index)) != 0;
+	return this->SharedVision.find(player.Index) != this->SharedVision.end();
 }
 
 /**
 **  Check if the player shares vision with the unit
 */
-bool CPlayer::IsSharedVision(const CUnit &unit) const
+bool CPlayer::HasSharedVisionWith(const CUnit &unit) const
 {
-	return IsSharedVision(*unit.Player);
+	return this->HasSharedVisionWith(*unit.Player);
 }
 
 /**
 **  Check if the both players share vision
 */
-bool CPlayer::IsBothSharedVision(const CPlayer &player) const
+bool CPlayer::HasMutualSharedVisionWith(const CPlayer &player) const
 {
-	return (SharedVision & (1 << player.Index)) != 0
-		   && (player.SharedVision & (1 << Index)) != 0;
+	return this->SharedVision.find(player.Index) != this->SharedVision.end()
+	 		&& player.SharedVision.find(this->Index) != player.SharedVision.end();
 }
 
 /**
 **  Check if the player and the unit share vision
 */
-bool CPlayer::IsBothSharedVision(const CUnit &unit) const
+bool CPlayer::HasMutualSharedVisionWith(const CUnit &unit) const
 {
-	return IsBothSharedVision(*unit.Player);
+	return this->HasMutualSharedVisionWith(*unit.Player);
 }
 
 /**

@@ -30,11 +30,11 @@
 # Version configuration #
 #########################
 # Stratagus major version
-set(STRATAGUS_MAJOR_VERSION 2)
+set(STRATAGUS_MAJOR_VERSION 3)
 # Stratagus minor version (maximum 99)
-set(STRATAGUS_MINOR_VERSION 4)
+set(STRATAGUS_MINOR_VERSION 0)
 # Stratagus patch level (maximum 99)
-set(STRATAGUS_PATCH_LEVEL 3)
+set(STRATAGUS_PATCH_LEVEL 0)
 # Stratagus patch level 2
 set(STRATAGUS_PATCH_LEVEL2 0)
 #########################
@@ -67,6 +67,12 @@ HunterGate(
 project(stratagus)
 cmake_minimum_required(VERSION 3.9.2)
 
+# useful for clangd LSP server
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# C++ standard
+set(CMAKE_CXX_STANDARD 17)
+
 set(STRATAGUS_VERSION "${STRATAGUS_MAJOR_VERSION}.${STRATAGUS_MINOR_VERSION}.${STRATAGUS_PATCH_LEVEL}")
 set(STRATAGUS_VERSION_FULL "${STRATAGUS_VERSION}.${STRATAGUS_PATCH_LEVEL2}")
 
@@ -80,6 +86,7 @@ include_directories(
 	src/include
 	src/guichan/include
 	src/guichan/include/guichan
+        src/third_party/
 	${CMAKE_CURRENT_BINARY_DIR}
 )
 
@@ -181,13 +188,9 @@ set(guichan_SRCS
 	src/guichan/key.cpp
 	src/guichan/keyinput.cpp
 	src/guichan/mouseinput.cpp
-#	src/guichan/opengl/opengl.cpp
-#	src/guichan/opengl/openglgraphics.cpp
-#	src/guichan/opengl/openglimageloader.cpp
 	src/guichan/rectangle.cpp
 	src/guichan/sdl/gsdl.cpp
 	src/guichan/sdl/sdlgraphics.cpp
-#	src/guichan/sdl/sdlimageloader.cpp
 	src/guichan/sdl/sdlinput.cpp
 	src/guichan/widget.cpp
 	src/guichan/widgets/button.cpp
@@ -274,16 +277,12 @@ set(pathfinder_SRCS
 source_group(pathfinder FILES ${pathfinder_SRCS})
 
 set(sound_SRCS
-	src/sound/fluidsynth.cpp
-	src/sound/mikmod.cpp
 	src/sound/music.cpp
-	src/sound/ogg.cpp
 	src/sound/script_sound.cpp
 	src/sound/sound.cpp
 	src/sound/sound_id.cpp
 	src/sound/sound_server.cpp
 	src/sound/unitsound.cpp
-	src/sound/wav.cpp
 )
 source_group(sound FILES ${sound_SRCS})
 
@@ -365,13 +364,12 @@ set(video_SRCS
 	src/video/font.cpp
 	src/video/graphic.cpp
 	src/video/linedraw.cpp
-	src/video/mng.cpp
+        src/video/mng.cpp
 	src/video/movie.cpp
 	src/video/png.cpp
 	src/video/sdl.cpp
-	src/video/shaders.cpp
-	src/video/sprite.cpp
 	src/video/video.cpp
+        src/video/shaders.cpp
 )
 source_group(video FILES ${video_SRCS})
 
@@ -424,6 +422,8 @@ set(stratagus_SRCS
 	${ui_SRCS}
 	${unit_SRCS}
 	${video_SRCS}
+        ${hqx_SRCS}
+        ${xbrz_SRCS}
 	${CMAKE_CURRENT_BINARY_DIR}/tolua.cpp
 )
 
@@ -562,6 +562,7 @@ set(stratagus_generic_HDRS
 	src/include/movie.h
 	src/include/myendian.h
 	src/include/net_lowlevel.h
+	src/include/net_serialization.h
 	src/include/net_message.h
 	src/include/netconnect.h
 	src/include/network.h
@@ -575,7 +576,6 @@ set(stratagus_generic_HDRS
 	src/include/script.h
 	src/include/script_sound.h
 	src/include/settings.h
-	src/include/shaders.h
 	src/include/sound.h
 	src/include/sound_server.h
 	src/include/spells.h
@@ -603,6 +603,7 @@ set(stratagus_generic_HDRS
 	src/include/vec2i.h
 	src/include/version.h
 	src/include/video.h
+	src/include/shaders.h
 	src/include/viewport.h
 	src/include/wav.h
 	src/include/widgets.h
@@ -628,7 +629,7 @@ set(stratagus_HDRS
 )
 
 # Configuration types
-set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "" FORCE)
+set(CMAKE_CONFIGURATION_TYPES "Debug;Release;Profile" CACHE STRING "" FORCE)
 
 # Additional platform checks
 
@@ -664,21 +665,26 @@ set(PNG_LIBRARIES PNG::png)
 hunter_add_package(SDL2)
 find_package(SDL2 CONFIG REQUIRED)
 set(SDL2_LIBRARY SDL2::SDL2)
+hunter_add_package(SDL_mixer)
+find_package(SDL_mixer CONFIG REQUIRED)
+set(SDL2_MIXER_LIBRARIES SDL_mixer::SDL_mixer)
+hunter_add_package(SDL_image)
+find_package(SDL_image CONFIG REQUIRED)
+set(SDL2_IMAGE_LIBRARIES SDL_image::SDL_image)
 hunter_add_package(toluapp)
 find_package(toluapp CONFIG REQUIRED)
 set(TOLUA++_LIBRARY toluapp::toluapp)
 hunter_add_package(ZLIB)
 find_package(ZLIB CONFIG REQUIRED)
 set(ZLIB_LIBRARIES ZLIB::zlib)
+find_package(OpenMP)
 
 if(WIN32)
 	find_package(MakeNSIS)
 endif()
 
 find_package(BZip2)
-find_package(FluidSynth)
 find_package(StackTrace)
-find_package(Mikmod)
 find_package(MNG)
 hunter_add_package(libogg)
 find_package(libogg CONFIG)
@@ -690,16 +696,6 @@ set(OGGVORBIS_FOUND true)
 find_package(Theora)
 
 find_package(X11)
-find_package(OpenGL)
-find_package(OpenGLES)
-if(!ANDROID)
-find_package(SDL_gles)
-else()
-	set(SDLGLES_FOUND true)
-	set(SDLGLES_TYPE "Native")
-	set(SDLGLES_INCLUDE_DIR "")
-	set(SDLGLES_LIBRARY "")
-endif()
 
 find_package(Sqlite)
 find_package(Doxygen)
@@ -731,8 +727,6 @@ endif()
 option(ENABLE_TOUCHSCREEN "Use touchscreen input" OFF)
 
 option(WITH_BZIP2 "Compile Stratagus with BZip2 compression support" ON)
-option(WITH_FLUIDSYNTH "Compile Stratagus with FluidSynth sound library" ON)
-option(WITH_MIKMOD "Compile Stratagus with Mikmod sound library" ON)
 option(WITH_MNG "Compile Stratagus with MNG image library" ON)
 option(WITH_OGGVORBIS "Compile Stratagus with OGG/Vorbis sound library" ON)
 option(WITH_THEORA "Compile Stratagus with Theroa video library" ON)
@@ -746,16 +740,6 @@ option(ENABLE_UPX "Compress Stratagus executable binary with UPX packer" OFF)
 option(ENABLE_STRIP "Strip all symbols from executables" OFF)
 option(ENABLE_USEGAMEDIR "Place all files created by Stratagus(logs, savegames) in game directory(old behavior), otherwise place everything in user directory(new behavior)" OFF)
 option(ENABLE_MULTIBUILD "Compile Stratagus on all CPU cores simltaneously in MSVC" ON)
-
-if(NOT WITH_RENDERER)
-	if(OPENGL_FOUND)
-		set(WITH_RENDERER "OpenGL")
-	elseif(OPENGLES_FOUND AND SDLGLES_FOUND)
-		set(WITH_RENDERER "OpenGLES")
-	else()
-		set(WITH_RENDERER "NativeSDL")
-	endif()
-endif()
 
 # Install paths
 set(BINDIR "bin" CACHE PATH "Where to install user binaries")
@@ -772,11 +756,16 @@ else()
 	set(PIXMAPSDIRABS "${PIXMAPSDIR}")
 endif()
 
+if (WIN32)
+  	set(SDL2_LIBRARY ${SDL2_LIBRARY} ${SDL2main_LIBRARY})
+  	message(${SDL2_LIBRARY})
+endif()
+
 # Stratagus definitions
 
-add_definitions(${PNG_DEFINITIONS} -DUSE_ZLIB -DPIXMAPS=\"${PIXMAPSDIRABS}\")
-include_directories(${LUA_INCLUDE_DIR} ${PNG_INCLUDE_DIR} ${SDL2_INCLUDE_DIR} ${TOLUA++_INCLUDE_DIR} ${ZLIB_INCLUDE_DIRS})
-set(stratagus_LIBS ${stratagus_LIBS} ${LUA_LIBRARIES} ${PNG_LIBRARIES} ${SDL2_LIBRARY} ${TOLUA++_LIBRARY} ${ZLIB_LIBRARIES})
+add_definitions(-DUSE_ZLIB -DPIXMAPS=\"${PIXMAPSDIRABS}\")
+include_directories(${LUA_INCLUDE_DIR} ${SDL2_INCLUDE_DIR} ${SDL2_MIXER_INCLUDE_DIRS} ${SDL2_IMAGE_INCLUDE_DIRS} ${TOLUA++_INCLUDE_DIR} ${ZLIB_INCLUDE_DIRS})
+set(stratagus_LIBS ${stratagus_LIBS} ${LUA_LIBRARIES} ${SDL2_LIBRARY} ${SDL2_MIXER_LIBRARIES} ${SDL2_IMAGE_LIBRARIES} ${TOLUA++_LIBRARY} ${ZLIB_LIBRARIES})
 
 if(WIN32 AND NOT ENABLE_STDIO_REDIRECT)
 	add_definitions(-DNO_STDIO_REDIRECT)
@@ -786,22 +775,6 @@ if(WITH_BZIP2 AND BZIP2_FOUND)
 	add_definitions(-DUSE_BZ2LIB ${BZIP2_DEFINITIONS})
 	include_directories(${BZIP2_INCLUDE_DIR})
 	set(stratagus_LIBS ${stratagus_LIBS} ${BZIP2_LIBRARIES})
-endif()
-
-if(WITH_FLUIDSYNTH AND FLUIDSYNTH_FOUND)
-	add_definitions(-DUSE_FLUIDSYNTH ${FLUIDSYNTH_DEFINITIONS})
-	include_directories(${FLUIDSYNTH_INCLUDE_DIR})
-	set(stratagus_LIBS ${stratagus_LIBS} ${FLUIDSYNTH_LIBRARY})
-	find_file(FLUIDSYNTH_DLL libfluidsynth.dll HINTS ${CMAKE_PREFIX_PATH}/bin)
-	find_file(GLIB_DLL libglib-2.0-0.dll HINTS ${CMAKE_PREFIX_PATH} PATH_SUFFIXES bin lib)
-	find_file(GTHREAD_DLL libgthread-2.0-0.dll HINTS ${CMAKE_PREFIX_PATH} PATH_SUFFIXES bin lib)
-	set(MAKENSIS_FLAGS ${MAKENSIS_FLAGS} -DFLUID -DFLUIDDLL=libfluidsynth.dll -DGTHREADDLL=libglib-2.0-0.dll -DGLIBDLL=libgthread-2.0-0.dll)
-endif()
-
-if(WITH_MIKMOD AND MIKMOD_FOUND)
-	add_definitions(-DUSE_MIKMOD ${MIKMOD_DEFINITIONS})
-	include_directories(${MIKMOD_INCLUDE_DIR})
-	set(stratagus_LIBS ${stratagus_LIBS} ${MIKMOD_LIBRARY})
 endif()
 
 if(WITH_MNG AND MNG_FOUND)
@@ -836,28 +809,6 @@ if(WITH_X11 AND X11_FOUND)
 	add_definitions(-DUSE_X11)
 	include_directories(${X11_INCLUDE_DIR})
 	set(stratagus_LIBS ${stratagus_LIBS} ${X11_X11_LIB})
-endif()
-
-if(WITH_RENDERER STREQUAL "OpenGL" AND OPENGL_FOUND)
-	add_definitions(-DUSE_OPENGL)
-	include_directories(${OPENGL_INCLUDE_DIR})
-	set(stratagus_LIBS ${stratagus_LIBS} ${OPENGL_LIBRARIES})
-	message(STATUS "Using OpenGL")
-elseif(WITH_RENDERER STREQUAL "OpenGLES" AND OPENGLES_FOUND AND SDLGLES_FOUND)
-	if(SDLGLES_TYPE STREQUAL "Native")
-		add_definitions(-DUSE_GLES_NATIVE)
-		message(STATUS "Using OpenGLES (SDL Native)")
-	elseif(SDLGLES_TYPE STREQUAL "EGL")
-		add_definitions(-DUSE_GLES_EGL)
-		message(STATUS "Using OpenGLES (SDL EGL)")
-	else()
-		message(FATAL_ERROR "Unknown SDL gles type")
-	endif()
-	add_definitions(-DUSE_GLES)
-	include_directories(${OPENGLES_INCLUDE_DIR} ${SDLGLES_INCLUDE_DIR})
-	set(stratagus_LIBS ${stratagus_LIBS} ${OPENGLES_LIBRARIES} ${SDLGLES_LIBRARY})
-elseif(NOT WITH_RENDERER STREQUAL "NativeSDL")
-	message(FATAL_ERROR "Specified rendering support was not found in system.\nChoose: NativeSDL OpenGL OpenGLES")
 endif()
 
 # Platform definitions
@@ -900,13 +851,20 @@ endif()
 # Stratagus needs to have char by default signed
 # No idea how to tell this to other compilers
 if(CMAKE_COMPILER_IS_GNUCXX)
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsigned-char -std=gnu++0x -Werror")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsigned-char -Werror")
 endif()
 if(CMAKE_COMPILER_IS_GNUC)
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsigned-char")
 endif()
-if(ANDROID)
+if(WIN32 AND MSVC)
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+elseif(ANDROID)
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsigned-char -DDYNAMIC_LOAD")
+endif()
+
+if(CMAKE_BUILD_TYPE STREQUAL "Profile")
+	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pg")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pg")
 endif()
 # TODO: Add support for other compilers
 
@@ -995,6 +953,12 @@ else()
 	message("Debug mode: No (Enable by param -DCMAKE_BUILD_TYPE=Debug)")
 endif()
 
+if(CMAKE_BUILD_TYPE STREQUAL "Profile")
+	message("Profiling mode: Yes (Disable by param -DCMAKE_BUILD_TYPE=Release)")
+else()
+	message("Profiling mode: No (Enable by param -DCMAKE_BUILD_TYPE=Profile)")
+endif()
+
 if(ENABLE_STRIP)
 	message("Strip executables: Yes (Disable by param -DENABLE_STRIP=OFF)")
 else()
@@ -1080,21 +1044,11 @@ else()
 endif()
 
 log_package("Bzip2" "BZIP2")
-log_package("FluidSynth" "FLUIDSYNTH")
-log_package("MikMod" "MIKMOD")
 log_package("Mng" "MNG")
 log_package("Ogg/Vorbis" "OGGVORBIS")
 log_package("StackTrace" "STACKTRACE")
 log_package("Theora" "THEORA")
 log_package("X11" "X11")
-
-if(WITH_RENDERER STREQUAL "OpenGL" AND OPENGL_FOUND)
-	message("Renderer: OpenGL (Disable by param -DWITH_RENDERER=NativeSDL)")
-elseif(WITH_RENDERER STREQUAL "OpenGLES" AND OPENGLES_FOUND AND SDLGLES_FOUND)
-	message("Renderer: OpenGLES (Disable by param -DWITH_RENDERER=NativeSDL)")
-else()
-	message("Renderer: NativeSDL (Enable OpenGL by param -DWITH_RENDERER=OpenGL)")
-endif()
 
 message("==================================")
 
@@ -1143,7 +1097,7 @@ add_custom_command(OUTPUT tolua.cpp
 
 if(ANDROID)
 add_library(stratagus SHARED ${stratagus_SRCS} ${stratagus_HDRS})
-target_link_libraries(stratagus PUBLIC ${stratagus_LIBS})
+target_link_libraries(stratagus ${stratagus_LIBS})
 else()
 if (ENABLE_STDIO_REDIRECT)
    add_executable(stratagus WIN32 ${stratagus_SRCS} ${stratagus_HDRS})
@@ -1151,6 +1105,11 @@ else ()
    add_executable(stratagus ${stratagus_SRCS} ${stratagus_HDRS})
 endif ()
 target_link_libraries(stratagus ${stratagus_LIBS})
+endif()
+
+if(OpenMP_CXX_FOUND)
+	target_compile_options(stratagus PRIVATE ${OpenMP_CXX_FLAGS})
+	target_link_libraries(stratagus OpenMP::OpenMP_CXX)
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -1164,12 +1123,17 @@ else()
 endif()
 endif()
 
+if(CMAKE_BUILD_TYPE STREQUAL "Profile")
+	set_target_properties(stratagus PROPERTIES OUTPUT_NAME stratagus-prof)
+endif()
+
 if(WIN32 AND MINGW AND ENABLE_STATIC)
 	set_target_properties(stratagus PROPERTIES LINK_FLAGS "${LINK_FLAGS} -static-libgcc -static-libstdc++ -Wl,--stack,10485760")
 endif()
 
-if(APPLE)
-	set_target_properties(stratagus PROPERTIES LINK_FLAGS "${LINK_FLAGS}")
+if(APPLE OR WIN32)
+  set_target_properties(stratagus PROPERTIES LINK_FLAGS "${LINK_FLAGS}")
+  set(CMAKE_EXE_LINKER_FLAGS_PROFILE "${CMAKE_EXE_LINKER_FLAGS}")
 endif()
 
 ########### next target ###############
@@ -1222,6 +1186,9 @@ set(png2stratagus_SRCS
 	tools/png2stratagus.cpp
 )
 source_group(png2stratagus FILES ${png2stratagus_SRCS})
+
+set_source_files_properties(png2stratagus_SRCS PROPERTIES INCLUDE_DIRECTORIES "${PNG_INCLUDE_DIR}")
+set_source_files_properties(png2stratagus_SRCS PROPERTIES COMPILE_DEFINITIONS "${PNG_DEFINITIONS}")
 
 add_executable(png2stratagus ${png2stratagus_SRCS})
 target_link_libraries(png2stratagus ${PNG_LIBRARIES} ${ZLIB_LIBRARIES})
@@ -1295,19 +1262,9 @@ endif()
 if(WIN32 AND ENABLE_NSIS AND MAKENSIS_FOUND)
     file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/COPYING DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 	file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/src/win32/stratagus.ico DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
-	if(WITH_FLUIDSYNTH AND FLUIDSYNTH_FOUND)
-		file(COPY ${FLUIDSYNTH_DLL} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
-		file(COPY ${GLIB_DLL} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
-		file(COPY ${GTHREAD_DLL} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
-	endif()
-	# also ship lua51.dll
-	find_file(LUA_DLL lua51.dll HINTS ${CMAKE_PREFIX_PATH} PATH_SUFFIXES bin lib)
-	file(COPY ${LUA_DLL} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
-	set(MAKENSIS_FLAGS ${MAKENSIS_FLAGS} -DLUADLL=lua51.dll)
-	# ship SDL.dll
-	find_file(SDL_DLL SDL.dll HINTS ${CMAKE_PREFIX_PATH} PATH_SUFFIXES bin lib)
-	file(COPY ${SDL_DLL} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
-	set(MAKENSIS_FLAGS ${MAKENSIS_FLAGS} -DSDL=SDL.dll)
+	# ship our DLLs
+	file(GLOB WINDLLS ${CMAKE_PREFIX_PATH}/bin/*.dll)
+	file(COPY ${WINDLLS} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 	add_custom_command(OUTPUT Stratagus-${STRATAGUS_VERSION}${MAKENSIS_SUFFIX}
 		COMMAND ${MAKENSIS} ARGS ${MAKENSIS_FLAGS} -DVERSION=${STRATAGUS_VERSION} -DVIVERSION=${STRATAGUS_VERSION_FULL} ${CMAKE_CURRENT_SOURCE_DIR}/src/win32/stratagus.nsi
 		DEPENDS src/win32/stratagus.nsi stratagus COPYING

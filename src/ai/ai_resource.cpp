@@ -51,6 +51,7 @@
 #include "unit_find.h"
 #include "unittype.h"
 #include "upgrade.h"
+#include "network.h"
 
 /*----------------------------------------------------------------------------
 --  Defines
@@ -778,12 +779,16 @@ void AiAddResearchRequest(CUpgrade *upgrade)
 **  @param what  To what should be upgraded.
 **
 **  @return      True if made, false if can't be made.
-**
-**  @note        We must check if the dependencies are fulfilled.
 */
 static bool AiUpgradeTo(const CUnitType &type, CUnitType &what)
 {
 	std::vector<CUnit *> table;
+
+	if (Preference.AiChecksDependencies || IsNetworkGame()) {
+		if (!CheckDependByType(*AiPlayer->Player, what)) {
+			return false;
+		}
+	}
 
 	// Remove all units already doing something.
 	FindPlayerUnitsByType(*AiPlayer->Player, type, table, true);

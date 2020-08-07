@@ -104,7 +104,6 @@ void LoadCursors(const std::string &race)
 		if (cursor.G && !cursor.G->IsLoaded()) {
 			ShowLoadProgress(_("Cursor %s"), cursor.G->File.c_str());
 			cursor.G->Load();
-			cursor.G->UseDisplayFormat();
 		}
 	}
 }
@@ -261,12 +260,7 @@ void DrawCursor()
 	}
 	const PixelPos pos = CursorScreenPos - GameCursor->HotPos;
 
-#if defined(USE_OPENGL) || defined(USE_GLES)
-	if (!UseOpenGL &&
-#else
-	if (
-#endif
-		!GameRunning && !Editor.Running) {
+	if (!GameRunning && !Editor.Running) {
 		if (!HiddenSurface
 			|| HiddenSurface->w != GameCursor->G->getWidth()
 			|| HiddenSurface->h != GameCursor->G->getHeight()) {
@@ -286,9 +280,7 @@ void DrawCursor()
 		}
 
 		SDL_Rect srcRect = { Sint16(pos.x), Sint16(pos.y), Uint16(GameCursor->G->getWidth()), Uint16(GameCursor->G->getHeight())};
-		//SDL_LockSurface(TheScreen);
 		SDL_BlitSurface(TheScreen, &srcRect, HiddenSurface, NULL);
-		//SDL_UnlockSurface(TheScreen);
 	}
 
 	//  Last, Normal cursor.
@@ -303,17 +295,10 @@ void DrawCursor()
 */
 void HideCursor()
 {
-#if defined(USE_OPENGL) || defined(USE_GLES)
-	if (!UseOpenGL &&
-#else
-	if (
-#endif
-		!GameRunning && !Editor.Running && GameCursor) {
+	if (!GameRunning && !Editor.Running && GameCursor) {
 		const PixelPos pos = CursorScreenPos - GameCursor->HotPos;
 		SDL_Rect dstRect = {Sint16(pos.x), Sint16(pos.y), 0, 0 };
-		//SDL_LockSurface(TheScreen);
 		SDL_BlitSurface(HiddenSurface, NULL, TheScreen, &dstRect);
-		//SDL_UnlockSurface(TheScreen);
 	}
 }
 

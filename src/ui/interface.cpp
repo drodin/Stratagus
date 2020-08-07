@@ -305,8 +305,8 @@ void UiToggleBigMap()
 
 		UI.MapArea.X = 0;
 		UI.MapArea.Y = 0;
-		UI.MapArea.EndX = Video.ViewportWidth - 1;
-		UI.MapArea.EndY = Video.ViewportHeight - 1;
+		UI.MapArea.EndX = Video.Width - 1;
+		UI.MapArea.EndY = Video.Height - 1;
 
 		SetViewportMode(UI.ViewportMode);
 
@@ -729,18 +729,6 @@ static bool CommandKey(int key)
 		case SDLK_KP_6:
 			KeyScrollState |= ScrollRight;
 			break;
-#ifdef USE_OPENGL
-		case SDLK_SLASH:
-		case SDLK_BACKSLASH:
-			if (KeyModifiers & ModifierAlt) {
-				if (GLShaderPipelineSupported) {
-					char shadername[1024] = { '\0' };
-					LoadShaders(key == SDLK_SLASH ? 1 : -1, shadername);
-					SetMessage("%s", shadername);
-				}
-			}
-			break;
-#endif
 		default:
 			if (HandleCommandKey(key)) {
 				break;
@@ -990,8 +978,6 @@ int HandleKeyModifiersDown(unsigned key, unsigned)
 			return 1;
 		case SDLK_LALT:
 		case SDLK_RALT:
-		//case SDLK_LMETA:
-		//case SDLK_RMETA:
 			KeyModifiers |= ModifierAlt;
 			// maxy: disabled
 			if (InterfaceState == IfaceStateNormal) {
@@ -1036,8 +1022,6 @@ int HandleKeyModifiersUp(unsigned key, unsigned)
 			return 1;
 		case SDLK_LALT:
 		case SDLK_RALT:
-		//case SDLK_LMETA:
-		//case SDLK_RMETA:
 			KeyModifiers &= ~ModifierAlt;
 			// maxy: disabled
 			if (InterfaceState == IfaceStateNormal) {
@@ -1275,13 +1259,8 @@ void HandleButtonUp(unsigned button)
 --  Lowlevel input functions
 ----------------------------------------------------------------------------*/
 
-#ifdef USE_TOUCHSCREEN
-int DoubleClickDelay = 1000;      /// Time to detect double clicks.
-int HoldClickDelay = 2000;        /// Time to detect hold clicks.
-#else
 int DoubleClickDelay = 300;       /// Time to detect double clicks.
 int HoldClickDelay = 1000;        /// Time to detect hold clicks.
-#endif
 
 static enum {
 	InitialMouseState,            /// start state
@@ -1373,28 +1352,11 @@ void InputMouseMove(const EventCallback &callbacks,
 {
 	PixelPos mousePos(x, y);
 	// Don't reset the mouse state unless we really moved
-#ifdef USE_TOUCHSCREEN
-	const int buff = 32;
-	const PixelDiff diff = LastMousePos - mousePos;
-
-	if (abs(diff.x) > buff || abs(diff.y) > buff) {
-		MouseState = InitialMouseState;
-		LastMouseTicks = ticks;
-		// Reset rectangle select cursor state if we moved by a lot
-		// - rectangle select should be a drag, not a tap
-		if (CursorState == CursorStateRectangle
-			&& (abs(diff.x) > 2 * buff || abs(diff.y) > 2 * buff)) {
-			CursorState = CursorStatePoint;
-		}
-	}
-	LastMousePos = mousePos;
-#else
 	if (LastMousePos != mousePos) {
 		MouseState = InitialMouseState;
 		LastMouseTicks = ticks;
 		LastMousePos = mousePos;
 	}
-#endif
 	callbacks.MouseMoved(mousePos);
 }
 

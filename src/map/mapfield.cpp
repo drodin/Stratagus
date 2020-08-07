@@ -233,6 +233,12 @@ bool CMapField::RockOnMap() const
 	return CheckMask(MapFieldRocks);
 }
 
+/// Returns true if the field should not need mixing with the surroundings
+bool CMapField::isDecorative() const
+{
+	return CheckMask(MapFieldDecorative);
+}
+
 bool CMapField::isAWall() const
 {
 	return Flags & MapFieldWall;
@@ -266,14 +272,16 @@ unsigned char CMapFieldPlayerInfo::TeamVisibilityState(const CPlayer &player) co
 	if (IsExplored(player)) {
 		maxVision = 1;
 	}
-	for (int i = 0; i != PlayerMax ; ++i) {
-		if (player.IsBothSharedVision(Players[i])) {
+	
+	for (const int i : player.GetSharedVision()) {
+		if (player.HasMutualSharedVisionWith(Players[i])) {
 			maxVision = std::max<unsigned char>(maxVision, Visible[i]);
 			if (maxVision >= 2) {
 				return 2;
 			}
 		}
 	}
+
 	if (maxVision == 1 && Map.NoFogOfWar) {
 		return 2;
 	}

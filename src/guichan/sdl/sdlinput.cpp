@@ -8,7 +8,7 @@
  *
  * Copyright (c) 2004, 2005 darkbits                        Js_./
  * Per Larsson a.k.a finalman                          _RqZ{a<^_aa
- * Olof Naessï¿½n a.k.a jansem/yakslem                _asww7!uY`>  )\a//
+ * Olof Naessén a.k.a jansem/yakslem                _asww7!uY`>  )\a//
  *                                                 _Qhm`] _f "'c  1!5m
  * Visit: http://guichan.darkbits.org             )Qk<P ` _: :+' .'  "{[
  *                                               .)j(] .d_/ '-(  P .   S
@@ -59,7 +59,6 @@
 #include "guichan/sdl/sdlinput.h"
 #include "guichan/exception.h"
 #ifdef ANDROID
-#include "stratagus.h"
 #include "video.h"
 #endif
 
@@ -154,8 +153,8 @@ namespace gcn
                   mouseInput = mMouseInputQueue.front();
                   mouseInput.setButton(convertMouseButton(SDL_BUTTON_MIDDLE));
               } else {
-                  mouseInput.x = event.tfinger.x * Video.ViewportWidth;
-                  mouseInput.y = event.tfinger.y * Video.ViewportHeight;
+                  mouseInput.x = event.tfinger.x * Video.Width;
+                  mouseInput.y = event.tfinger.y * Video.Height;
                   mouseInput.setButton(convertMouseButton(SDL_BUTTON_LEFT));
               }
               mouseInput.setType(MouseInput::PRESS);
@@ -169,8 +168,8 @@ namespace gcn
                   mouseInput = mMouseInputQueue.front();
                   mouseInput.setButton(convertMouseButton(SDL_BUTTON_MIDDLE));
               } else {
-                  mouseInput.x = event.tfinger.x * Video.ViewportWidth;
-                  mouseInput.y = event.tfinger.y * Video.ViewportHeight;
+                  mouseInput.x = event.tfinger.x * Video.Width;
+                  mouseInput.y = event.tfinger.y * Video.Height;
                   mouseInput.setButton(convertMouseButton(SDL_BUTTON_LEFT));
               }
               mouseInput.setType(MouseInput::RELEASE);
@@ -181,8 +180,8 @@ namespace gcn
           case SDL_FINGERMOTION:
               if (event.tfinger.fingerId)
                   break;
-              mouseInput.x = event.tfinger.x * Video.ViewportWidth;
-              mouseInput.y = event.tfinger.y * Video.ViewportHeight;
+              mouseInput.x = event.tfinger.x * Video.Width;
+              mouseInput.y = event.tfinger.y * Video.Height;
               mouseInput.setButton(MouseInput::EMPTY);
               mouseInput.setType(MouseInput::MOTION);
               mouseInput.setTimeStamp(SDL_GetTicks());
@@ -401,14 +400,6 @@ namespace gcn
           case SDLK_SCROLLLOCK:
               value = Key::K_SCROLL_LOCK;
               break;
-          #if 0
-          case SDLK_RMETA:
-              value = Key::K_RIGHT_META;
-              break;
-          case SDLK_LMETA:
-              value = Key::K_LEFT_META;
-              break;
-          #endif
           case SDLK_LGUI:
               value = Key::K_LEFT_SUPER;
               break;
