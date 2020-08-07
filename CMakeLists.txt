@@ -870,7 +870,6 @@ endif()
 
 if(APPLE)
 	add_definitions(-DUSE_MAC)
-	set(SDL2_LIBRARY ${SDL2_LIBRARY} SDL2main)
 endif()
 
 if(BSD)
@@ -910,9 +909,9 @@ check_function_exists("getopt" HAVE_GETOPT)
 # so rather check if we have strcat_s in string.h file
 check_symbol_exists("strcat_s" "string.h" HAVE_STRCATS)
 
-if(HAVE_ERRNOT)
-	add_definitions(-DHAVE_ERRNOT)
-endif()
+#if(HAVE_ERRNOT)
+#	add_definitions(-DHAVE_ERRNOT)
+#endif()
 
 if(HAVE_STRCPYS)
 	add_definitions(-DHAVE_STRCPYS)
@@ -1202,7 +1201,7 @@ set(png2stratagus_SRCS
 source_group(png2stratagus FILES ${png2stratagus_SRCS})
 
 add_executable(png2stratagus ${png2stratagus_SRCS})
-target_link_libraries(png2stratagus ${PNG_LIBRARY} ${ZLIB_LIBRARIES})
+target_link_libraries(png2stratagus ${PNG_LIBRARIES} ${ZLIB_LIBRARIES})
 
 if(WIN32 AND MINGW AND ENABLE_STATIC)
 	set_target_properties(png2stratagus PROPERTIES LINK_FLAGS "${LINK_FLAGS} -static-libgcc -static-libstdc++")
