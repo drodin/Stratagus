@@ -288,6 +288,7 @@ private:
 	void DoClicked_Unload(int button);
 	void DoClicked_SpellCast(int button);
 	void DoClicked_Repair(int button);
+	void DoClicked_Explore();
 	void DoClicked_Return();
 	void DoClicked_Stop();
 	void DoClicked_StandGround();
@@ -434,6 +435,12 @@ public:
 	CUIButton *ResearchingButton;       /// Button info for researching
 
 	std::vector<CUIButton> TransportingButtons;/// Button info for transporting
+
+        std::vector<std::string> LifeBarColorNames;
+        std::vector<int> LifeBarPercents;
+        std::vector<IntColor> LifeBarColorsInt;
+        int LifeBarYOffset;
+        bool LifeBarBorder;
 
 	// Completed bar
 	CColor CompletedBarColorRGB;     /// color for completed bar
@@ -597,6 +604,8 @@ extern void CallHandler(unsigned int handle, int value);
 
 /// Show load progress
 extern void ShowLoadProgress(const char *fmt, ...) PRINTF_VAARG_ATTRIBUTE(1, 2);
+/// Check if Demo/Attract mode is in progress
+extern bool IsDemoMode();
 
 //@}
 

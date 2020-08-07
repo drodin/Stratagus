@@ -8,9 +8,9 @@
 //                        T H E   W A R   B E G I N S
 //           Stratagus - A free fantasy real time strategy game engine
 //
-/**@name action_patrol.cpp - The patrol action. */
+/**@name action_explore.cpp - The explore action. */
 //
-//      (c) Copyright 1998-2005 by Lutz Sammer and Jimmy Salmon
+//      (c) Copyright 1998-2019 by Lutz Sammer, Jimmy Salmon and Talas
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -35,13 +35,14 @@
 
 #include "stratagus.h"
 
-#include "action/action_patrol.h"
+#include "action/action_explore.h"
 
 #include "animation.h"
 #include "iolib.h"
 #include "map.h"
 #include "pathfinder.h"
 #include "script.h"
+#include "tile.h"
 #include "ui.h"
 #include "unit.h"
 #include "unittype.h"
@@ -51,22 +52,40 @@
 --  Functions
 ----------------------------------------------------------------------------*/
 
-/* static */ COrder *COrder::NewActionPatrol(const Vec2i &currentPos, const Vec2i &dest)
+static void GetExplorationTarget(const CUnit &unit, Vec2i &dest)
 {
-	Assert(Map.Info.IsPointOnMap(currentPos));
+	int triesLeft = Map.NoFogOfWar ? 0 : 3;
+	CMapField *field;
+	const CPlayer &player = *unit.Player;
+	dest.x = SyncRand(Map.Info.MapWidth - 1) + 1;
+	dest.y = SyncRand(Map.Info.MapHeight - 1) + 1;
+
+	while (triesLeft > 0) {
+		field = Map.Field(dest);
+		if (field && !field->playerInfo.IsExplored(player))
+			return; // unexplored, go here!
+		dest.x = SyncRand(Map.Info.MapWidth - 1) + 1;
+		dest.y = SyncRand(Map.Info.MapHeight - 1) + 1;
+		--triesLeft;
+	}
+}
+
+/* static */ COrder *COrder::NewActionExplore(const CUnit &unit)
+{
+	Vec2i dest;
+	GetExplorationTarget(unit, dest);
 	Assert(Map.Info.IsPointOnMap(dest));
 
-	COrder_Patrol *order = new COrder_Patrol();
+	COrder_Explore *order = new COrder_Explore();
 
 	order->goalPos = dest;
-	order->WayPoint = currentPos;
 	return order;
 }
 
 
-/* virtual */ void COrder_Patrol::Save(CFile &file, const CUnit &unit) const
+/* virtual */ void COrder_Explore::Save(CFile &file, const CUnit &unit) const
 {
-	file.printf("{\"action-patrol\",");
+	file.printf("{\"action-explore\",");
 
 	if (this->Finished) {
 		file.printf(" \"finished\", ");
@@ -77,18 +96,12 @@
 	if (this->WaitingCycle != 0) {
 		file.printf(" \"waiting-cycle\", %d,", this->WaitingCycle);
 	}
-	file.printf(" \"patrol\", {%d, %d}", this->WayPoint.x, this->WayPoint.y);
 	file.printf("}");
 }
 
-/* virtual */ bool COrder_Patrol::ParseSpecificData(lua_State *l, int &j, const char *value, const CUnit &unit)
+/* virtual */ bool COrder_Explore::ParseSpecificData(lua_State *l, int &j, const char *value, const CUnit &unit)
 {
-	if (!strcmp(value, "patrol")) {
-		++j;
-		lua_rawgeti(l, -1, j + 1);
-		CclGetPos(l, &this->WayPoint.x , &this->WayPoint.y);
-		lua_pop(l, 1);
-	} else if (!strcmp(value, "waiting-cycle")) {
+	if (!strcmp(value, "waiting-cycle")) {
 		++j;
 		this->WaitingCycle = LuaToNumber(l, -1, j + 1);
 	} else if (!strcmp(value, "range")) {
@@ -105,24 +118,21 @@
 	return true;
 }
 
-/* virtual */ bool COrder_Patrol::IsValid() const
+/* virtual */ bool COrder_Explore::IsValid() const
 {
 	return true;
 }
 
-/* virtual */ PixelPos COrder_Patrol::Show(const CViewport &vp, const PixelPos &lastScreenPos) const
+/* virtual */ PixelPos COrder_Explore::Show(const CViewport &vp, const PixelPos &lastScreenPos) const
 {
 	const PixelPos pos1 = vp.TilePosToScreen_Center(this->goalPos);
-	const PixelPos pos2 = vp.TilePosToScreen_Center(this->WayPoint);
 
 	Video.DrawLineClip(ColorGreen, lastScreenPos, pos1);
 	Video.FillCircleClip(ColorBlue, pos1, 2);
-	Video.DrawLineClip(ColorBlue, pos1, pos2);
-	Video.FillCircleClip(ColorBlue, pos2, 3);
-	return pos2;
+	return pos1;
 }
 
-/* virtual */ void COrder_Patrol::UpdatePathFinderData(PathFinderInput &input)
+/* virtual */ void COrder_Explore::UpdatePathFinderData(PathFinderInput &input)
 {
 	input.SetMinRange(0);
 	input.SetMaxRange(this->Range);
@@ -131,7 +141,7 @@
 }
 
 
-/* virtual */ void COrder_Patrol::Execute(CUnit &unit)
+/* virtual */ void COrder_Explore::Execute(CUnit &unit)
 {
 	if (unit.Wait) {
 		if (!unit.Waiting) {
@@ -158,21 +168,26 @@
 			break;
 
 		case PF_REACHED:
+		{
 			this->WaitingCycle = 1;
 			this->Range = 0;
-			std::swap(this->WayPoint, this->goalPos);
-
+			// pick a new place to explore
+			GetExplorationTarget(unit, this->goalPos);
+		}
 			break;
 		case PF_WAIT:
+		{
 			// Wait for a while then give up
 			this->WaitingCycle++;
 			if (this->WaitingCycle == 5) {
 				this->WaitingCycle = 0;
 				this->Range = 0;
-				std::swap(this->WayPoint, this->goalPos);
+				// pick a new place to explore
+				GetExplorationTarget(unit, this->goalPos);
 
 				unit.pathFinderData->output.Cycles = 0; //moving counter
 			}
+		}
 			break;
 		default: // moving
 			this->WaitingCycle = 0;
@@ -189,7 +204,7 @@
 /**
 **  Get goal position
 */
-/* virtual */ const Vec2i COrder_Patrol::GetGoalPos() const
+/* virtual */ const Vec2i COrder_Explore::GetGoalPos() const
 {
 	const Vec2i invalidPos(-1, -1);
 	if (goalPos != invalidPos) {

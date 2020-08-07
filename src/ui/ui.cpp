@@ -107,6 +107,16 @@ void ShowLoadProgress(const char *fmt, ...)
 	}
 }
 
+/**
+**  Check if the game is running in Demo mode.
+**
+**  @return  True if the game is in demo mode, false otherwise
+*/
+bool IsDemoMode()
+{
+	return GameRunning && ThisPlayer->Type == PlayerNobody;
+}
+
 CUnitInfoPanel::~CUnitInfoPanel()
 {
 	for (std::vector<CContentType *>::iterator content = Contents.begin();
@@ -154,6 +164,19 @@ CUserInterface::CUserInterface() :
 
 	NormalFontColor = "light-blue";
 	ReverseFontColor = "yellow";
+
+	LifeBarColorNames.push_back("dark-green");
+	LifeBarColorNames.push_back("yellow");
+	LifeBarColorNames.push_back("orange");
+	LifeBarColorNames.push_back("red");
+
+    LifeBarPercents.push_back(75);
+	LifeBarPercents.push_back(50);
+	LifeBarPercents.push_back(25);
+	LifeBarPercents.push_back(0);
+
+	LifeBarBorder = true;
+	LifeBarYOffset = 0;
 }
 
 /**
