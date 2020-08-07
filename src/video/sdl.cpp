@@ -65,6 +65,7 @@
 #endif
 
 #ifdef USE_OPENGL
+#define __gl_glext_h_
 #include "SDL_opengl.h"
 #include "shaders.h"
 #endif
@@ -199,6 +200,10 @@ static bool IsExtensionSupported(const char *extension)
 	len = strlen(extension);
 	start = extensions;
 	while (true) {
+		if (!start)
+		{
+			return false;
+		}
 		ptr = (GLubyte *)strstr((const char *)start, extension);
 		if (!ptr) {
 			break;
@@ -757,6 +762,10 @@ void InitVideoSdl()
 	ColorGreen = Video.MapRGB(TheScreen->format, 0, 252, 0);
 	ColorYellow = Video.MapRGB(TheScreen->format, 252, 252, 0);
 
+	for(std::vector<std::string>::iterator it = UI.LifeBarColorNames.begin(); it != UI.LifeBarColorNames.end(); ++it) {
+		UI.LifeBarColorsInt.push_back(IndexToColor(GetColorIndexByName((*it).c_str())));
+	}
+
 	UI.MouseWarpPos.x = UI.MouseWarpPos.y = -1;
 }
 
@@ -892,13 +901,13 @@ static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
 						IsSDLWindowVisible = false;
 						if (!GamePaused) {
 							DoTogglePause = true;
-							UiTogglePause();
+							GamePaused = true;
 						}
 					} else if (!IsSDLWindowVisible && (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED)) {
 						IsSDLWindowVisible = true;
 						if (GamePaused && DoTogglePause) {
 							DoTogglePause = false;
-							UiTogglePause();
+							GamePaused = true;
 						}
 					}
 				}

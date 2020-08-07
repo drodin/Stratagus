@@ -253,7 +253,11 @@ static int CclSetZoomNoResize(lua_State *l)
 {
 #if defined(USE_OPENGL) || defined(USE_GLES)
 	if (CclInConfigFile) {
-		// May have been set from the command line
+		// Did the commandline force OpenGL off?
+		if (ForceUseOpenGL && UseOpenGL == 0) {
+			return 0;
+		}
+		// Did the commandline already force ZoomNoResize on?
 		if (!(ForceUseOpenGL && ZoomNoResize)) {
 			const int args = lua_gettop(l);
 			int originalWidth = 640;
@@ -357,6 +361,14 @@ static int CclGetVideoFullScreen(lua_State *l)
 {
 	LuaCheckArgs(l, 0);
 	lua_pushboolean(l, Video.FullScreen);
+	return 1;
+}
+
+static int CclShowTitleScreens(lua_State *l)
+{
+	LuaCheckArgs(l, 0);
+	ShowTitleScreens();
+	lua_pushboolean(l, 1);
 	return 1;
 }
 
@@ -998,6 +1010,8 @@ static int CclDefineButton(lua_State *l)
 				ba.Action = ButtonTrain;
 			} else if (!strcmp(value, "patrol")) {
 				ba.Action = ButtonPatrol;
+			} else if (!strcmp(value, "explore")) {
+				ba.Action = ButtonExplore;
 			} else if (!strcmp(value, "stand-ground")) {
 				ba.Action = ButtonStandGround;
 			} else if (!strcmp(value, "attack-ground")) {
@@ -1275,6 +1289,7 @@ void UserInterfaceCclRegister()
 	lua_register(Lua, "GetVideoFullScreen", CclGetVideoFullScreen);
 
 	lua_register(Lua, "SetTitleScreens", CclSetTitleScreens);
+	lua_register(Lua, "ShowTitleScreens", CclShowTitleScreens);
 
 	lua_register(Lua, "DefinePanelContents", CclDefinePanelContents);
 	lua_register(Lua, "DefinePopup", CclDefinePopup);

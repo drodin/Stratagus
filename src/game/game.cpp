@@ -897,11 +897,33 @@ void CreateGame(const std::string &filename, CMap *map)
 
 	for (int i = 0; i < PlayerMax; ++i) {
 		int playertype = (PlayerTypes)Map.Info.PlayerType[i];
-		// Network games only:
 		if (GameSettings.Presets[i].Type != SettingsPresetMapDefault) {
 			playertype = GameSettings.Presets[i].Type;
 		}
 		CreatePlayer(playertype);
+		if (GameSettings.Presets[i].Team != SettingsPresetMapDefault) {
+			int presetTeam = GameSettings.Presets[i].Team;
+			for (int j = 0; j < i; j++) {
+				if (Players[j].Team != SettingsPresetMapDefault) {
+					if (Players[j].Team != presetTeam) {
+						Players[i].SetDiplomacyEnemyWith(Players[j]);
+						Players[j].SetDiplomacyEnemyWith(Players[i]);
+					} else {
+						Players[i].SetDiplomacyAlliedWith(Players[j]);
+						Players[j].SetDiplomacyAlliedWith(Players[i]);
+					}
+				}
+			}
+		}
+	}
+	if (!ThisPlayer && !IsNetworkGame()) {
+		// In demo or kiosk mode, pick first empty slot
+		for (int i = 0; i < PlayerMax; ++i) {
+			if (Players[i].Type == PlayerNobody) {
+				ThisPlayer = &Players[i];
+				break;
+			}
+		}
 	}
 
 	if (!filename.empty()) {
@@ -1076,6 +1098,11 @@ void CreateGame(const std::string &filename, CMap *map)
 			unit.Colors = &unit.RescuedFrom->UnitColors;
 		} else {
 			unit.Colors = &unit.Player->UnitColors;
+		}
+		if (unit.Type->OnReady) {
+			unit.Type->OnReady->pushPreamble();
+			unit.Type->OnReady->pushInteger(UnitNumber(unit));
+			unit.Type->OnReady->run();
 		}
 	}
 

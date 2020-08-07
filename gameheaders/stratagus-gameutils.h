@@ -97,37 +97,30 @@ void error(const char* title, const char* text) {
 	exit(-1);
 }
 
-void mkdir_p(const char* path)
-{
-	char *cp, *s, *s2;
-
-	if (*path && path[0] == '.') {  // relative don't work
-		return;
-	}
-	cp = strdup(path);
-	s = strrchr(cp, '/');
-	if (!s) s = strrchr(cp, SLASH[0]);
-	if (s) {
-		*s = '\0';  // remove file
-		s = cp;
-		for (;;) {  // make each path element
-			s2 = strchr(s, '/');
-			if (!s2) s = strchr(s, SLASH[0]);
-			s = s2;
-			if (s) {
-				*s = '\0';
+void mkdir_p(const char* path) {
+	int error = 0;	
+	printf("mkdir %s\n", path);
+	if (mkdir(path, 0777)) {
+		error = errno;
+		if (error == ENOENT) {	
+			char *sep = strrchr((char*)path, '/');
+			if (sep == NULL) {
+				sep = strrchr((char*)path, SLASH[0]);
 			}
-			mkdir(cp, 0777);
-			if (s) {
-				*s++ = SLASH[0];
-			} else {
-				break;
+			if (sep != NULL) {
+				*sep = '\0';
+				if (strlen(path) > 0) {
+					// will be null if the we reach the first /
+					mkdir_p(path);
+				}
+				*sep = '/';
+			}
+		} else if (error != EEXIST) {
+			if (mkdir(path, 0777)) {
+				printf("Error while trying to create '%s'\n", path);
 			}
 		}
-	} else {
-		mkdir(cp, 0777);
 	}
-	free(cp);
 }
 
 #ifdef WIN32
@@ -143,7 +136,9 @@ void copy_dir(const char* source_folder, const char* target_folder)
 	WCHAR sf[MAX_PATH + 1];
 	WCHAR tf[MAX_PATH + 1];
 	wcscpy_s(sf, MAX_PATH, wsource_folder);
-	mkdir_p(target_folder);
+	char* ptarget = strdup(target_folder);
+	parentdir(ptarget);
+	mkdir_p(ptarget);
 	wcscpy_s(tf, MAX_PATH, wtarget_folder);
 	sf[lstrlenW(sf) + 1] = 0;
 	tf[lstrlenW(tf) + 1] = 0;
@@ -165,7 +160,7 @@ int copy_file(const char* src_path, const struct stat* sb, int typeflag) {
 		mkdir_p(dst_path);
 		break;
 	case FTW_F:
-		mkdir_p(dst_path);
+		mkdir_p(parentdir(strdup(dst_path)));
 		FILE* in = fopen(src_path, "rb");
 		FILE* out = fopen(dst_path, "wb");
 		char buf[4096];
@@ -188,7 +183,7 @@ int copy_file(const char* src_path, const struct stat* sb, int typeflag) {
 
 void copy_dir(const char* src_path, const char* dst_path) {
 	printf("Copying %s to %s\n", src_path, dst_path);
-	mkdir_p(dst_path);
+	mkdir_p(parentdir(strdup(dst_path)));
 	strcpy(dst_root, dst_path);
 	strcpy(src_root, src_path);
 	ftw(src_path, copy_file, 20);

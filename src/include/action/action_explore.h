@@ -8,9 +8,9 @@
 //                        T H E   W A R   B E G I N S
 //         Stratagus - A free fantasy real time strategy game engine
 //
-/**@name action_unload.h - The actions headerfile. */
+/**@name action_explore.h - The actions headerfile. */
 //
-//      (c) Copyright 1998-2012 by Lutz Sammer and Jimmy Salmon
+//      (c) Copyright 1998-2019 by Lutz Sammer, Jimmy Salmon and Talas
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -27,24 +27,24 @@
 //      02111-1307, USA.
 //
 
-#ifndef __ACTION_UNLOAD_H__
-#define __ACTION_UNLOAD_H__
+#ifndef __ACTION_EXPLORE_H__
+#define __ACTION_EXPLORE_H__
 
 #include "actions.h"
 
 //@{
 
-class COrder_Unload : public COrder
+class COrder_Explore : public COrder
 {
-	friend COrder *COrder::NewActionUnload(const Vec2i &pos, CUnit *what);
+	friend COrder *COrder::NewActionExplore(const CUnit &unit);
 public:
-	COrder_Unload() : COrder(UnitActionUnload), State(0), Range(0)
+	COrder_Explore() : COrder(UnitActionExplore), WaitingCycle(0), Range(0)
 	{
 		goalPos.x = -1;
 		goalPos.y = -1;
 	}
 
-	virtual COrder_Unload *Clone() const { return new COrder_Unload(*this); }
+	virtual COrder_Explore *Clone() const { return new COrder_Explore(*this); }
 
 	virtual bool IsValid() const;
 
@@ -54,16 +54,13 @@ public:
 	virtual void Execute(CUnit &unit);
 	virtual PixelPos Show(const CViewport &vp, const PixelPos &lastScreenPos) const;
 	virtual void UpdatePathFinderData(PathFinderInput &input);
-	virtual const Vec2i GetGoalPos() const { return goalPos; }
-
+	virtual const Vec2i GetGoalPos() const;
 private:
-	bool LeaveTransporter(CUnit &transporter);
-private:
-	int State;
+	unsigned int WaitingCycle; /// number of cycle pathfinder wait.
 	int Range;
 	Vec2i goalPos;
 };
 
 //@}
 
-#endif // !__ACTION_UNLOAD_H__
+#endif // !__ACTION_EXPLORE_H__
