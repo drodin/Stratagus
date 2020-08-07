@@ -730,6 +730,7 @@ static bool CommandKey(int key)
 			KeyScrollState |= ScrollRight;
 			break;
 
+#if defined(USE_OPENGL) || defined(USE_GLES)
 		case SDLK_SLASH:
 		case SDLK_BACKSLASH:
 			if (KeyModifiers & ModifierAlt) {
@@ -740,7 +741,7 @@ static bool CommandKey(int key)
 				}
 			}
 			break;
-
+#endif
 		default:
 			if (HandleCommandKey(key)) {
 				break;
@@ -1088,6 +1089,13 @@ static bool IsKeyPad(unsigned key, unsigned *kp)
 */
 void HandleKeyDown(unsigned key, unsigned keychar)
 {
+	if (IsDemoMode()) {
+		// If we are in "demo mode", exit no matter which key we hit.
+		void ActionDraw();
+		ActionDraw();
+		return;
+	}
+
 	if (HandleKeyModifiersDown(key, keychar)) {
 		return;
 	}

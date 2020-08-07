@@ -37,6 +37,7 @@
 #include "commands.h"
 #include "construct.h"
 #include "iolib.h"
+#include "luacallback.h"
 #include "map.h"
 #include "player.h"
 #include "script.h"
@@ -208,6 +209,12 @@ static void Finish(COrder_Built &order, CUnit &unit)
 		AiWorkComplete(worker, unit);
 	}
 
+	if (unit.Type->OnReady) {
+		unit.Type->OnReady->pushPreamble();
+		unit.Type->OnReady->pushInteger(UnitNumber(unit));
+		unit.Type->OnReady->run();
+	}
+
 	// FIXME: Vladi: this is just a hack to test wall fixing,
 	// FIXME:  also not sure if the right place...
 	// FIXME: Johns: hardcoded unit-type wall / more races!
@@ -266,6 +273,12 @@ static void Finish(COrder_Built &order, CUnit &unit)
 	}
 
 	const int maxProgress = type.Stats[unit.Player->Index].Costs[TimeCost] * 600;
+
+	// Check if we should make some random noise
+	// IMPORTANT: this is local randomization, do not use the SyncRand function!
+	if (unit.Frame == 0 && unit.Player == ThisPlayer && GameCycle % 150 == 0 && (MyRand() % 3) == 0) {
+		PlayUnitSound(unit, VoiceBuilding, true);
+	}
 
 	// Check if building ready. Note we can both build and repair.
 	if (!unit.Anim.Unbreakable && this->ProgressCounter >= maxProgress) {

@@ -396,10 +396,11 @@ void FireMissile(CUnit &unit, CUnit *goal, const Vec2i &goalPos)
 	// If Firing from inside a Bunker
 	CUnit *from = GetFirstContainer(unit);
 	const int dir = ((unit.Direction + NextDirection / 2) & 0xFF) / NextDirection;
-	const PixelPos startPixelPos = Map.TilePosToMapPixelPos_Center(from->tilePos)
+	const PixelPos startPixelPos = from->GetMapPixelPosCenter()
 								   + unit.Type->MissileOffsets[dir][0];
 
 	Vec2i dpos;
+	bool divisionOffset = false;
 	if (goal) {
 		Assert(goal->Type);  // Target invalid?
 		// Moved out of attack range?
@@ -415,6 +416,8 @@ void FireMissile(CUnit &unit, CUnit *goal, const Vec2i &goalPos)
 		if (unit.Container) {
 			NearestOfUnit(*goal, GetFirstContainer(unit)->tilePos, &dpos);
 		} else {
+			if (goal->Type->TileWidth % 2 == 0)
+				divisionOffset = true;
 			dpos = goal->tilePos + goal->Type->GetHalfTileSize();
 		}
 	} else {
@@ -423,6 +426,8 @@ void FireMissile(CUnit &unit, CUnit *goal, const Vec2i &goalPos)
 	}
 
 	PixelPos destPixelPos = Map.TilePosToMapPixelPos_Center(dpos);
+	if (divisionOffset)
+		destPixelPos -= PixelTileSize/2;
 	Missile *missile = MakeMissile(*unit.Type->Missile.Missile, startPixelPos, destPixelPos);
 	//
 	// Damage of missile
@@ -632,9 +637,10 @@ void Missile::MissileNewHeadingFromXY(const PixelPos &delta)
 **
 **  @return         true if goal is reached, false else.
 */
-bool MissileInitMove(Missile &missile)
+bool MissileInitMove(Missile &missile, bool pointToPoint)
 {
-	const PixelPos heading = missile.destination - missile.position;
+	const PixelPos source = pointToPoint ? missile.source : missile.position;
+	const PixelPos heading = missile.destination - source;
 
 	missile.MissileNewHeadingFromXY(heading);
 	if (!(missile.State & 1)) {
@@ -740,7 +746,7 @@ bool MissileHandleBlocking(Missile &missile, const PixelPos &position)
 */
 bool PointToPointMissile(Missile &missile)
 {
-	MissileInitMove(missile);
+	MissileInitMove(missile, true);
 	if (missile.TotalStep == 0) {
 		return true;
 	}

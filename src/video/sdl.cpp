@@ -65,6 +65,7 @@
 #endif
 
 #ifdef USE_OPENGL
+#define __gl_glext_h_
 #include "SDL_opengl.h"
 #include "shaders.h"
 #endif
@@ -196,6 +197,10 @@ static bool IsExtensionSupported(const char *extension)
 	len = strlen(extension);
 	start = extensions;
 	while (true) {
+		if (!start)
+		{
+			return false;
+		}
 		ptr = (GLubyte *)strstr((const char *)start, extension);
 		if (!ptr) {
 			break;
@@ -639,12 +644,14 @@ void InitVideoSdl()
 	if (TheScreen == NULL) {
 		fprintf(stderr, "Couldn't set %dx%dx%d video mode: %s\n",
 				Video.Width, Video.Height, Video.Depth, SDL_GetError());
+#if defined(USE_OPENGL) || defined(USE_GLES)
 		if (UseOpenGL) {
 			fprintf(stderr, "Re-trying video without OpenGL\n");
 			UseOpenGL = false;
 			InitVideoSdl();
 			return;
 		}
+#endif
 		if (Video.FullScreen) {
 			fprintf(stderr, "Re-trying video without fullscreen mode\n");
 			Video.FullScreen = false;
@@ -750,6 +757,10 @@ void InitVideoSdl()
 	ColorRed = Video.MapRGB(TheScreen->format, 252, 0, 0);
 	ColorGreen = Video.MapRGB(TheScreen->format, 0, 252, 0);
 	ColorYellow = Video.MapRGB(TheScreen->format, 252, 252, 0);
+
+	for(std::vector<std::string>::iterator it = UI.LifeBarColorNames.begin(); it != UI.LifeBarColorNames.end(); ++it) {
+		UI.LifeBarColorsInt.push_back(IndexToColor(GetColorIndexByName((*it).c_str())));
+	}
 
 	UI.MouseWarpPos.x = UI.MouseWarpPos.y = -1;
 }
@@ -877,13 +888,13 @@ static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
 					IsSDLWindowVisible = false;
 					if (!GamePaused) {
 						DoTogglePause = true;
-						UiTogglePause();
+						GamePaused = true;
 					}
 				} else if (!IsSDLWindowVisible && event.active.gain) {
 					IsSDLWindowVisible = true;
 					if (GamePaused && DoTogglePause) {
 						DoTogglePause = false;
-						UiTogglePause();
+						GamePaused = false;
 					}
 				}
 			}

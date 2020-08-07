@@ -34,7 +34,7 @@ set(STRATAGUS_MAJOR_VERSION 2)
 # Stratagus minor version (maximum 99)
 set(STRATAGUS_MINOR_VERSION 4)
 # Stratagus patch level (maximum 99)
-set(STRATAGUS_PATCH_LEVEL 2)
+set(STRATAGUS_PATCH_LEVEL 3)
 # Stratagus patch level 2
 set(STRATAGUS_PATCH_LEVEL2 0)
 #########################
@@ -65,6 +65,7 @@ set(action_SRCS
 	src/action/action_built.cpp
 	src/action/action_defend.cpp
 	src/action/action_die.cpp
+	src/action/action_explore.cpp
 	src/action/action_follow.cpp
 	src/action/action_move.cpp
 	src/action/action_patrol.cpp
@@ -845,6 +846,10 @@ if(BEOS)
 	set(stratagus_SRCS ${stratagus_SRCS} ${beos_SRCS})
 endif()
 
+if(HAIKU)
+	set(stratagus_LIBS ${stratagus_LIBS} -lnetwork)
+endif()
+
 # Stratagus needs to have char by default signed
 # No idea how to tell this to other compilers
 if(CMAKE_COMPILER_IS_GNUCXX)
@@ -976,6 +981,8 @@ elseif(BSD)
 	message("Platform: BSD")
 elseif(BEOS)
 	message("Platform: BEOS")
+elseif(HAIKU)
+	message("Platform: Haiku")
 elseif(LINUX)
 	message("Platform: Linux")
 else()
