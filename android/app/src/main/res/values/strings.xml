@@ -1,7 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-	<string name="app_name">Stratagus</string>
-
 	<string name="scaled">Scaled</string>
 
 	<string name="select_folder">Please select folder containing game data files:
@@ -15,11 +13,13 @@
 	<string name="nodatadir_msg">No Stratagus data files were found in </string>
 	<string name="nodatadir_btn">Select another folder</string>
 
-	<string name="help">Stratagus is a real-time strategy gaming engine.\n\
-Games which use Stratagus: Wargus (Warcraft II clone), \
-Stargus (partial Starcraft I clone) - both games use content from original Blizzard CDs; Aleona\'s Tales.\n\
-To actually play anything you will need to generate \'game data files\' on your PC and copy them to your device.\n\
-Please visit <b><i>http://stratagus.drodin.com</i></b> for instructions.\n\
-Note: \'game data files\' generated for the previos version of Stratagus (0.8.5 beta) are not compatible with the current version (2.4.3)!</string>
+	<string name="help">Stratagus is a real-time strategy gaming engine.\
+Games which use Stratagus:\
+Wargus (Warcraft II clone)\
+Stargus (partial Starcraft I clone)\
+Aleona\'s Tales\n\
+To actually play anything you will need to generate \'game data files\' on your PC and copy them to your device.\
+Please visit <b><i>https://drodin.com/stratagus</i></b> for instructions.\n\
+Note: \'game data files\' generated for the first version of Stratagus (0.8.5 beta) are not compatible with the current version!</string>
 
 </resources>

@@ -39,6 +39,8 @@ set(STRATAGUS_PATCH_LEVEL 0)
 set(STRATAGUS_PATCH_LEVEL2 0)
 #########################
 
+option(HUNTER_ENABLED "Enable Hunter package manager" OFF)
+
 # For Android Studio we will force generated toolchain
 if(ANDROID_STUDIO)
   set(gen_toolchain "${CMAKE_CURRENT_BINARY_DIR}/generated/toolchain.cmake")
@@ -48,24 +50,32 @@ if(ANDROID_STUDIO)
       @ONLY
   )
   set(CMAKE_TOOLCHAIN_FILE "${gen_toolchain}" CACHE PATH "" FORCE)
+
+  set(HUNTER_ENABLED ON)
 endif()
 
+if(HUNTER_ENABLED)
 # Example of stepping into external sources.
 # USE CAREFULLY, please check documentation:
 # * https://docs.hunter.sh/en/latest/reference/user-variables.html#hunter-keep-package-sources
 option(HUNTER_KEEP_PACKAGE_SOURCES "Keep third party sources" ON)
 
-option(HUNTER_STATUS_DEBUG "Print debug info" ON)
+option(HUNTER_STATUS_DEBUG "Print debug info" OFF)
 
 include(cmake/HunterGate.cmake)
 HunterGate(
-    URL "https://github.com/ruslo/hunter/archive/v0.23.12.tar.gz"
-    SHA1 "f6a2b596beb8bbd7d81d01a0fcf417f97d779fbf"
+    URL "https://github.com/drodin/hunter/archive/a4610c2.tar.gz"
+    SHA1 "2607fc0c6330aca21caa16e9170f62f10ccad9a0"
     LOCAL
 )
+endif()
 
 project(stratagus)
+if(HUNTER_ENABLED)
 cmake_minimum_required(VERSION 3.9.2)
+else()
+cmake_minimum_required(VERSION 2.6)
+endif()
 
 # useful for clangd LSP server
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -656,50 +666,82 @@ endif()
 
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules ${CMAKE_MODULE_PATH})
 
+if(HUNTER_ENABLED)
 hunter_add_package(Lua)
-find_package(Lua CONFIG REQUIRED)
-set(LUA_LIBRARIES Lua::lua_lib)
 hunter_add_package(PNG)
-find_package(PNG CONFIG REQUIRED)
-set(PNG_LIBRARIES PNG::png)
 hunter_add_package(SDL2)
-find_package(SDL2 CONFIG REQUIRED)
-set(SDL2_LIBRARY SDL2::SDL2)
 hunter_add_package(SDL_mixer)
-find_package(SDL_mixer CONFIG REQUIRED)
-set(SDL2_MIXER_LIBRARIES SDL_mixer::SDL_mixer)
 hunter_add_package(SDL_image)
-find_package(SDL_image CONFIG REQUIRED)
-set(SDL2_IMAGE_LIBRARIES SDL_image::SDL_image)
 hunter_add_package(toluapp)
-find_package(toluapp CONFIG REQUIRED)
-set(TOLUA++_LIBRARY toluapp::toluapp)
 hunter_add_package(ZLIB)
+find_package(Lua CONFIG REQUIRED)
+find_package(PNG CONFIG REQUIRED)
+find_package(SDL2 CONFIG REQUIRED)
+find_package(SDL_mixer CONFIG REQUIRED)
+find_package(SDL_image CONFIG REQUIRED)
+find_package(toluapp CONFIG REQUIRED)
 find_package(ZLIB CONFIG REQUIRED)
+set(LUA_LIBRARIES Lua::lua_lib)
+set(PNG_LIBRARY PNG::png)
+set(SDL2_LIBRARY SDL2::SDL2)
+set(SDL2main_LIBRARY SDL2::SDL2main)
+set(SDL2_MIXER_LIBRARIES SDL_mixer::SDL_mixer)
+set(SDL2_IMAGE_LIBRARIES SDL_image::SDL_image)
+set(TOLUA++_LIBRARY toluapp::toluapp)
 set(ZLIB_LIBRARIES ZLIB::zlib)
+else()
+find_package(Lua51 REQUIRED)
+find_package(PNG REQUIRED)
+find_package(SDL2 REQUIRED)
+find_package(SDL2_mixer REQUIRED)
+find_package(SDL2_image REQUIRED)
+find_package(Tolua++ REQUIRED)
+find_package(ZLIB REQUIRED)
 find_package(OpenMP)
+endif()
 
 if(WIN32)
 	find_package(MakeNSIS)
 endif()
 
+if(HUNTER_ENABLED)
+hunter_add_package(BZip2)
+hunter_add_package(libogg)
+hunter_add_package(vorbis)
+hunter_add_package(theora)
+find_package(BZip2 CONFIG)
+find_package(libogg CONFIG)
+find_package(vorbis CONFIG)
+find_package(theora CONFIG)
+set(BZIP2_LIBRARIES BZip2::bz2)
+set(OGG_LIBRARY libogg::ogg)
+set(OGG_LIBRARY vorbis::vorbis)
+set(THEORA_LIBRARY theora::theora)
+set(BZIP2_FOUND true)
+set(OGGVORBIS_FOUND true)
+set(THEORA_FOUND true)
+else()
 find_package(BZip2)
 find_package(StackTrace)
 find_package(MNG)
-hunter_add_package(libogg)
-find_package(libogg CONFIG)
-set(OGG_LIBRARY libogg::ogg)
-hunter_add_package(vorbis)
-find_package(vorbis CONFIG)
-set(OGG_LIBRARY vorbis::vorbis)
-set(OGGVORBIS_FOUND true)
+find_package(OggVorbis)
 find_package(Theora)
+endif()
 
+if(NOT ANDROID)
 find_package(X11)
 
+if(HUNTER_ENABLED)
+hunter_add_package(sqlite3)
+find_package(sqlite3 CONFIG)
+set(SQLITE_LIBRARIES sqlite3::sqlite3)
+set(SQLITE_FOUND true)
+else()
 find_package(Sqlite)
+endif()
 find_package(Doxygen)
 find_package(SelfPackers)
+endif()
 
 include(CheckTypeSize)
 include(CheckFunctionExists)
@@ -829,6 +871,9 @@ endif()
 
 if(APPLE)
 	add_definitions(-DUSE_MAC)
+if(NOT HUNTER_ENABLED)
+	set(SDL2_LIBRARY ${SDL2_LIBRARY} SDL2main)
+endif()
 endif()
 
 if(BSD)
@@ -859,7 +904,7 @@ endif()
 if(WIN32 AND MSVC)
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
 elseif(ANDROID)
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsigned-char -DDYNAMIC_LOAD")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsigned-char -DDYNAMIC_LOAD -DUSE_GAME_DIR")
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Profile")
@@ -879,9 +924,9 @@ check_function_exists("getopt" HAVE_GETOPT)
 # so rather check if we have strcat_s in string.h file
 check_symbol_exists("strcat_s" "string.h" HAVE_STRCATS)
 
-#if(HAVE_ERRNOT)
-#	add_definitions(-DHAVE_ERRNOT)
-#endif()
+if(HAVE_ERRNOT)
+	add_definitions(-DHAVE_ERRNOT)
+endif()
 
 if(HAVE_STRCPYS)
 	add_definitions(-DHAVE_STRCPYS)
@@ -1097,15 +1142,14 @@ add_custom_command(OUTPUT tolua.cpp
 
 if(ANDROID)
 add_library(stratagus SHARED ${stratagus_SRCS} ${stratagus_HDRS})
-target_link_libraries(stratagus ${stratagus_LIBS})
 else()
 if (ENABLE_STDIO_REDIRECT)
    add_executable(stratagus WIN32 ${stratagus_SRCS} ${stratagus_HDRS})
 else ()
    add_executable(stratagus ${stratagus_SRCS} ${stratagus_HDRS})
 endif ()
-target_link_libraries(stratagus ${stratagus_LIBS})
 endif()
+target_link_libraries(stratagus ${stratagus_LIBS})
 
 if(OpenMP_CXX_FOUND)
 	target_compile_options(stratagus PRIVATE ${OpenMP_CXX_FLAGS})
@@ -1132,8 +1176,12 @@ if(WIN32 AND MINGW AND ENABLE_STATIC)
 endif()
 
 if(APPLE OR WIN32)
-  set_target_properties(stratagus PROPERTIES LINK_FLAGS "${LINK_FLAGS}")
-  set(CMAKE_EXE_LINKER_FLAGS_PROFILE "${CMAKE_EXE_LINKER_FLAGS}")
+if(HUNTER_ENABLED)
+	set_target_properties(stratagus PROPERTIES LINK_FLAGS "${LINK_FLAGS}")
+else()
+	set_target_properties(stratagus PROPERTIES LINK_FLAGS "${LINK_FLAGS} -lSDL2main")
+endif()
+	set(CMAKE_EXE_LINKER_FLAGS_PROFILE "${CMAKE_EXE_LINKER_FLAGS}")
 endif()
 
 ########### next target ###############
@@ -1155,13 +1203,6 @@ set(metaserver_HDRS
 )
 
 source_group(metaserver FILES ${metaserver_SRCS} ${metaserver_HDRS})
-
-hunter_add_package(sqlite3)
-find_package(sqlite3 CONFIG)
-if (sqlite3_FOUND)
-	set(SQLITE_FOUND true)
-	set(SQLITE_LIBRARIES sqlite3::sqlite3)
-endif()
 
 if(SQLITE_FOUND)
 	add_executable(metaserver ${metaserver_SRCS} ${metaserver_HDRS})
@@ -1191,7 +1232,7 @@ set_source_files_properties(png2stratagus_SRCS PROPERTIES INCLUDE_DIRECTORIES "$
 set_source_files_properties(png2stratagus_SRCS PROPERTIES COMPILE_DEFINITIONS "${PNG_DEFINITIONS}")
 
 add_executable(png2stratagus ${png2stratagus_SRCS})
-target_link_libraries(png2stratagus ${PNG_LIBRARIES} ${ZLIB_LIBRARIES})
+target_link_libraries(png2stratagus ${PNG_LIBRARY} ${ZLIB_LIBRARIES})
 
 if(WIN32 AND MINGW AND ENABLE_STATIC)
 	set_target_properties(png2stratagus PROPERTIES LINK_FLAGS "${LINK_FLAGS} -static-libgcc -static-libstdc++")
