@@ -25,7 +25,7 @@
 
 #include "shaders.h"
 
-#ifndef __APPLE__
+#if !defined(__APPLE__) && !defined(ANDROID)
 #include <SDL.h>
 #include <SDL_opengl.h>
 #include <SDL_opengl_glext.h>

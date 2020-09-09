@@ -323,7 +323,11 @@ void InitVideoSdl()
 				Video.Width, Video.Height, Video.Depth, SDL_GetError());
 		exit(1);
 	}
+#ifdef ANDROID
+	SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengles2");
+#else
 	SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
+#endif
 	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
 	if (!TheRenderer) {
 		TheRenderer = SDL_CreateRenderer(TheWindow, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_TARGETTEXTURE);

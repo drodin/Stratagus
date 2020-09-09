@@ -3,7 +3,7 @@
 
 #include <SDL.h>
 
-#ifndef __APPLE__
+#if !defined(__APPLE__) && !defined(ANDROID)
 extern bool LoadShaderExtensions();
 extern void RenderWithShader(SDL_Renderer *renderer, SDL_Window* win, SDL_Texture* backBuffer);
 extern const char* NextShader();
