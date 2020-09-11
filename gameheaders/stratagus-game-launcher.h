@@ -226,6 +226,8 @@ int check_version(char* tool_path, char* data_path) {
 		pclose(pipe);
     }
 #else
+	// TODO: fix version check on Windows
+	return 1;
 	sprintf(buf, "%s -V", tool_path); // tool_path is already quoted
 	HANDLE g_hChildStd_OUT_Rd = NULL;
 	HANDLE g_hChildStd_OUT_Wr = NULL;
