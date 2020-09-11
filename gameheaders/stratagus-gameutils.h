@@ -123,7 +123,7 @@ void mkdir_p(const char* path) {
 					// will be null if the we reach the first /
 					mkdir_p(path);
 				}
-				*sep = '/';
+				*sep = SLASH[0];
 				mkdir(path, 0777);
 			}
 		} else if (error != EEXIST) {
