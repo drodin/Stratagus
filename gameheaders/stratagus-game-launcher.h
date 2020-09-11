@@ -408,6 +408,12 @@ static void ExtractData(char* extractor_tool, char* destination, char* scripts_p
 	strcat(cmdbuf, destination);
 	strcat(cmdbuf, QUOTE);
 #ifdef USE_MAC
+	// TODO: fix Mac version disable deflate
+	strcat(cmdbuf, "; find ");
+	strcat(cmdbuf, QUOTE);
+	strcat(cmdbuf, destination);
+	strcat(cmdbuf, QUOTE);
+	strcat(cmdbuf, " -name '*.gz' -exec gunzip {} +");
 	strcat(cmdbuf, "; exit\\\"\n"
                        "    repeat\n"
                        "        delay 1\n"
