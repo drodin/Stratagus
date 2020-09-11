@@ -53,13 +53,17 @@ void copy_dir(const char* source_folder, const char* target_folder);
 //#define inline __inline
 #define chdir _chdir
 #define getcwd _getcwd
+#ifndef __MINGW32__
 #define spawnvp _spawnvp
 #define stat _stat
+#endif
 #define strdup _strdup
 #define mkdir(f, m) _mkdir(f)
 // PathRemoveFileSpec on a drive (e.g. when extracting from CD) will leave the trailing \... remove that
 #define parentdir(x) PathRemoveFileSpec(x); if (x[strlen(x) - 1] == '\\') x[strlen(x) - 1] = '\0'
+#ifndef __MINGW32__
 #define execvp _execvp
+#endif
 #define unlink(x) _unlink(x)
 #else
 #if defined(USE_MAC)
