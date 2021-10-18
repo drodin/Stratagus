@@ -64,8 +64,8 @@ option(HUNTER_STATUS_DEBUG "Print debug info" OFF)
 
 include(cmake/HunterGate.cmake)
 HunterGate(
-    URL "https://github.com/drodin/hunter/archive/a4610c2.tar.gz"
-    SHA1 "2607fc0c6330aca21caa16e9170f62f10ccad9a0"
+    URL "https://github.com/cpp-pm/hunter/archive/v0.23.315.tar.gz"
+    SHA1 "ea5d72afc0df67f2126e7fd069f20c5f723709e1"
     LOCAL
 )
 endif()
