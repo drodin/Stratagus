@@ -695,6 +695,7 @@ int stratagusMain(int argc, char **argv)
 		ParseCommandLine(argc, argv, parameters);
 #ifdef ANDROID
 		parameters.SetDefaultValues();
+		SDL_setenv("TIMIDITY_CFG", (StratagusLibPath + "/timidity.cfg").c_str(), 1);
 #endif
 		// Init the random number generator.
 		InitSyncRand();
