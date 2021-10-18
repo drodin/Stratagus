@@ -261,7 +261,8 @@ void InitVideoSdl()
 
 	if (SDL_WasInit(SDL_INIT_VIDEO) == 0) {
 #ifdef ANDROID
-		SDL_SetHint(SDL_HINT_ANDROID_SEPARATE_MOUSE_AND_TOUCH, "1");
+		SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
+		SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
 #endif
 		// Fix tablet input in full-screen mode
 		SDL_setenv("SDL_MOUSE_RELATIVE", "0", 1);

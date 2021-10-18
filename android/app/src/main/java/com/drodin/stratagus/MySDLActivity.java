@@ -10,7 +10,11 @@ public class MySDLActivity extends SDLActivity {
 
     @Override
     protected String[] getLibraries() {
+        String hidapi = "hidapi";
+        if (BuildConfig.DEBUG)
+            hidapi += "d";
         return new String[] {
+                hidapi,
                 "stratagus"
         };
     }
@@ -34,7 +38,8 @@ public class MySDLActivity extends SDLActivity {
                 "-d",
                 dataDir,
                 "-v",
-                videoMode
+                videoMode,
+                "-F" // Full screen video mode
         };
     }
 }
