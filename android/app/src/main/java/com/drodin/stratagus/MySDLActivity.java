@@ -2,6 +2,9 @@ package com.drodin.stratagus;
 
 import android.content.SharedPreferences;
 import android.preference.PreferenceManager;
+import android.os.Build;
+import android.view.Display;
+import android.graphics.Point;
 
 import org.libsdl.app.SDLActivity;
 
@@ -25,12 +28,19 @@ public class MySDLActivity extends SDLActivity {
         String dataDir = settings.getString("dataDir", StartMenu.dataDir);
         boolean scaled = settings.getBoolean("scaled", StartMenu.scaled);
 
-        int displayWidth = getWindowManager().getDefaultDisplay().getWidth();
-        int displayHeight = getWindowManager().getDefaultDisplay().getHeight();
+        Display display = getWindowManager().getDefaultDisplay();
+        Point size = new Point();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
+            display.getRealSize(size);
+        } else {
+            display.getSize(size);
+        }
+        int displayWidth = size.x;
+        int displayHeight = size.y;
 
         String videoMode = displayWidth + "x" + displayHeight;
         if (scaled) {
-            int scaledWidth = Math.round(displayWidth * scaledHeight / displayHeight);
+            int scaledWidth = displayWidth * scaledHeight / displayHeight;
             videoMode = scaledWidth + "x" + scaledHeight;
         }
 
