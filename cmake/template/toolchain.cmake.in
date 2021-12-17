@@ -80,7 +80,7 @@ if("${_INTERNAL_ANDROID_STUDIO_ORIGINAL_CMAKE_TOOLCHAIN_FILE}" STREQUAL "${CMAKE
   message(FATAL_ERROR "Internal error")
 endif()
 
-set(ANDROID_NDK "") # Suppress warning
+#set(ANDROID_NDK "") # Suppress warning
 include("${_INTERNAL_ANDROID_STUDIO_ORIGINAL_CMAKE_TOOLCHAIN_FILE}")
 
 # STEP 3: Tweak CMake Android variables

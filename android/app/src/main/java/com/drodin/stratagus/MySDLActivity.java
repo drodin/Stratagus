@@ -13,11 +13,7 @@ public class MySDLActivity extends SDLActivity {
 
     @Override
     protected String[] getLibraries() {
-        String hidapi = "hidapi";
-        if (BuildConfig.DEBUG)
-            hidapi += "d";
         return new String[] {
-                hidapi,
                 "stratagus"
         };
     }
