@@ -199,10 +199,10 @@ static FullReplay *StartReplay()
 	for (int i = 0; i < PlayerMax; ++i) {
 		replay->Players[i].Name = Players[i].Name;
 		replay->Players[i].PlayerColor = GameSettings.Presets[i].PlayerColor;
-		replay->Players[i].AIScript = GameSettings.Presets[i].AIScript;
-		replay->Players[i].Race = GameSettings.Presets[i].Race;
-		replay->Players[i].Team = GameSettings.Presets[i].Team;
-		replay->Players[i].Type = GameSettings.Presets[i].Type;
+		replay->Players[i].AIScript = Players[i].AiName; // GameSettings.Presets[i].AIScript;
+		replay->Players[i].Race = Players[i].Race; // GameSettings.Presets[i].Race;
+		replay->Players[i].Team = Players[i].Team; // GameSettings.Presets[i].Team;
+		replay->Players[i].Type = Players[i].Type; // GameSettings.Presets[i].Type;
 	}
 
 	replay->LocalPlayer = ThisPlayer->Index;
@@ -425,8 +425,10 @@ void CommandLog(const char *action, const CUnit *unit, int flush,
 	// to the save file name, to test more than one player on one computer.
 	//
 	if (!LogFile) {
+		time_t now;
+		time(&now);
 		struct stat tmp;
-		char buf[16];
+
 		std::string path(Parameters::Instance.GetUserDirectory());
 		if (!GameName.empty()) {
 			path += "/";
@@ -438,10 +440,10 @@ void CommandLog(const char *action, const CUnit *unit, int flush,
 			makedir(path.c_str(), 0777);
 		}
 
-		snprintf(buf, sizeof(buf), "%d", ThisPlayer->Index);
-
 		path += "/log_of_stratagus_";
-		path += buf;
+		path += std::to_string(ThisPlayer->Index);
+		path += "_";
+		path += std::to_string((intmax_t)now);
 		path += ".log";
 
 		LogFile = new CFile;
@@ -555,7 +557,7 @@ static int CclLog(lua_State *l)
 		} else if (!strcmp(value, "Num")) {
 			log->Num = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "SyncRandSeed")) {
-			log->SyncRandSeed = LuaToUnsignedNumber(l, -1);
+			log->SyncRandSeed = lua_tointeger(l, -1);
 		} else {
 			LuaError(l, "Unsupported key: %s" _C_ value);
 		}

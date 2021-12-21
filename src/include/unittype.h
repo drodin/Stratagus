@@ -118,13 +118,14 @@ public:
 class CVariable
 {
 public:
-	CVariable() : Max(0), Value(0), Increase(0), Enable(0) {}
+	CVariable() : Max(0), Value(0), Increase(0), IncreaseFrequency(1), Enable(0) {}
 
 	bool operator ==(const CVariable &rhs) const
 	{
 		return this->Max == rhs.Max
 			   && this->Value == rhs.Value
 			   && this->Increase == rhs.Increase
+			   && this->IncreaseFrequency == rhs.IncreaseFrequency
 			   && this->Enable == rhs.Enable;
 	}
 	bool operator !=(const CVariable &rhs) const { return !(*this == rhs); }
@@ -133,7 +134,8 @@ public:
 	int Max;        /// Maximum for the variable. (Assume min is 0.)
 	int Value;      /// Current (or initial) value of the variable (or initial value).
 	char Increase;  /// Number to increase(decrease) Value by second.
-	char Enable;    /// True if the unit doesn't have this variable. (f.e shield)
+	unsigned char IncreaseFrequency:7;    /// Every how many seconds we should apply the increase
+	unsigned char Enable:1;    /// True if the unit doesn't have this variable. (f.e shield)
 };
 
 // Index for boolflag already defined
@@ -172,6 +174,7 @@ enum {
 	SIDEATTACK_INDEX,
 	SKIRMISHER_INDEX,
 	ALWAYSTHREAT_INDEX,				/// Unit always considered as threat for auto targeting algorihm, useful for unit without main attack ability, but which can cast spells (f.e. defiler in SC:BW)
+	ELEVATED_INDEX,					/// Unit is elevated and can see over opaque tiles placed in the same ground level with the unit.
 	NOFRIENDLYFIRE_INDEX,           /// Unit accepts friendly fire for splash attacks
 	MAINFACILITY_INDEX,				/// Unit is a main building (Town Hall f. ex.)
 	NBARALREADYDEFINED
@@ -530,7 +533,7 @@ public:
 	MissileConfig Explosion;                         /// Missile for unit explosion
 	MissileConfig Impact[ANIMATIONS_DEATHTYPES + 2]; /// Missiles spawned if unit is hit(+shield)
 
-	LuaCallback *DeathExplosion;
+	LuaCallback *OnDeath;           /// lua function called when unit is about to die, receives x,y,unit
 	LuaCallback *OnHit;             /// lua function called when unit is hit
 	LuaCallback *OnEachCycle;       /// lua function called every cycle
 	LuaCallback *OnEachSecond;      /// lua function called every second

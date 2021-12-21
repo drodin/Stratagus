@@ -152,10 +152,13 @@ void CPlayer::Load(lua_State *l)
 		} else if (!strcmp(value, "shared-vision")) {
 			value = LuaToString(l, j + 1);
 			for (int i = 0; i < PlayerMax && *value; ++i, ++value) {
+				if (i == this->Index) {
+					continue;
+				}
 				if (*value == '-' || *value == '_' || *value == ' ') {
-					this->SharedVision.erase(i);
+					this->UnshareVisionWith(Players[i]);
 				} else {
-					this->SharedVision.insert(i);
+					this->ShareVisionWith(Players[i]);
 				}
 			}
 		} else if (!strcmp(value, "start")) {
@@ -333,9 +336,17 @@ void CPlayer::Load(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Change unit owner
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code>-- Changes the unit owner from player 0 to player 1
+**		ChangeUnitsOwner({16, 17},{30, 32},0,1)</code></div>
+**
 */
 static int CclChangeUnitsOwner(lua_State *l)
 {
@@ -357,9 +368,15 @@ static int CclChangeUnitsOwner(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Get ThisPlayer.
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code>GetThisPlayer()</code></div>
 */
 static int CclGetThisPlayer(lua_State *l)
 {
@@ -373,6 +390,8 @@ static int CclGetThisPlayer(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Set ThisPlayer.
 **
 **  @param l  Lua state.
@@ -388,9 +407,20 @@ static int CclSetThisPlayer(lua_State *l)
 }
 
 /**
-**  Set MaxSelectable
+** <b>Description</b>
+**
+**  Set the maximum amount of units that can be selected.
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code>-- 9 units can be selected together.
+**		  SetMaxSelectable(9)
+**		  -- 18 units can be selected together.
+**		  SetMaxSelectable(18)
+**		  -- 50 units can be selected together.
+**		  SetMaxSelectable(50)</code></div>
 */
 static int CclSetMaxSelectable(lua_State *l)
 {
@@ -402,9 +432,15 @@ static int CclSetMaxSelectable(lua_State *l)
 }
 
 /**
-**  Set player unit limit.
+** <b>Description</b>
+**
+**  Set players units limit.
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code>SetAllPlayersUnitLimit(200)</code></div>
 */
 static int CclSetAllPlayersUnitLimit(lua_State *l)
 {
@@ -418,9 +454,15 @@ static int CclSetAllPlayersUnitLimit(lua_State *l)
 }
 
 /**
-**  Set player unit limit.
+** <b>Description</b>
+**
+**  Set players buildings limit.
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code>SetAllPlayersBuildingLimit(200)</code></div>
 */
 static int CclSetAllPlayersBuildingLimit(lua_State *l)
 {
@@ -434,9 +476,15 @@ static int CclSetAllPlayersBuildingLimit(lua_State *l)
 }
 
 /**
-**  Set player unit limit.
+** <b>Description</b>
+**
+**  Set players total units limit.
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code>SetAllPlayersTotalUnitLimit(400)</code></div>
 */
 static int CclSetAllPlayersTotalUnitLimit(lua_State *l)
 {
@@ -450,11 +498,21 @@ static int CclSetAllPlayersTotalUnitLimit(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Change the diplomacy from player to another player.
 **
 **  @param l  Lua state.
 **
-**  @return          FIXME: should return old state.
+**  @return FIXME: should return old state.
+**
+** Example:
+**
+** <div class="example"><code>SetDiplomacy(0,"allied",1)
+**		SetDiplomacy(1,"allied",0)
+**		
+**		SetDiplomacy(0,"enemy",2)
+**		SetDiplomacy(1,"enemy",2)</code></div>
 */
 static int CclSetDiplomacy(lua_State *l)
 {
@@ -488,11 +546,22 @@ static int CclDiplomacy(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Change the shared vision from player to another player.
+**
 **
 **  @param l  Lua state.
 **
-**  @return   FIXME: should return old state.
+**  @return FIXME: should return old state.
+**
+** Example:
+**
+** <div class="example"><code>SetSharedVision(0,true,1)
+**		SetSharedVision(1,true,0)
+**		
+**		SetSharedVision(0,false,2)
+**		SetSharedVision(1,false,2)</code></div>
 */
 static int CclSetSharedVision(lua_State *l)
 {
@@ -520,9 +589,18 @@ static int CclSharedVision(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Change the players revelation type - reveal all units, only buidings or don't reveal anything
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code>SetRevelationType("no-revelation")
+** 		SetRevelationType("buildings-only")
+** 		SetRevelationType("all-units")</code></div>
+**
 */
 static int CclSetRevelationType(lua_State *l)
 {
@@ -544,6 +622,8 @@ static int CclSetRevelationType(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Define race names in addition to those already there.
 **
 **  @param l  Lua state.
@@ -593,9 +673,32 @@ static int CclDefineRaceNames(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Define player colors
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code>DefinePlayerColors({
+**		"red", {{164, 0, 0}, {124, 0, 0}, {92, 4, 0}, {68, 4, 0}},
+**		"blue", {{12, 72, 204}, {4, 40, 160}, {0, 20, 116}, {0, 4, 76}},
+**		"green", {{44, 180, 148}, {20, 132, 92}, {4, 84, 44}, {0, 40, 12}},
+**		"violet", {{152, 72, 176}, {116, 44, 132}, {80, 24, 88}, {44, 8, 44}},
+**		"orange", {{248, 140, 20}, {200, 96, 16}, {152, 60, 16}, {108, 32, 12}},
+**		"black", {{40, 40, 60}, {28, 28, 44}, {20, 20, 32}, {12, 12, 20}},
+**		"white", {{224, 224, 224}, {152, 152, 180}, {84, 84, 128}, {36, 40, 76}},
+**		"yellow", {{252, 252, 72}, {228, 204, 40}, {204, 160, 16}, {180, 116, 0}},
+**		"red", {{164, 0, 0}, {124, 0, 0}, {92, 4, 0}, {68, 4, 0}},
+**		"blue", {{12, 72, 204}, {4, 40, 160}, {0, 20, 116}, {0, 4, 76}},
+**		"green", {{44, 180, 148}, {20, 132, 92}, {4, 84, 44}, {0, 40, 12}},
+**		"violet", {{152, 72, 176}, {116, 44, 132}, {80, 24, 88}, {44, 8, 44}},
+**		"orange", {{248, 140, 20}, {200, 96, 16}, {152, 60, 16}, {108, 32, 12}},
+**		"black", {{40, 40, 60}, {28, 28, 44}, {20, 20, 32}, {12, 12, 20}},
+**		"white", {{224, 224, 224}, {152, 152, 180}, {84, 84, 128}, {36, 40, 76}},
+**		"yellow", {{252, 252, 72}, {228, 204, 40}, {204, 160, 16}, {180, 116, 0}},
+**	})</code></div>
 */
 static int CclDefinePlayerColors(lua_State *l)
 {
@@ -662,9 +765,15 @@ static int CclDefinePlayerColorIndex(lua_State *l)
 // ----------------------------------------------------------------------------
 
 /**
+** <b>Description</b>
+**
 **  Get player data.
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code>GetPlayerData(0,"TotalNumUnits")</code></div>
 */
 static int CclGetPlayerData(lua_State *l)
 {
@@ -817,9 +926,17 @@ static int CclGetPlayerData(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Set player data.
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code>SetPlayerData(0,"Name","Nation of Stromgarde")
+**		SetPlayerData(0,"RaceName","human")
+** 		SetPlayerData(0,"Resources","gold",1700)</code></div>
 */
 static int CclSetPlayerData(lua_State *l)
 {
@@ -925,9 +1042,16 @@ static int CclSetPlayerData(lua_State *l)
 }
 
 /**
+** <b>Description</b> 
+** 
 **  Set ai player algo.
 **
 **  @param l  Lua state.
+** 
+** Example: 
+** 
+** <div class="example"> <code> -- Player 1 has a passive A.I 
+**		  SetAiType(1, "Passive")</code></div>
 */
 static int CclSetAiType(lua_State *l)
 {

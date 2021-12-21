@@ -56,6 +56,7 @@
 #include "missile.h"
 #include "netconnect.h"
 #include "network.h"
+#include "online_service.h"
 #include "parameters.h"
 #include "pathfinder.h"
 #include "player.h"
@@ -288,7 +289,7 @@ static void WriteMapPreview(const char *mapname, CMap &map)
 
 
 // Write the map presentation file
-static int WriteMapPresentation(const std::string &mapname, CMap &map)
+static int WriteMapPresentation(const std::string &mapname, CMap &map, Vec2i newSize)
 {
 	FileWriter *f = NULL;
 
@@ -318,8 +319,13 @@ static int WriteMapPresentation(const std::string &mapname, CMap &map)
 		}
 		f->printf(")\n");
 
+		if (newSize.x == 0 || newSize.y == 0) {
+			newSize.x = map.Info.MapWidth;
+			newSize.y = map.Info.MapHeight;
+		}
+
 		f->printf("PresentMap(\"%s\", %d, %d, %d, %d)\n",
-				  map.Info.Description.c_str(), numplayers, map.Info.MapWidth, map.Info.MapHeight,
+				  map.Info.Description.c_str(), numplayers, newSize.x, newSize.y,
 				  map.Info.MapUID + 1);
 
 		if (map.Info.Filename.find(".sms") == std::string::npos && !map.Info.Filename.empty()) {
@@ -343,7 +349,7 @@ static int WriteMapPresentation(const std::string &mapname, CMap &map)
 **  @param map           map to save
 **  @param writeTerrain  write the tiles map in the .sms
 */
-int WriteMapSetup(const char *mapSetup, CMap &map, int writeTerrain)
+int WriteMapSetup(const char *mapSetup, CMap &map, int writeTerrain, Vec2i newSize, Vec2i offset)
 {
 	FileWriter *f = NULL;
 
@@ -381,6 +387,17 @@ int WriteMapSetup(const char *mapSetup, CMap &map, int writeTerrain)
 		f->printf("LoadTileModels(\"%s\")\n\n", map.TileModelsFileName.c_str());
 
 		if (writeTerrain) {
+		   	if (newSize.x != 0 && newSize.y != 0) {
+				f->printf("for x=0,%d,1 do\n", newSize.x - 1);
+				f->printf("    for y=0,%d,1 do\n", newSize.y - 1);
+				f->printf("        SetTile(%d, x, y, 0)\n", Map.Tileset->getDefaultTileIndex());
+				f->printf("    end\n");
+				f->printf("end\n");
+			} else {
+				newSize.x = map.Info.MapHeight;
+				newSize.y = map.Info.MapWidth;
+			}
+
 			f->printf("-- Tiles Map\n");
 			for (int i = 0; i < map.Info.MapHeight; ++i) {
 				for (int j = 0; j < map.Info.MapWidth; ++j) {
@@ -388,9 +405,18 @@ int WriteMapSetup(const char *mapSetup, CMap &map, int writeTerrain)
 					const int tile = mf.getGraphicTile();
 					const int n = map.Tileset->findTileIndexByTile(tile);
 					const int value = mf.Value;
-					f->printf("SetTile(%3d, %d, %d, %d)\n", n, j, i, value);
+					const int x = j + offset.x;
+					const int y = i + offset.y;
+					if (x < newSize.x && y < newSize.y) {
+						f->printf("SetTile(%3d, %d, %d, %d)\n", n, x, y, value);
+					}
 				}
 			}
+		}
+
+		if (newSize.x == 0 || newSize.y == 0) {
+			newSize.x = map.Info.MapHeight;
+			newSize.y = map.Info.MapWidth;
 		}
 
 		f->printf("\n-- set map default stat and map sound for unit types\n");
@@ -457,18 +483,22 @@ int WriteMapSetup(const char *mapSetup, CMap &map, int writeTerrain)
 		std::vector<CUnit *> teleporters;
 		for (CUnitManager::Iterator it = UnitManager.begin(); it != UnitManager.end(); ++it) {
 			const CUnit &unit = **it;
-			f->printf("unit = CreateUnit(\"%s\", %d, {%d, %d})\n",
-					  unit.Type->Ident.c_str(),
-					  unit.Player->Index,
-					  unit.tilePos.x, unit.tilePos.y);
-			if (unit.Type->GivesResource) {
-				f->printf("SetResourcesHeld(unit, %d)\n", unit.ResourcesHeld);
-			}
-			if (!unit.Active) { //Active is true by default
-				f->printf("SetUnitVariable(unit, \"Active\", false)\n");
-			}
-			if (unit.Type->BoolFlag[TELEPORTER_INDEX].value && unit.Goal) {
-				teleporters.push_back(*it);
+			const int x = unit.tilePos.x + offset.x;
+			const int y = unit.tilePos.y + offset.y;
+			if (x < newSize.x && y < newSize.y) {
+				f->printf("unit = CreateUnit(\"%s\", %d, {%d, %d})\n",
+						  unit.Type->Ident.c_str(),
+						  unit.Player->Index,
+						  x, y);
+				if (unit.Type->GivesResource) {
+					f->printf("SetResourcesHeld(unit, %d)\n", unit.ResourcesHeld);
+				}
+				if (!unit.Active) { //Active is true by default
+					f->printf("SetUnitVariable(unit, \"Active\", false)\n");
+				}
+				if (unit.Type->BoolFlag[TELEPORTER_INDEX].value && unit.Goal) {
+					teleporters.push_back(*it);
+				}
 			}
 		}
 		f->printf("\n\n");
@@ -496,7 +526,7 @@ int WriteMapSetup(const char *mapSetup, CMap &map, int writeTerrain)
 **  @param map       map to save
 **  @param writeTerrain   write the tiles map in the .sms
 */
-int SaveStratagusMap(const std::string &mapName, CMap &map, int writeTerrain)
+int SaveStratagusMap(const std::string &mapName, CMap &map, int writeTerrain, Vec2i newSize, Vec2i offset)
 {
 	if (!map.Info.MapWidth || !map.Info.MapHeight) {
 		fprintf(stderr, "%s: invalid Stratagus map\n", mapName.c_str());
@@ -518,13 +548,12 @@ int SaveStratagusMap(const std::string &mapName, CMap &map, int writeTerrain)
 	WriteMapPreview(previewName, map);
 
 	memcpy(setupExtension, ".sms", 4 * sizeof(char));
-	if (WriteMapPresentation(mapName, map) == -1) {
+	if (WriteMapPresentation(mapName, map, newSize) == -1) {
 		return -1;
 	}
 
-	return WriteMapSetup(mapSetup, map, writeTerrain);
+	return WriteMapSetup(mapSetup, map, writeTerrain, newSize, offset);
 }
-
 
 /**
 **  Load any map.
@@ -737,6 +766,44 @@ static void GameTypeManTeamVsMachine()
 	}
 }
 
+/**
+**  Machine vs Machine
+*/
+static void GameTypeMachineVsMachine()
+{
+	Map.Reveal();
+	for (int i = 0; i < PlayerMax - 1; ++i) {
+		if (Players[i].Type == PlayerComputer) {
+			for (int j = i + 1; j < PlayerMax - 1; ++j) {
+				if (Players[j].Type == PlayerComputer) {
+					CommandDiplomacy(i, DiplomacyEnemy, j);
+					CommandDiplomacy(j, DiplomacyEnemy, i);
+				} else {
+					CommandDiplomacy(i, DiplomacyNeutral, j);
+					CommandDiplomacy(j, DiplomacyNeutral, i);
+				}
+			}
+		}
+	}
+}
+
+/**
+ ** Machine vs Machine Training
+ */
+static void GameTypeMachineVsMachineTraining()
+{
+	Assert(!IsNetworkGame());
+	GameTypeMachineVsMachine();
+	FastForwardCycle = LONG_MAX;
+	SyncHash = 0;
+	InitSyncRand();
+	SetEffectsEnabled(false);
+	SetMusicEnabled(false);
+	for (int i = 0; i < MyRand() % 100; i++) {
+		SyncRand();
+	}
+}
+
 /*----------------------------------------------------------------------------
 --  Game creation
 ----------------------------------------------------------------------------*/
@@ -870,6 +937,13 @@ void CreateGame(const std::string &filename, CMap *map)
 				break;
 			case SettingsGameTypeManTeamVsMachine:
 				GameTypeManTeamVsMachine();
+				break;
+			case SettingsGameTypeMachineVsMachine:
+				GameTypeMachineVsMachine();
+				break;
+			case SettingsGameTypeMachineVsMachineTraining:
+				GameTypeMachineVsMachineTraining();
+				break;
 
 				// Future game type ideas
 #if 0
@@ -1058,9 +1132,15 @@ void CleanGame()
 }
 
 /**
+** <b>Description</b>
+**
 **  Return of game name.
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code><strong>SetGameName</strong>("Wargus Map - Chapter 1")</code></div>
 */
 static int CclSetGameName(lua_State *l)
 {
@@ -1092,11 +1172,20 @@ static int CclSetFullGameName(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Set God mode.
 **
 **  @param l  Lua state.
 **
 **  @return   The old mode.
+**
+** Example:
+**
+** <div class="example"><code>-- God Mode enabled
+**		<strong>SetGodMode</strong>(true)
+**		-- God Mode disabled
+**		<strong>SetGodMode</strong>(false)</code></div>
 */
 static int CclSetGodMode(lua_State *l)
 {
@@ -1106,11 +1195,18 @@ static int CclSetGodMode(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Get God mode.
 **
 **  @param l  Lua state.
 **
 **  @return   God mode.
+**
+** Example:
+**
+** <div class="example"><code>g_mode = <strong>GetGodMode</strong>()
+**		print(g_mode)</code></div>
 */
 static int CclGetGodMode(lua_State *l)
 {
@@ -1363,9 +1459,15 @@ static int ScriptSetUseHPForXp(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Set the local player name
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code><strong>SetLocalPlayerName</strong>("Stormreaver Clan")</code></div>
 */
 static int CclSetLocalPlayerName(lua_State *l)
 {
@@ -1375,9 +1477,15 @@ static int CclSetLocalPlayerName(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Get the local player name
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code><strong>GetLocalPlayerName</strong>()</code></div>
 */
 static int CclGetLocalPlayerName(lua_State *l)
 {
@@ -1387,7 +1495,14 @@ static int CclGetLocalPlayerName(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Get Stratagus Version
+**
+** Example:
+**
+** <div class="example"><code>version = <strong>GetStratagusVersion</strong>()
+**		print(version)</code></div>
 */
 static int CclGetStratagusVersion(lua_State *l)
 {
@@ -1397,7 +1512,14 @@ static int CclGetStratagusVersion(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Get Stratagus Homepage
+**
+** Example:
+**
+** <div class="example"><code>url = <strong>GetStratagusHomepage</strong>()
+**	print(url)</code></div>
 */
 static int CclGetStratagusHomepage(lua_State *l)
 {
@@ -1507,6 +1629,7 @@ void LuaRegisterModules()
 	UpgradesCclRegister();
 	UserInterfaceCclRegister();
 	VideoCclRegister();
+	OnlineServiceCclRegister();
 }
 
 

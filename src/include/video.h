@@ -140,7 +140,17 @@ public:
 };
 
 #ifdef USE_MNG
+#ifdef WIN32
+#ifdef HAVE_STDDEF_H
+#undef HAVE_STDDEF_H
+#endif
+#endif
 #include <libmng.h>
+#ifdef WIN32
+#ifndef HAVE_STDDEF_H
+#undef HAVE_STDDEF_H
+#endif
+#endif
 
 class Mng : public gcn::Image
 {
@@ -215,29 +225,29 @@ struct EventCallback {
 };
 
 #if SDL_BYTEORDER == SDL_LIL_ENDIAN
-#define RSHIFT  0
+#define RSHIFT  16
 #define GSHIFT  8
-#define BSHIFT  16
+#define BSHIFT  0
 #define ASHIFT  24
-#define RMASK   0x000000ff
+#define RMASK   0x00ff0000
 #define GMASK   0x0000ff00
-#define BMASK   0x00ff0000
+#define BMASK   0x000000ff
 #define AMASK   0xff000000
 #else
-#define RSHIFT  24
+#define RSHIFT  8
 #define GSHIFT  16
-#define BSHIFT  8
+#define BSHIFT  24
 #define ASHIFT  0
-#define RMASK   0xff000000
+#define RMASK   0x0000ff00
 #define GMASK   0x00ff0000
-#define BMASK   0x0000ff00
+#define BMASK   0xff000000
 #define AMASK   0x000000ff
 #endif
 
 class CVideo
 {
 public:
-	CVideo() : Width(0), Height(0), WindowWidth(0), WindowHeight(0), Depth(0), FullScreen(false) {}
+	CVideo() : Width(0), Height(0), WindowWidth(0), WindowHeight(0), VerticalPixelSize(1), Depth(0), FullScreen(false) {}
 
 	void LockScreen();
 	void UnlockScreen();
@@ -312,6 +322,7 @@ public:
 	int Height;
 	int WindowWidth;
 	int WindowHeight;
+	double VerticalPixelSize;
 	SDL_Cursor *blankCursor;
 	int Depth;
 	bool FullScreen;
@@ -406,9 +417,6 @@ extern void WaitEventsOneFrame();
 
 /// Toggle full screen mode
 extern void ToggleFullScreen();
-
-/// Switch to the shader currently stored in Video.ShaderIndex
-extern void SwitchToShader();
 
 /// Push current clipping.
 extern void PushClipping();

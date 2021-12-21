@@ -175,6 +175,7 @@ class CUserInterface
         vector<string> LifeBarColorNames;
         vector<int> LifeBarPercents;
         int LifeBarYOffset;
+		int LifeBarPadding;
         bool LifeBarBorder;
 
 	CColor CompletedBarColorRGB;
@@ -199,6 +200,11 @@ class CUserInterface
 	CMinimap Minimap;
 	CStatusLine StatusLine;
 	CUITimer Timer;
+
+	Vec2i EditorSettingsAreaTopLeft;
+	Vec2i EditorSettingsAreaBottomRight;
+	Vec2i EditorButtonAreaTopLeft;
+	Vec2i EditorButtonAreaBottomRight;
 };
 
 extern CUserInterface UI;
@@ -292,6 +298,8 @@ class Widget
 	virtual void setHotKey(const int key);
 	virtual void setHotKey(const char *key);
 
+        virtual void requestFocus();
+
 	virtual void addActionListener(LuaActionListener *actionListener);
         virtual void addMouseListener(LuaActionListener *actionListener);
         virtual void addKeyListener(LuaActionListener *actionListener);
@@ -325,6 +333,8 @@ class ScrollArea : public BasicContainer
 	virtual Widget *getContent();
 	virtual void setScrollbarWidth(int width);
 	virtual int getScrollbarWidth();
+        virtual void scrollToBottom();
+        virtual void scrollToTop();
 };
 
 class ImageWidget : public Widget

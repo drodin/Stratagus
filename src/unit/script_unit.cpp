@@ -42,6 +42,8 @@
 #include "construct.h"
 #include "interface.h"
 #include "map.h"
+#include "netconnect.h"
+#include "network.h"
 #include "pathfinder.h"
 #include "player.h"
 #include "script.h"
@@ -64,11 +66,20 @@
 extern unsigned CclGetResourceByName(lua_State *l);
 
 /**
+** <b>Description</b>
+**
 **  Set training queue
 **
 **  @param l  Lua state.
 **
 **  @return  The old state of the training queue
+**
+** Example:
+**
+** <div class="example"><code>-- Training queue available. Train multiple units.
+**		<strong>SetTrainingQueue</strong>(true)
+**		-- Train one unit at a time.
+**		<strong>SetTrainingQueue</strong>(false)</code></div>
 */
 static int CclSetTrainingQueue(lua_State *l)
 {
@@ -280,7 +291,7 @@ static int CclUnit(lua_State *l)
 		LuaError(l, "incorrect argument");
 	}
 
-	CUnit *unit = NULL;
+	CUnit *unit = &UnitManager.GetSlotUnit(slot);
 	CUnitType *type = NULL;
 	CUnitType *seentype = NULL;
 	CPlayer *player = NULL;
@@ -309,7 +320,6 @@ static int CclUnit(lua_State *l)
 			// unit->CurrentAction()==UnitActionDie so we have to wait
 			// until we parsed at least Unit::Orders[].
 			Assert(type);
-			unit = &UnitManager.GetSlotUnit(slot);
 			unit->Init(*type);
 			unit->Seen.Type = seentype;
 			unit->Active = 0;
@@ -332,10 +342,10 @@ static int CclUnit(lua_State *l)
 			pos.y = LuaToNumber(l, -1, 2);
 			w = LuaToNumber(l, -1, 3);
 			h = LuaToNumber(l, -1, 4);
-			MapSight(*player, pos, w, h, unit->CurrentSightRange, MapMarkTileSight);
+			MapSight(*player, *unit, pos, w, h, unit->CurrentSightRange, MapMarkTileSight);
 			// Detectcloak works in container
 			if (unit->Type->BoolFlag[DETECTCLOAK_INDEX].value) {
-				MapSight(*player, pos, w, h, unit->CurrentSightRange, MapMarkTileDetectCloak);
+				MapSight(*player, *unit, pos, w, h, unit->CurrentSightRange, MapMarkTileDetectCloak);
 			}
 			// Radar(Jammer) not.
 			lua_pop(l, 1);
@@ -635,11 +645,24 @@ static int CclMoveUnit(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Remove unit from the map.
 **
 **  @param l  Lua state.
 **
 **  @return   Returns 1.
+**
+** Example:
+**
+** <div class="example"><code>ogre = CreateUnit("unit-ogre", 0, {24, 89})
+**
+**		AddTrigger(
+**  		function() return (GameCycle > 150) end,
+**  		function()
+**    			<strong>RemoveUnit</strong>(ogre)
+**    			return false end -- end of function
+**		)</code></div>
 */
 static int CclRemoveUnit(lua_State *l)
 {
@@ -654,11 +677,17 @@ static int CclRemoveUnit(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Create a unit and place it on the map
 **
 **  @param l  Lua state.
 **
 **  @return   Returns the slot number of the made unit.
+**
+** Example:
+**
+** <div class="example"><code><strong>CreateUnit</strong>("unit-human-transport", 1, {94, 0})</code></div>
 */
 static int CclCreateUnit(lua_State *l)
 {
@@ -708,11 +737,20 @@ static int CclCreateUnit(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  'Upgrade' a unit in place to a unit of different type.
 **
 **  @param l  Lua state.
 **
 **  @return   Returns success.
+**
+** Example:
+**
+** <div class="example"><code>-- Make a peon for player 5
+**		peon = CreateUnit("unit-peon", 5, {58, 9})
+**		-- The peon will be trasformed into a Grunt
+**		<strong>TransformUnit</strong>(peon,"unit-grunt")</code></div>
 */
 static int CclTransformUnit(lua_State *l)
 {
@@ -722,17 +760,26 @@ static int CclTransformUnit(lua_State *l)
 	lua_pushvalue(l, 2);
 	const CUnitType *unittype = TriggerGetUnitType(l);
 	lua_pop(l, 1);
-	CommandUpgradeTo(*targetUnit, *(CUnitType*)unittype, 1);
+	CommandUpgradeTo(*targetUnit, *(CUnitType*)unittype, 1, true);
 	lua_pushvalue(l, 1);
 	return 1;
 }
 
 /**
+** <b>Description</b>
+**
 **  Damages unit, additionally using another unit as first's attacker
 **
 **  @param l  Lua state.
 **
 **  @return   Returns the slot number of the made unit.
+**
+** Example:
+**
+** <div class="example"><code>-- Make a grunt for player 5
+**		grunt = CreateUnit("unit-grunt", 5, {58, 8})
+**		-- Damage the grunt with 15 points
+**		<strong>DamageUnit</strong>(-1,grunt,15)</code></div>
 */
 static int CclDamageUnit(lua_State *l)
 {
@@ -803,11 +850,18 @@ static int CclSetTeleportDestination(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Order a unit
 **
 **  @param l  Lua state.
 **
-**  OrderUnit(player, unit-type, sloc, dloc, order)
+**  OrderUnit(player, unit-type, start_loc, dest_loc, order)
+**
+** Example:
+**
+** <div class="example"><code>-- Move transport from position x=94,y=0 to x=80,y=9
+**		<strong>OrderUnit</strong>(1,"unit-human-transport",{94,0},{80,9},"move")</code></div>
 */
 static int CclOrderUnit(lua_State *l)
 {
@@ -859,6 +913,10 @@ static int CclOrderUnit(lua_State *l)
 			if (plynr == -1 || plynr == unit.Player->Index) {
 				if (!strcmp(order, "move")) {
 					CommandMove(unit, (dpos1 + dpos2) / 2, 1);
+				} else if (!strcmp(order, "stop")) {
+					CommandStopUnit(unit); //Stop the unit
+				} else if (!strcmp(order, "stand-ground")) {
+					CommandStandGround(unit,0); //Stand and flush every order
 				} else if (!strcmp(order, "attack")) {
 					CUnit *attack = TargetOnMap(unit, dpos1, dpos2);
 					CommandAttack(unit, (dpos1 + dpos2) / 2, attack, 1);
@@ -891,11 +949,18 @@ private:
 
 
 /**
+** <b>Description</b>
+**
 **  Kill a unit
 **
 **  @param l  Lua state.
 **
 **  @return   Returns true if a unit was killed.
+**
+** Example:
+**
+** <div class="example"><code>-- Kills an ogre controlled by player 3
+**		<strong>KillUnit</strong>("unit-ogre", 3)</code></div>
 */
 static int CclKillUnit(lua_State *l)
 {
@@ -928,11 +993,18 @@ static int CclKillUnit(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Kill a unit at a location
 **
 **  @param l  Lua state.
 **
 **  @return   Returns the number of units killed.
+**
+** Example:
+**
+** <div class="example"><code>-- Kill 8 peasants controlled by player 7 from position {27,1} to {34,5}
+**		<strong>KillUnitAt</strong>("unit-peasant",7,8,{27,1},{34,5})</code></div>
 */
 static int CclKillUnitAt(lua_State *l)
 {
@@ -977,6 +1049,8 @@ static int CclKillUnitAt(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Get a player's units
 **
 **  @param l  Lua state.
@@ -1070,11 +1144,26 @@ static int CclGetUnitBoolFlag(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Get the value of the unit variable.
 **
 **  @param l  Lua state.
 **
 **  @return   The value of the variable of the unit.
+**
+** Example:
+**
+** <div class="example"><code>-- Make a grunt for player 5
+**		grunt = CreateUnit("unit-grunt", 5, {58, 8})
+**		-- Take the name of the unit
+**		unit_name = <strong>GetUnitVariable</strong>(grunt,"Name")
+**		-- Take the player number based on the unit
+**		player_type = <strong>GetUnitVariable</strong>(grunt,"PlayerType")
+**		-- Take the value of the armor
+**		armor_value = <strong>GetUnitVariable</strong>(grunt,"Armor")
+**		-- Show the message in the game.
+**		AddMessage(unit_name .. " " .. player_type .. " " .. armor_value)</code></div>
 */
 static int CclGetUnitVariable(lua_State *l)
 {
@@ -1146,6 +1235,8 @@ static int CclGetUnitVariable(lua_State *l)
 				lua_pushnumber(l, unit->Variable[index].Max);
 			} else if (!strcmp(type, "Increase")) {
 				lua_pushnumber(l, unit->Variable[index].Increase);
+			} else if (!strcmp(type, "IncreaseFrequency")) {
+				lua_pushnumber(l, unit->Variable[index].IncreaseFrequency);
 			} else if (!strcmp(type, "Enable")) {
 				lua_pushnumber(l, unit->Variable[index].Enable);
 			} else {
@@ -1157,11 +1248,20 @@ static int CclGetUnitVariable(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Set the value of the unit variable.
 **
 **  @param l  Lua state.
 **
 **  @return The new value of the unit.
+**
+** Example:
+**
+** <div class="example"><code>-- Create a blacksmith for player 2
+**		blacksmith = CreateUnit("unit-human-blacksmith", 2, {66, 71})
+**		-- Specify the amount of hit points to assign to the blacksmith
+**		<strong>SetUnitVariable</strong>(blacksmith,"HitPoints",344)</code></div>
 */
 static int CclSetUnitVariable(lua_State *l)
 {
@@ -1183,8 +1283,12 @@ static int CclSetUnitVariable(lua_State *l)
 		value = LuaToNumber(l, 3);
 		unit->Summoned = value;
 	} else if (!strcmp(name, "RegenerationRate")) {
-		value = LuaToNumber(l, 3);
 		unit->Variable[HP_INDEX].Increase = std::min(unit->Variable[HP_INDEX].Max, value);
+	} else if (!strcmp(name, "RegenerationFrequency")) {
+		unit->Variable[HP_INDEX].IncreaseFrequency = value;
+		if (unit->Variable[HP_INDEX].IncreaseFrequency != value) {
+			LuaError(l, "RegenerationFrequency out of range!");
+		}
 	} else if (!strcmp(name, "IndividualUpgrade")) {
 		LuaCheckArgs(l, 4);
 		std::string upgrade_ident = LuaToString(l, 3);
@@ -1229,6 +1333,11 @@ static int CclSetUnitVariable(lua_State *l)
 				unit->Stats->Variables[index].Max = value;
 			} else if (!strcmp(type, "Increase")) {
 				unit->Stats->Variables[index].Increase = value;
+			} else if (!strcmp(type, "IncreaseFrequency")) {
+				unit->Stats->Variables[index].IncreaseFrequency = value;
+				if (unit->Stats->Variables[index].IncreaseFrequency != value) {
+					LuaError(l, "%s.IncreaseFrequency out of range!" _C_ type);
+				}
 			} else if (!strcmp(type, "Enable")) {
 				unit->Stats->Variables[index].Enable = value;
 			} else {
@@ -1244,6 +1353,11 @@ static int CclSetUnitVariable(lua_State *l)
 				unit->Variable[index].Max = value;
 			} else if (!strcmp(type, "Increase")) {
 				unit->Variable[index].Increase = value;
+			} else if (!strcmp(type, "IncreaseFrequency")) {
+				unit->Variable[index].IncreaseFrequency = value;
+				if (unit->Variable[index].IncreaseFrequency != value) {
+					LuaError(l, "%s.IncreaseFrequency out of range!" _C_ type);
+				}
 			} else if (!strcmp(type, "Enable")) {
 				unit->Variable[index].Enable = value;
 			} else {
@@ -1266,6 +1380,22 @@ static int CclSlotUsage(lua_State *l)
 	return 0;
 }
 
+/**
+** <b>Description</b>
+**
+**  Select a single unit 
+**
+**  @param l  Lua state.
+**
+**  @return 0, meaning the unit is selected.
+**
+** Example:
+**
+** <div class="example"><code>-- Make the hero unit Grom Hellscream for player 5
+**		grom = CreateUnit("unit-beast-cry", 5, {58, 8})
+**		-- Select only the unit Grom Hellscream
+**		<strong>SelectSingleUnit</strong>(grom)</code></div>
+*/
 static int CclSelectSingleUnit(lua_State *l)
 {
 	const int nargs = lua_gettop(l);
@@ -1275,6 +1405,26 @@ static int CclSelectSingleUnit(lua_State *l)
 	lua_pop(l, 1);
 	SelectSingleUnit(*unit);
 	SelectionChanged();
+	return 0;
+}
+
+/**
+**  Enable/disable simplified auto targeting 
+**
+**  @param l  Lua state.
+**
+**  @return   0 for success, 1 for wrong type;
+*/
+static int CclEnableSimplifiedAutoTargeting(lua_State *l)
+{
+	LuaCheckArgs(l, 1);
+	const bool isSimplified = LuaToBoolean(l, 1);
+	if (!IsNetworkGame()) {
+		Preference.SimplifiedAutoTargeting = isSimplified;
+	} else {
+		NetworkSendExtendedCommand(ExtendedMessageAutoTargetingDB, 
+								   int(isSimplified), 0, 0, 0, 0);
+	}
 	return 0;
 }
 
@@ -1312,6 +1462,7 @@ void UnitCclRegister()
 	lua_register(Lua, "SlotUsage", CclSlotUsage);
 
 	lua_register(Lua, "SelectSingleUnit", CclSelectSingleUnit);
+	lua_register(Lua, "EnableSimplifiedAutoTargeting", CclEnableSimplifiedAutoTargeting);
 }
 
 //@}

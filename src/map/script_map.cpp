@@ -36,8 +36,11 @@
 #include "stratagus.h"
 
 #include "map.h"
-
+#include "fov.h"
+#include "fow.h"
 #include "iolib.h"
+#include "netconnect.h"
+#include "network.h"
 #include "script.h"
 #include "tileset.h"
 #include "translate.h"
@@ -45,6 +48,10 @@
 #include "unit.h"
 #include "version.h"
 #include "video.h"
+
+/*----------------------------------------------------------------------------
+--  Variables
+----------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------
 --  Functions
@@ -145,9 +152,16 @@ static int CclRevealMap(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Center the map.
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code>-- Center the view at position x=11 and y=1.
+**		  <strong>CenterMap</strong>(11, 1)</code></div>
 */
 static int CclCenterMap(lua_State *l)
 {
@@ -159,9 +173,18 @@ static int CclCenterMap(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Define the starting viewpoint for a given player.
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code>-- Start view for player 0.
+**		  <strong>SetStartView</strong>(0, 25, 12)
+**		  -- Start view for player 1.
+**		  <strong>SetStartView</strong>(1, 71, 38)</code></div>
 */
 static int CclSetStartView(lua_State *l)
 {
@@ -184,7 +207,7 @@ static int CclShowMapLocation(lua_State *l)
 	// Put a unit on map, use its properties, except for
 	// what is listed below
 
-	LuaCheckArgs(l, 4);
+	LuaCheckArgs(l, 5);
 	const char *unitname = LuaToString(l, 5);
 	CUnitType *unitType = UnitTypeByIdent(unitname);
 	if (!unitType) {
@@ -206,7 +229,13 @@ static int CclShowMapLocation(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Set fog of war on/off.
+**
+** Example:
+**
+** <div class="example"><code><strong>SetFogOfWar</strong>(true)</code></div>
 **
 **  @param l  Lua state.
 */
@@ -242,6 +271,272 @@ static int CclSetMinimapTerrain(lua_State *l)
 }
 
 /**
+**  Activate map grid  (true|false)
+**
+**  @param l  Lua state.
+**
+**  @return   0 for success, 1 for wrong type;
+*/
+static int CclSetEnableMapGrid(lua_State *l)
+{
+	LuaCheckArgs(l, 1);
+	CViewport::EnableGrid(LuaToBoolean(l, 1));
+	return 0;
+}
+
+/**
+**  Check if map grid is enabled
+*/
+static int CclGetIsMapGridEnabled(lua_State *l)
+{
+	LuaCheckArgs(l, 0);
+	lua_pushboolean(l, CViewport::isGridEnabled());
+	return 1;
+}
+
+/**
+**  Select unit's field of view algorithm -  ShadowCasting or SimpleRadial
+**
+**  @param l  Lua state.
+**
+**  @return   0 for success, 1 for wrong type;
+*/
+static int CclSetFieldOfViewType(lua_State *l)
+{
+	LuaCheckArgs(l, 1);
+
+	FieldOfViewTypes new_type;
+	const char *type_name = LuaToString(l, 1);
+	if (!strcmp(type_name, "shadow-casting")) {
+		new_type = FieldOfViewTypes::cShadowCasting;
+		/// Legacy type of FOW doesn't work with shadow casting
+		if (FogOfWar.GetType() == FogOfWarTypes::cLegacy) {
+			FogOfWar.SetType(FogOfWarTypes::cEnhanced);
+		}	
+	} else if (!strcmp(type_name, "simple-radial")) {
+		new_type = FieldOfViewTypes::cSimpleRadial;
+	} else {
+		PrintFunction();
+		fprintf(stdout, "Accessible Field of View types: \"shadow-casting\", \"simple-radial\".\n");
+		return 1;
+	}
+	if (!IsNetworkGame()) {
+		FieldOfView.SetType(new_type);
+	} else {
+		NetworkSendExtendedCommand(ExtendedMessageFieldOfViewDB, int(new_type), 0, 0, 0, 0);
+	}
+	return 0;
+}
+
+/**
+**  Get unit's field of view type -  ShadowCasting or SimpleRadial
+*/
+static int CclGetFieldOfViewType(lua_State *l)
+{
+	LuaCheckArgs(l, 0);
+	lua_pushinteger(l, int(FieldOfView.GetType()));
+	return 1;
+}
+
+/**
+**  Set opaque for the tile's terrain.
+**
+**  @param l  Lua state.
+**
+**  @return   0 for success, 1 for wrong tile's terrain;
+*/
+static int CclSetOpaqueFor(lua_State *l)
+{
+	uint16_t new_flag = 0;
+	const int args = lua_gettop(l);
+	if (args < 1) {
+		LuaError(l, "argument missed");
+		return 1;
+	}
+	for (int arg = 0; arg < args; ++arg) {
+		const char *flag_name = LuaToString(l, arg + 1);
+		if (!strcmp(flag_name, "wall")) {
+			new_flag |= MapFieldWall;
+		} else if (!strcmp(flag_name, "rock")) {
+			new_flag |= MapFieldRocks;
+		} else if (!strcmp(flag_name, "forest")) {
+			new_flag |= MapFieldForest;
+		} else {
+			PrintFunction();
+			fprintf(stdout, "Opaque can only be set for \"wall\", \"rock\" or \"forest\". \n");
+			return 1;
+		}
+	}
+	if (!IsNetworkGame()) {
+		FieldOfView.SetOpaqueFields(FieldOfView.GetOpaqueFields() | new_flag);
+	} else {
+		NetworkSendExtendedCommand(ExtendedMessageMapFieldsOpacityDB, 0,
+								   FieldOfView.GetOpaqueFields() | new_flag, 0, 0, 0);
+	}
+	return 0;
+}
+/**
+**  Check opacity for the tile's terrain.
+**
+**  @param l  Lua state.
+**
+*/
+static int CclGetIsOpaqueFor(lua_State *l)
+{
+	LuaCheckArgs(l, 1);
+
+	uint16_t flagToCheck = 0;
+	const char *flag_name = LuaToString(l, 1);
+	if (!strcmp(flag_name, "wall")) {
+		flagToCheck = MapFieldWall;
+	} else if (!strcmp(flag_name, "rock")) {
+		flagToCheck = MapFieldRocks;
+	} else if (!strcmp(flag_name, "forest")) {
+		flagToCheck = MapFieldForest;
+	} else {
+		PrintFunction();
+		fprintf(stdout, "Opaque can only be checked for \"wall\", \"rock\" or \"forest\". \n");
+	}
+
+	lua_pushboolean(l, FieldOfView.GetOpaqueFields() & flagToCheck);
+	return 1;
+}
+
+static int CclRemoveOpaqueFor(lua_State *l)
+{
+	unsigned short new_flag = 0;
+	const int args = lua_gettop(l);
+	if (args < 1) {
+		LuaError(l, "argument missed");
+		return 1;
+	}
+	for (int arg = 0; arg < args; ++arg) {
+		const char *flag_name = LuaToString(l, arg + 1);
+		if (!strcmp(flag_name, "wall")) {
+			new_flag |= MapFieldWall;
+		} else if (!strcmp(flag_name, "rock")) {
+			new_flag |= MapFieldRocks;
+		} else if (!strcmp(flag_name, "forest")) {
+			new_flag |= MapFieldForest;
+		} else {
+			PrintFunction();
+			fprintf(stdout, "Opaque can only be removed for \"wall\", \"rock\" or \"forest\". \n");
+			return 1;
+		}
+	}
+	if (!IsNetworkGame()) {
+		FieldOfView.SetOpaqueFields(FieldOfView.GetOpaqueFields() & ~new_flag);
+	} else {
+		NetworkSendExtendedCommand(ExtendedMessageMapFieldsOpacityDB, 0,
+								   FieldOfView.GetOpaqueFields() & ~new_flag, 0, 0, 0);
+	}
+	return 0;
+}
+
+
+/**
+**  Select which type of Fog of War to use
+**
+**  @param l  Lua state.
+**
+**  @return   0 for success, 1 for wrong type;
+*/
+static int CclSetFogOfWarType(lua_State *l)
+{
+	LuaCheckArgs(l, 1);
+	
+	FogOfWarTypes new_type;
+	const char *type_name = LuaToString(l, 1);
+	if (!strcmp(type_name, "legacy")) {
+		new_type = FogOfWarTypes::cLegacy;
+		/// Legacy type of FOW doesn't work with shadow casting
+		if (FieldOfView.GetType() == FieldOfViewTypes::cShadowCasting) {
+			if (!IsNetworkGame()) {
+				FieldOfView.SetType(FieldOfViewTypes::cSimpleRadial);
+			} else {
+				NetworkSendExtendedCommand(ExtendedMessageFieldOfViewDB, 
+										   int(FieldOfViewTypes::cSimpleRadial), 0, 0, 0, 0);
+			}
+		}
+	} else if (!strcmp(type_name, "enhanced")) {
+		new_type = FogOfWarTypes::cEnhanced;
+	} else {
+		PrintFunction();
+		fprintf(stdout, "Accessible Fog of War types: \"legacy\", \"enhanced\".\n");
+		return 1;
+	}
+	FogOfWar.SetType(new_type);
+	return 0;
+}
+
+/**
+**  Get Fog of War type - legacy or enhanced
+*/
+static int CclGetFogOfWarType(lua_State *l)
+{
+	LuaCheckArgs(l, 0);
+	lua_pushinteger(l, int(FogOfWar.GetType()));
+	return 1;
+}
+
+
+/**
+**  Set parameters for FOW blurer (radiuses and number of iterations)
+**
+**  @param l  Lua state.
+**
+**  @return   0 for success, 1 for wrong type;
+*/
+static int CclSetFogOfWarBlur(lua_State *l)
+{
+	LuaCheckArgs(l, 3);
+
+	float radiusSimple = LuaToFloat(l, 1);
+	if (radiusSimple <= 0 ) {
+		PrintFunction();
+		fprintf(stdout, "Radius should be a positive float number. Blur is disabled.\n");
+	}
+
+	float radiusBilinear = LuaToFloat(l, 2);
+	if (radiusBilinear <= 0 ) {
+		PrintFunction();
+		fprintf(stdout, "Radius should be a positive float number. Blur is disabled.\n");
+	}
+
+	int iterations = LuaToNumber(l, 3);	
+	if (iterations <= 0 ) {
+		PrintFunction();
+		fprintf(stdout, "Number of box blur iterations should be greater than 0. Blur is disabled.\n");
+	}
+	FogOfWar.InitBlurer(radiusSimple, radiusBilinear, iterations);
+	return 0;
+}
+
+/**
+**  Activate FOW bilinear upscaling type  (true|false)
+**
+**  @param l  Lua state.
+**
+**  @return   0 for success, 1 for wrong type;
+*/
+static int CclSetFogOfWarBilinear(lua_State *l)
+{
+	LuaCheckArgs(l, 1);
+	FogOfWar.EnableBilinearUpscale(LuaToBoolean(l, 1));
+	return 0;
+}
+
+/**
+**  Check if FOW bilinear upscaling enabled
+*/
+static int CclGetIsFogOfWarBilinear(lua_State *l)
+{
+	LuaCheckArgs(l, 0);
+	lua_pushboolean(l, FogOfWar.IsBilinearUpscaleEnabled());
+	return 1;
+}
+
+/**
 **  Fog of war opacity.
 **
 **  @param l  Lua state.
@@ -264,23 +559,38 @@ static int CclSetFogOfWarOpacity(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Set forest regeneration speed.
 **
 **  @param l  Lua state.
 **
 **  @return   Old speed
+**
+** Example:
+**
+** <div class="example"><code>-- No regeneration.
+**		  <strong>SetForestRegeneration</strong>(0)
+**		  -- Slow regeneration every 50 seconds
+**		  <strong>SetForestRegeneration</strong>(50)
+**		  -- Extremely slow regeneration every 1h of game time
+**		  <strong>SetForestRegeneration</strong>(3600)</code></div>
 */
 static int CclSetForestRegeneration(lua_State *l)
 {
 	LuaCheckArgs(l, 1);
 	int i = LuaToNumber(l, 1);
-	if (i < 0 || i > 255) {
-		PrintFunction();
-		fprintf(stdout, "Regeneration speed should be 0 - 255\n");
-		i = 100;
+	int frequency = 1;
+	if (i < 0) {
+		LuaError(l, "Regeneration speed should be >= 0\n");
 	}
-	const int old = ForestRegeneration;
+	while (i / frequency > 255) {
+		frequency++;
+	}
+	i = i / frequency;
+	const int old = ForestRegeneration * ForestRegenerationFrequency;
 	ForestRegeneration = i;
+	ForestRegenerationFrequency = frequency;
 
 	lua_pushnumber(l, old);
 	return 1;
@@ -307,6 +617,8 @@ static int CclSetFogOfWarColor(lua_State *l)
 	FogOfWarColor.G = g;
 	FogOfWarColor.B = b;
 
+	FogOfWar.SetFogColor(r, g, b);
+
 	return 0;
 }
 
@@ -321,11 +633,24 @@ static int CclSetFogOfWarGraphics(lua_State *l)
 
 	LuaCheckArgs(l, 1);
 	FogGraphicFile = LuaToString(l, 1);
-	if (CMap::FogGraphic) {
-		CGraphic::Free(CMap::FogGraphic);
+	if (CMap::LegacyFogGraphic) {
+		CGraphic::Free(CMap::LegacyFogGraphic);
 	}
-	CMap::FogGraphic = CGraphic::New(FogGraphicFile, PixelTileSize.x, PixelTileSize.y);
+	CMap::LegacyFogGraphic = CGraphic::New(FogGraphicFile, PixelTileSize.x, PixelTileSize.y);
 
+	return 0;
+}
+
+/**
+**  Define size in pixels (x,y) of a tile in this game
+**
+**  @param l  Lua state.
+*/
+static int CclSetTileSize(lua_State *l)
+{
+	LuaCheckArgs(l, 2);
+	PixelTileSize.x = LuaToNumber(l, 1);
+	PixelTileSize.y = LuaToNumber(l, 2);
 	return 0;
 }
 
@@ -514,7 +839,9 @@ static int CclGetTileTerrainHasFlag(lua_State *l)
 
 	unsigned short flag = 0;
 	const char *flag_name = LuaToString(l, 3);
-	if (!strcmp(flag_name, "water")) {
+	if (!strcmp(flag_name, "opaque")) {
+		flag = MapFieldOpaque;
+	} else if (!strcmp(flag_name, "water")) {
 		flag = MapFieldWaterAllowed;
 	} else if (!strcmp(flag_name, "land")) {
 		flag = MapFieldLandAllowed;
@@ -544,6 +871,40 @@ static int CclGetTileTerrainHasFlag(lua_State *l)
 }
 
 /**
+**  Enable walls enabled for single player games (for debug purposes)
+**
+**  @param l  Lua state.
+**
+**  @return   0 for success, 1 for wrong type;
+*/
+static int CclSetEnableWallsForSP(lua_State *l)
+{
+	LuaCheckArgs(l, 1);
+	EnableWallsInSinglePlayer = LuaToBoolean(l, 1);
+	return 0;
+}
+
+/**
+**  Check if walls enabled for single player games (for debug purposes)
+*/
+static int CclIsWallsEnabledForSP(lua_State *l)
+{
+	LuaCheckArgs(l, 0);
+	lua_pushboolean(l, EnableWallsInSinglePlayer);
+	return 1;
+}
+
+/**
+**  Check if network game was created on this PC
+*/
+static int CclGetIsGameHoster(lua_State *l)
+{
+	LuaCheckArgs(l, 0);
+	lua_pushboolean(l, (ThisPlayer->Index == Hosts[0].PlyNr) ? true : false);
+	return 1;
+}
+
+/**
 **  Register CCL features for map.
 */
 void MapCclRegister()
@@ -554,10 +915,28 @@ void MapCclRegister()
 	lua_register(Lua, "SetStartView", CclSetStartView);
 	lua_register(Lua, "ShowMapLocation", CclShowMapLocation);
 
+	lua_register(Lua, "SetTileSize", CclSetTileSize);
+
 	lua_register(Lua, "SetFogOfWar", CclSetFogOfWar);
 	lua_register(Lua, "GetFogOfWar", CclGetFogOfWar);
 	lua_register(Lua, "SetMinimapTerrain", CclSetMinimapTerrain);
 
+	lua_register(Lua, "SetEnableMapGrid", CclSetEnableMapGrid);
+	lua_register(Lua, "GetIsMapGridEnabled", CclGetIsMapGridEnabled);
+
+	lua_register(Lua, "SetFieldOfViewType", CclSetFieldOfViewType);
+	lua_register(Lua, "GetFieldOfViewType", CclGetFieldOfViewType);
+	lua_register(Lua, "SetOpaqueFor", CclSetOpaqueFor);
+	lua_register(Lua, "RemoveOpaqueFor", CclRemoveOpaqueFor);
+	lua_register(Lua, "GetIsOpaqueFor", CclGetIsOpaqueFor);
+	
+	lua_register(Lua, "SetFogOfWarType", CclSetFogOfWarType);
+	lua_register(Lua, "GetFogOfWarType", CclGetFogOfWarType);
+
+	lua_register(Lua, "SetFogOfWarBlur", CclSetFogOfWarBlur);
+	lua_register(Lua, "SetFogOfWarBilinear", CclSetFogOfWarBilinear);
+	lua_register(Lua, "GetIsFogOfWarBilinear", CclGetIsFogOfWarBilinear);
+	
 	lua_register(Lua, "SetFogOfWarGraphics", CclSetFogOfWarGraphics);
 	lua_register(Lua, "SetFogOfWarOpacity", CclSetFogOfWarOpacity);
 	lua_register(Lua, "SetFogOfWarColor", CclSetFogOfWarColor);
@@ -573,6 +952,12 @@ void MapCclRegister()
 
 	lua_register(Lua, "GetTileTerrainName", CclGetTileTerrainName);
 	lua_register(Lua, "GetTileTerrainHasFlag", CclGetTileTerrainHasFlag);
+
+	lua_register(Lua, "SetEnableWallsForSP", CclSetEnableWallsForSP);
+	lua_register(Lua, "GetIsWallsEnabledForSP", CclIsWallsEnabledForSP);
+
+	lua_register(Lua, "GetIsGameHoster", CclGetIsGameHoster);
+
 }
 
 //@}

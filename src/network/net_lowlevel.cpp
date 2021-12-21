@@ -50,14 +50,6 @@
 #include <windows.h>
 #include <winsock.h>
 #include <ws2tcpip.h>
-#if (NTDDI_VERSION >= NTDDI_VISTA)
-// that's fine
-#elif (NTDDI_VERSION >= NTDDI_WIN2K)
-// that's fine, too
-#else
-// oh no, we're at least NTDDI_WIN2K, otherwise Iphlpapi doesn't work
-#define NTDDI_VERSION NTDDI_WIN2K
-#endif
 #include <Iphlpapi.h>
 #pragma comment(lib, "Iphlpapi.lib")
 
@@ -215,6 +207,26 @@ unsigned long NetResolveHost(const std::string &host)
 }
 
 /**
+ * Return the system hostname.
+ */
+std::string NetGetHostname()
+{
+	char hostname_buffer[256];
+#ifdef _WIN32
+	DWORD hostname_size = (DWORD)sizeof(hostname_buffer);
+	if (GetComputerNameA(hostname_buffer, &hostname_size)) {
+		return std::string(hostname_buffer);
+	}
+#else
+	size_t hostname_size = sizeof(hostname_buffer);
+	if (gethostname(hostname_buffer, hostname_size) == 0) {
+		return std::string(hostname_buffer);
+	}
+#endif
+	return "localhost";
+}
+
+/**
 **  Get IP-addrs of local interfaces from Network file descriptor
 **
 **  @param sock     local socket.
@@ -227,7 +239,7 @@ unsigned long NetResolveHost(const std::string &host)
 #ifndef MIB_IF_TYPE_IEEE80211
 #define MIB_IF_TYPE_IEEE80211 71
 #endif
-int NetSocketAddr(const Socket sock, unsigned long *ips, int maxAddr)
+int NetSocketAddr(unsigned long *ips, int maxAddr)
 {
 	int idx = 0;
 	PIP_ADAPTER_ADDRESSES pAddresses = NULL;
@@ -253,7 +265,7 @@ int NetSocketAddr(const Socket sock, unsigned long *ips, int maxAddr)
 	return idx;
 }
 #elif defined(USE_LINUX) || defined(USE_MAC)
-int NetSocketAddr(const Socket sock, unsigned long *ips, int maxAddr)
+int NetSocketAddr(unsigned long *ips, int maxAddr)
 {
 	struct ifaddrs *ifAddrStruct = NULL;
 	struct ifaddrs *ifa = NULL;
@@ -276,7 +288,7 @@ int NetSocketAddr(const Socket sock, unsigned long *ips, int maxAddr)
 }
 #else // } {
 // more??
-int NetSocketAddr(const Socket sock, unsigned long *ips, int maxAddr)
+int NetSocketAddr(unsigned long *ips, int maxAddr)
 {
 	ips[0] = htonl(0x7f000001);
 	return 1;

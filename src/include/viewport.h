@@ -31,7 +31,7 @@
 #define VIEWPORT_H
 
 //@{
-
+#include "fow.h"
 #include "vec2i.h"
 class CUnit;
 
@@ -89,7 +89,7 @@ public:
 	void SetClipping() const;
 
 	/// Draw the full Viewport.
-	void Draw() const;
+	void Draw();
 	void DrawBorder() const;
 	/// Check if any part of an area is visible in viewport
 	bool AnyMapAreaVisibleInViewport(const Vec2i &boxmin, const Vec2i &boxmax) const;
@@ -97,6 +97,18 @@ public:
 	bool Contains(const PixelPos &screenPos) const;
 
 	void Restrict(int &screenPosX, int &screenPosY) const;
+	void Clean();
+
+	static bool isGridEnabled()
+	{
+		return CViewport::ShowGrid;
+	}
+
+	static void EnableGrid(const bool value)
+	{
+		CViewport::ShowGrid = value;
+	}
+
 
 	PixelSize GetPixelSize() const;
 	const PixelPos &GetTopLeftPos() const { return TopLeftPos;}
@@ -104,10 +116,18 @@ public:
 private:
 	/// Set the current map view to x,y(upper,left corner)
 	void Set(const PixelPos &mapPixelPos);
+	/// Draw the map grid for dubug purposes
+	void DrawMapGridInViewport() const;
 	/// Draw the map background
 	void DrawMapBackgroundInViewport() const;
 	/// Draw the map fog of war
-	void DrawMapFogOfWar() const;
+	void DrawMapFogOfWar();
+	void DrawLegacyFogOfWar() const;
+	void DrawEnhancedFogOfWar(const bool isSoftwareRender = true);
+	/// Adjust fog of war surface to viewport
+	void AdjustFogSurface();
+	/// Clean enhanced fog of war texture
+	void CleanEnhFog();
 
 public:
 	//private:
@@ -121,7 +141,12 @@ public:
 	int MapHeight;            /// Height in map tiles
 
 	CUnit *Unit;              /// Bound to this unit
+private:
+	SDL_Surface *EnhFogSurface { nullptr }; /// Texture for enhanced fog of war. Viewport sized.
+	static bool ShowGrid;
+
 };
+
 
 //@}
 

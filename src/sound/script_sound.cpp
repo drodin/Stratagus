@@ -192,9 +192,15 @@ static int CclMapSound(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Ask the sound system to play the specified sound.
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code><strong>PlaySound</strong>("rescue (orc)")</code></div>
 */
 static int CclPlaySound(lua_State *l)
 {
@@ -310,9 +316,15 @@ static int CclDefineGameSounds(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Set the cut off distance.
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code><strong>SetGlobalSoundRange</strong>(200)</code></div>
 */
 static int CclSetGlobalSoundRange(lua_State *l)
 {

@@ -1,0 +1,41 @@
+{
+    "configurations": [
+        {
+            "name": "Stratagus",
+            "request": "launch",
+            "type": "cppdbg",
+            "linux": {
+              "program": "${workspaceFolder}/build/stratagus-dbg",
+              "args": ["-W", "-a", "-d", "${workspaceFolder}/../data.${input:game}"],
+              "environment": [
+                {"name": "OMP_WAIT_POLICY", "value": "passive"}
+              ],
+            },
+            "windows": {
+              "type": "cppvsdbg",
+              "program": "${workspaceFolder}/build/Debug/stratagus-dbg.exe",
+              "args": ["-W", "-a", "-d", "${workspaceFolder}\\..\\data.${input:game}"],
+              "environment": [
+                {"name": "PATH", "value": "${workspaceFolder}\\..\\dependencies\\bin;${env:PATH}"},
+                {"name": "OMP_WAIT_POLICY", "value": "passive"}
+              ],
+              "externalConsole": false,
+            },
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/../${input:game}",
+        }
+    ],
+    "inputs": [
+        {
+          "type": "pickString",
+          "id": "game",
+          "description": "Which game to launch?",
+          "options": [
+            "wargus",
+            "war1gus",
+            "stargus",
+          ],
+          "default": "wargus"
+        },
+    ]
+}

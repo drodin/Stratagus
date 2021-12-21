@@ -1,0 +1,21 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Download games and dependencies",
+            "type": "shell",
+            "linux": {
+                "command": "bash ${workspaceFolder}/.vscode/scripts/download.sh '${workspaceFolder}'",
+            },
+            "windows": {
+                "command": "PowerShell.exe -ExecutionPolicy Bypass -File '${workspaceFolder}/.vscode/scripts/download.ps1' '${workspaceFolder}'",
+            },
+            "problemMatcher": [],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            }
+        },
+    ]
+}

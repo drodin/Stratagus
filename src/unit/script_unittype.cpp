@@ -95,6 +95,7 @@ static const char ORGANIC_KEY[] = "organic";
 static const char SIDEATTACK_KEY[] = "SideAttack";
 static const char SKIRMISHER_KEY[] = "Skirmisher";
 static const char ALWAYSTHREAT_KEY[] = "AlwaysThreat";
+static const char ELEVATED_KEY[] = "Elevated";
 static const char NOFRIENDLYFIRE_KEY[] = "NoFriendlyFire";
 static const char MAINFACILITY_KEY[] = "MainFacility";
 
@@ -155,7 +156,7 @@ CUnitTypeVar::CBoolKeys::CBoolKeys()
 							   BUILDERLOST_KEY, CANHARVEST_KEY, HARVESTER_KEY, SELECTABLEBYRECTANGLE_KEY,
 							   ISNOTSELECTABLE_KEY, DECORATION_KEY, INDESTRUCTIBLE_KEY, TELEPORTER_KEY, SHIELDPIERCE_KEY,
 							   SAVECARGO_KEY, NONSOLID_KEY, WALL_KEY, NORANDOMPLACING_KEY, ORGANIC_KEY, SIDEATTACK_KEY, SKIRMISHER_KEY,
-							   ALWAYSTHREAT_KEY, NOFRIENDLYFIRE_KEY, MAINFACILITY_KEY
+							   ALWAYSTHREAT_KEY, ELEVATED_KEY, NOFRIENDLYFIRE_KEY, MAINFACILITY_KEY
 							  };
 
 	for (int i = 0; i < NBARALREADYDEFINED; ++i) {
@@ -433,12 +434,45 @@ static void UpdateDefaultBoolFlags(CUnitType &type)
 	type.BoolFlag[CANATTACK_INDEX].value             = type.CanAttack;
 }
 
+static const std::string shadowMarker = std::string("MARKER");
 /**
+** <b>Description</b>
+**
 **  Parse unit-type.
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code><strong>DefineUnitType</strong>("unit-silvermoon-archer", { Name = _("Silvermoon Archer"),
+**			Image = {"file", "human/units/elven_archer.png", "size", {72, 72}},
+**			Animations = "animations-archer", Icon = "icon-archer",
+**			Costs = {"time", 70, "gold", 500, "wood", 50},
+**			Speed = 10,
+**			HitPoints = 45,
+**			DrawLevel = 40,
+**			TileSize = {1, 1}, BoxSize = {33, 33},
+**			SightRange = 6, ComputerReactionRange = 7, PersonReactionRange = 6,
+**			BasicDamage = 4, PiercingDamage = 6, Missile = "missile-arrow",
+**			MaxAttackRange = 4,
+**			Priority = 75,
+**			Points = 60,
+**			Demand = 1,
+**			Corpse = "unit-human-dead-body",
+**			Type = "land",
+**			RightMouseAction = "attack",
+**			CanAttack = true,
+**			CanTargetLand = true, CanTargetSea = true, CanTargetAir = true,
+**			LandUnit = true,
+**			organic = true,
+**			SelectableByRectangle = true,
+**			Sounds = {
+**				"selected", "archer-selected",
+**				"acknowledge", "archer-acknowledge",
+**				"ready", "archer-ready",
+**				"help", "basic human voices help 1",
+**				"dead", "basic human voices dead"} } )</code></div>
 */
-static const std::string shadowMarker = std::string("MARKER");
 static int CclDefineUnitType(lua_State *l)
 {
 	LuaCheckArgs(l, 2);
@@ -452,6 +486,7 @@ static int CclDefineUnitType(lua_State *l)
 	int redefine;
 	if (type) {
 		redefine = 1;
+		DebugPrint("Redefining unit-type '%s'\n" _C_ str);
 	} else {
 		type = NewUnitTypeSlot(str);
 		redefine = 0;
@@ -611,6 +646,12 @@ static int CclDefineUnitType(lua_State *l)
 			type->StartingResources = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "RegenerationRate")) {
 			type->DefaultStat.Variables[HP_INDEX].Increase = LuaToNumber(l, -1);
+		} else if (!strcmp(value, "RegenerationFrequency")) {
+			int value = LuaToNumber(l, -1);
+			type->DefaultStat.Variables[HP_INDEX].IncreaseFrequency = value;
+			if (type->DefaultStat.Variables[HP_INDEX].IncreaseFrequency != value) {
+				LuaError(l, "RegenerationFrequency out of range!");
+			}
 		} else if (!strcmp(value, "BurnPercent")) {
 			type->BurnPercent = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "BurnDamageRate")) {
@@ -630,6 +671,8 @@ static int CclDefineUnitType(lua_State *l)
 			CclGetPos(l, &type->TileWidth, &type->TileHeight);
 		} else if (!strcmp(value, "NeutralMinimapColor")) {
 			type->NeutralMinimapColorRGB.Parse(l);
+		} else if (!strcmp(value, "Neutral")) {
+			type->Neutral = LuaToBoolean(l, -1);
 		} else if (!strcmp(value, "BoxSize")) {
 			CclGetPos(l, &type->BoxWidth, &type->BoxHeight);
 		} else if (!strcmp(value, "BoxOffset")) {
@@ -678,8 +721,8 @@ static int CclDefineUnitType(lua_State *l)
 			type->TeleportEffectIn = new LuaCallback(l, -1);
 		} else if (!strcmp(value, "TeleportEffectOut")) {
 			type->TeleportEffectOut = new LuaCallback(l, -1);
-		} else if (!strcmp(value, "DeathExplosion")) {
-			type->DeathExplosion = new LuaCallback(l, -1);
+		} else if (!strcmp(value, "OnDeath")) {
+			type->OnDeath = new LuaCallback(l, -1);
 		} else if (!strcmp(value, "OnHit")) {
 			type->OnHit = new LuaCallback(l, -1);
 		} else if (!strcmp(value, "OnEachCycle")) {
@@ -1157,9 +1200,19 @@ static int CclDefineUnitType(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Parse unit-stats.
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code><strong>DefineUnitStats</strong>("unit-berserker", 2, {
+**    		"HitPoints", {Value = 55, Max = 55, Increase = 0, Enable = true},
+**    		"AttackRange", {Value = 5, Max = 6, Increase = 0, Enable = true},
+**    		"SightRange", {Value = 7, Max = 7, Increase = 0, Enable = true},
+**  		})</code></div>
 */
 static int CclDefineUnitStats(lua_State *l)
 {
@@ -1332,11 +1385,18 @@ static int CclGetUnitTypeIdent(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Get the name of the unit-type structure.
 **
 **  @param l  Lua state.
 **
 **  @return   The name of the unit-type.
+**
+** Example:
+**
+** <div class="example"><code>name = <strong>GetUnitTypeName</strong>("unit-knight")
+**		  print(name)</code></div>
 */
 static int CclGetUnitTypeName(lua_State *l)
 {
@@ -1348,11 +1408,17 @@ static int CclGetUnitTypeName(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Set the name of the unit-type structure.
 **
 **  @param l  Lua state.
 **
 **  @return   The name of the unit-type.
+**
+** Example:
+**
+** <div class="example"><code><strong>SetUnitTypeName</strong>("unit-beast-cry","Doomhammer")</code></div>
 */
 static int CclSetUnitTypeName(lua_State *l)
 {
@@ -1368,9 +1434,17 @@ static int CclSetUnitTypeName(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Get unit type data.
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code>-- Get the amount of supply from Human Farms
+**		  supply = <strong>GetUnitTypeData</strong>("unit-farm","Supply")
+**		  print(supply)</code></div>
 */
 static int CclGetUnitTypeData(lua_State *l)
 {
@@ -1609,6 +1683,12 @@ void DefineVariableField(lua_State *l, CVariable *var, int lua_index)
 			var->Max = LuaToNumber(l, -1);
 		} else if (!strcmp(key, "Increase")) {
 			var->Increase = LuaToNumber(l, -1);
+		} else if (!strcmp(key, "IncreaseFrequency")) {
+			int value = LuaToNumber(l, -1);
+			var->IncreaseFrequency = value;
+			if (var->IncreaseFrequency != value) {
+				LuaError(l, "IncreaseFrequency out of range!");
+			}
 		} else if (!strcmp(key, "Enable")) {
 			var->Enable = LuaToBoolean(l, -1);
 		} else { // Error.
@@ -2010,6 +2090,15 @@ void SetMapStat(std::string ident, std::string variable_key, int value, std::str
 				type->MapDefaultStat.Variables[variable_index].Increase = value;
 				for (int player = 0; player < PlayerMax; ++player) {
 					type->Stats[player].Variables[variable_index].Increase = type->MapDefaultStat.Variables[variable_index].Increase;
+				}
+			} else if (variable_type == "IncreaseFrequency") {
+				type->MapDefaultStat.Variables[variable_index].IncreaseFrequency = value;
+				// TODO: error
+				// if (type->MapDefaultStat.Variables[variable_index].IncreaseFrequency != value) {
+				// 	LuaError(l, "%s.IncreaseFrequency out of range!" _C_ variable_key.c_str());
+				// }
+				for (int player = 0; player < PlayerMax; ++player) {
+					type->Stats[player].Variables[variable_index].IncreaseFrequency = type->MapDefaultStat.Variables[variable_index].IncreaseFrequency;
 				}
 			} else if (variable_type == "Enable") {
 				type->MapDefaultStat.Variables[variable_index].Enable = value;

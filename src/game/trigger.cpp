@@ -154,7 +154,15 @@ static CompareFunction GetCompareFunction(const char *op)
 }
 
 /**
+** <b>Description</b>
+**
 **  Return the number of units of a given unit-type and player at a location.
+**
+** Example:
+**
+** <div class="example"><code>-- Get the number of knights from player 1 from position 0,0 to 20,15
+**			num_units = <strong>GetNumUnitsAt</strong>(1,"unit-knight",{0,0},{20,15})
+**			print(num_units)</code></div>
 */
 static int CclGetNumUnitsAt(lua_State *l)
 {
@@ -197,7 +205,18 @@ static int CclGetNumUnitsAt(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Player has the quantity of unit-type near to unit-type.
+**
+** Example:
+**
+** <div class="example"><code>AddTrigger(
+**    function() return <strong>IfNearUnit</strong>(0,">",1,"unit-peasant","unit-town-hall") end,
+**    function()
+**        AddMessage("Player 0 has more than 1 peasant near the Town Hall")
+**        return false end
+**	)</code></div>
 */
 static int CclIfNearUnit(lua_State *l)
 {
@@ -259,7 +278,13 @@ static int CclIfNearUnit(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Player has the quantity of rescued unit-type near to unit-type.
+**
+** Example:
+**
+** <div class="example"><code><strong>IfRescuedNearUnit</strong>("this", ">=", 1, "unit-archer", "unit-circle-of-power")</code></div>
 */
 static int CclIfRescuedNearUnit(lua_State *l)
 {
@@ -321,6 +346,8 @@ static int CclIfRescuedNearUnit(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Returns the number of opponents of a given player.
 */
 int GetNumOpponents(int player)
@@ -423,7 +450,16 @@ void ActionStopTimer()
 }
 
 /**
+** <b>Description</b>
+**
 **  Add a trigger.
+**
+** Example:
+**
+** <div class="example"><code><strong>AddTrigger</strong>(
+**			function() return (GetPlayerData(1,"UnitTypesCount","unit-farm") >= 4) end,
+**			function() return ActionVictory() end
+**		)</code></div>
 */
 static int CclAddTrigger(lua_State *l)
 {

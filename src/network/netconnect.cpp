@@ -33,13 +33,14 @@
 // Includes
 //----------------------------------------------------------------------------
 
+#include "game.h"
+#include "online_service.h"
 #include "stratagus.h"
 
 #include "netconnect.h"
 
 #include "interface.h"
 #include "map.h"
-#include "master.h"
 #include "network.h"
 #include "parameters.h"
 #include "player.h"
@@ -47,6 +48,7 @@
 #include "settings.h"
 #include "version.h"
 #include "video.h"
+#include "mdns.h"
 
 //----------------------------------------------------------------------------
 // Declaration
@@ -87,10 +89,12 @@ int NetLocalPlayerNumber;              /// Player number of local client
 
 int NetPlayers;                         /// How many network players
 std::string NetworkMapName;             /// Name of the map received with ICMMap
-static int NoRandomPlacementMultiplayer = 0; /// Disable the random placement of players in muliplayer mode
+int NoRandomPlacementMultiplayer = 0; /// Disable the random placement of players in muliplayer mode
 
 CServerSetup ServerSetupState; // Server selection state for Multiplayer clients
 CServerSetup LocalSetupState;  // Local selection state for Multiplayer clients
+
+MDNS MdnsService;
 
 class CServer
 {
@@ -782,6 +786,8 @@ void CClient::Parse_Welcome(const unsigned char *buf)
 	CNetworkParameter::Instance.NetworkLag = msg.Lag;
 	CNetworkParameter::Instance.gameCyclesPerUpdate = msg.gameCyclesPerUpdate;
 
+	OnlineContextHandler->joinGame(msg.hosts[0].PlyName, "");
+
 	Hosts[0].Host = serverHost.getIp();
 	Hosts[0].Port = serverHost.getPort();
 	for (int i = 1; i < PlayerMax; ++i) {
@@ -1445,6 +1451,8 @@ void NetworkProcessServerRequest()
 		return;
 		// Game already started...
 	}
+
+	MdnsService.AnswerServerQueries();
 	Server.Update(FrameCounter);
 }
 
@@ -1706,6 +1714,10 @@ breakout:
 	}
 
 	DebugPrint("DONE: All configs acked - Now starting..\n");
+
+	// advertise online that we're in progress
+	OnlineContextHandler->startAdvertising(true);
+
 	// Give clients a quick-start kick..
 	const CInitMessage_Header message_go(MessageInit_FromServer, ICMGo);
 	for (int i = 0; i < HostsCount; ++i) {
@@ -1861,9 +1873,31 @@ static int CclNoRandomPlacementMultiplayer(lua_State *l)
 	return 0;
 }
 
+static int CclNetworkDiscoverServers(lua_State *l)
+{
+	LuaCheckArgs(l, 1);
+	bool start = LuaToBoolean(l, 1);
+
+	auto callback= [l](char* ip) {
+		auto i = lua_objlen(l, -1) + 1;
+		lua_pushnumber(l, i);
+		lua_pushstring(l, ip);
+		lua_settable(l, -3);
+	};
+
+	lua_newtable(l);
+	if (start) {
+		MdnsService.QueryServers(callback);
+	}
+
+	return 1;
+}
+
+
 void NetworkCclRegister()
 {
 	lua_register(Lua, "NoRandomPlacementMultiplayer", CclNoRandomPlacementMultiplayer);
+	lua_register(Lua, "NetworkDiscoverServers", CclNetworkDiscoverServers);
 }
 
 

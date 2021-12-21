@@ -70,6 +70,7 @@ extern lua_State *Lua;
 
 extern int LuaLoadFile(const std::string &file, const std::string &strArg = "");
 extern int LuaCall(int narg, int clear, bool exitOnError = true);
+extern int LuaCall(lua_State *L, int narg, int nresults, int base, bool exitOnError = true);
 
 #define LuaError(l, args) \
 	do { \
@@ -300,6 +301,7 @@ extern int CclInConfigFile;        /// True while config file parsing
 
 extern const char *LuaToString(lua_State *l, int narg);
 extern int LuaToNumber(lua_State *l, int narg);
+extern float LuaToFloat(lua_State *l, int narg);
 extern unsigned int LuaToUnsignedNumber(lua_State *l, int narg);
 extern bool LuaToBoolean(lua_State *l, int narg);
 

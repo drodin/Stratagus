@@ -33,10 +33,12 @@
 //  Includes
 //----------------------------------------------------------------------------
 
+#include "online_service.h"
 #include "stratagus.h"
 
 #include "actions.h"
 #include "editor.h"
+#include "fow.h"
 #include "game.h"
 #include "map.h"
 #include "missile.h"
@@ -53,6 +55,16 @@
 
 #include <guichan.h>
 void DrawGuichanWidgets();
+
+
+enum CallPeriod { cEvery2nd   = 0b1, 
+				  cEvery4th   = 0b11, 
+				  cEvery8th   = 0b111, 
+				  cEvery16th  = 0b1111, 
+				  cEvery32nd  = 0b11111, 
+				  cEvery64th  = 0b111111, 
+				  cEvery128th = 0b1111111,
+				  cEvery256th = 0b11111111 };
 
 //----------------------------------------------------------------------------
 // Variables
@@ -306,13 +318,17 @@ static void GameLogicLoop()
 	ParticleManager.update(); // handle particles
 	CheckMusicFinished(); // Check for next song
 
-	if (FastForwardCycle <= GameCycle || !(GameCycle & 0x3f)) {
+	if (FastForwardCycle <= GameCycle || !(GameCycle & CallPeriod::cEvery256th)) {
 		WaitEventsOneFrame();
 	}
 
 	if (!NetworkInSync) {
 		NetworkRecover(); // recover network
 	}
+
+#ifdef HAVE_COZ_PROFILER
+	COZ_PROGRESS_NAMED("GameLogicLoop")
+#endif
 }
 
 //#define REALVIDEO
@@ -347,17 +363,14 @@ static void DisplayLoop()
 		VideoSyncSpeed = 3000;
 	}
 #endif
-	if (FastForwardCycle <= GameCycle || GameCycle <= 10 || !(GameCycle & 0x3f)) {
+	if (FastForwardCycle <= GameCycle || GameCycle <= 10 || !(GameCycle & CallPeriod::cEvery256th)) {
 		//FIXME: this might be better placed somewhere at front of the
 		// program, as we now still have a game on the background and
 		// need to go through the game-menu or supply a map file
-		UpdateDisplay();
 
-		//
-		// If double-buffered mode, we will display the contains of
-		// VideoMemory. If direct mode this does nothing. In X11 it does
-		// XFlush
-		//
+		FogOfWar.Update(FastForwardCycle > GameCycle ? true : false);
+
+		UpdateDisplay();
 		RealizeVideoMemory();
 	}
 #ifdef REALVIDEO
@@ -396,6 +409,7 @@ void GameMainLoop()
 
 	SetVideoSync();
 	GameCursor = UI.Point.Cursor;
+	GameCycle = 0;
 	GameRunning = true;
 
 	CParticleManager::init();
@@ -413,6 +427,10 @@ void GameMainLoop()
 	//
 	// Game over
 	//
+	if (ThisPlayer && IsNetworkGame()) {
+		OnlineContextHandler->reportGameResult();
+	}
+
 	if (GameResult == GameExit) {
 		Exit(0);
 		return;
@@ -426,7 +444,7 @@ void GameMainLoop()
 	NetworkQuitGame();
 	EndReplayLog();
 
-	GameCycle = 0;//????
+	GameCycle = 0;
 	CParticleManager::exit();
 	FlagRevealMap = 0;
 	ReplayRevealMap = 0;

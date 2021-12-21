@@ -177,6 +177,7 @@ CUserInterface::CUserInterface() :
 
 	LifeBarBorder = true;
 	LifeBarYOffset = 0;
+	LifeBarPadding = 0;
 }
 
 /**
@@ -208,8 +209,25 @@ void InitUserInterface()
 	// Calculations
 	//
 	if (Map.Info.MapWidth) {
-		UI.MapArea.EndX = std::min<int>(UI.MapArea.EndX, UI.MapArea.X + Map.Info.MapWidth * PixelTileSize.x - 1);
-		UI.MapArea.EndY = std::min<int>(UI.MapArea.EndY, UI.MapArea.Y + Map.Info.MapHeight * PixelTileSize.y - 1);
+		/// Align UI map area if at least one of the map dimensions fits completely into it.
+		const uint16_t mapWidthInPixels = Map.Info.MapWidth * PixelTileSize.x;
+		const uint16_t mapHeightInPixels = Map.Info.MapHeight * PixelTileSize.y;
+		const uint16_t uiMapAreaWidth = UI.MapArea.EndX - UI.MapArea.X;
+		const uint16_t uiMapAreaHeight = UI.MapArea.EndY - UI.MapArea.Y;
+		uint16_t xAlign = 0;
+		uint16_t yAlign = 0;
+		
+		if (mapWidthInPixels < uiMapAreaWidth) {
+			xAlign = (uiMapAreaWidth - mapWidthInPixels) / 2;
+			UI.MapArea.X += xAlign;
+		}	
+		if (mapHeightInPixels < uiMapAreaHeight) {
+			yAlign = (uiMapAreaHeight - mapHeightInPixels) / 2;
+			UI.MapArea.Y += yAlign;
+		}
+
+		UI.MapArea.EndX = std::min<int>(UI.MapArea.EndX - xAlign, UI.MapArea.X + Map.Info.MapWidth * PixelTileSize.x - 1);
+		UI.MapArea.EndY = std::min<int>(UI.MapArea.EndY - yAlign, UI.MapArea.Y + Map.Info.MapHeight * PixelTileSize.y - 1);
 	}
 
 	UI.SelectedViewport = UI.Viewports;
@@ -341,7 +359,9 @@ void CleanUserInterface()
 
 	// Resource Icons
 	for (int i = 0; i <= FreeWorkersCount; ++i) {
-		CGraphic::Free(UI.Resources[i].G);
+		if (UI.Resources[i].G) {
+			CGraphic::Free(UI.Resources[i].G);
+		}
 	}
 
 	// Info Panel

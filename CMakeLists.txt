@@ -32,9 +32,9 @@
 # Stratagus major version
 set(STRATAGUS_MAJOR_VERSION 3)
 # Stratagus minor version (maximum 99)
-set(STRATAGUS_MINOR_VERSION 0)
+set(STRATAGUS_MINOR_VERSION 1)
 # Stratagus patch level (maximum 99)
-set(STRATAGUS_PATCH_LEVEL 0)
+set(STRATAGUS_PATCH_LEVEL 2)
 # Stratagus patch level 2
 set(STRATAGUS_PATCH_LEVEL2 0)
 #########################
@@ -76,9 +76,15 @@ cmake_minimum_required(VERSION 3.9.2)
 else()
 cmake_minimum_required(VERSION 2.6)
 endif()
+cmake_policy(VERSION 3.10..3.20.2)
 
 # useful for clangd LSP server
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+if(EXISTS ${WIN32_CMAKE_PREFIX_PATH})
+	list(APPEND CMAKE_PREFIX_PATH "${WIN32_CMAKE_PREFIX_PATH}")
+	message("Using prefix path ${CMAKE_PREFIX_PATH}")
+endif()
 
 # C++ standard
 set(CMAKE_CXX_STANDARD 17)
@@ -220,6 +226,9 @@ set(guichan_SRCS
 source_group(guichan FILES ${guichan_SRCS})
 
 set(map_SRCS
+	src/map/fov.cpp
+	src/map/fow.cpp
+	src/map/fow_utils.cpp
 	src/map/map.cpp
 	src/map/map_draw.cpp
 	src/map/map_fog.cpp
@@ -262,10 +271,11 @@ set(network_SRCS
 	src/network/commands.cpp
 	src/network/net_lowlevel.cpp
 	src/network/net_message.cpp
-	src/network/master.cpp
 	src/network/netconnect.cpp
 	src/network/network.cpp
 	src/network/netsockets.cpp
+        src/network/online_service.cpp
+        src/network/mdns.cpp
 )
 source_group(network FILES ${network_SRCS})
 
@@ -395,7 +405,6 @@ set(tolua_FILES
 	src/tolua/font.pkg
 	src/tolua/game.pkg
 	src/tolua/map.pkg
-	src/tolua/master.pkg
 	src/tolua/minimap.pkg
 	src/tolua/network.pkg
 	src/tolua/particle.pkg
@@ -556,7 +565,11 @@ set(stratagus_generic_HDRS
 	src/include/cursor.h
 	src/include/depend.h
 	src/include/editor.h
+	src/include/online_service.h
 	src/include/font.h
+	src/include/fov.h
+	src/include/fow.h
+	src/include/fow_utils.h
 	src/include/game.h
 	src/include/icons.h
 	src/include/interface.h
@@ -564,7 +577,6 @@ set(stratagus_generic_HDRS
 	src/include/iolib.h
 	src/include/luacallback.h
 	src/include/map.h
-	src/include/master.h
 	src/include/menus.h
 	src/include/minimap.h
 	src/include/missile.h
@@ -697,11 +709,17 @@ find_package(SDL2_mixer REQUIRED)
 find_package(SDL2_image REQUIRED)
 find_package(Tolua++ REQUIRED)
 find_package(ZLIB REQUIRED)
-find_package(OpenMP)
 endif()
+find_package(OpenMP)
 
 if(WIN32)
 	find_package(MakeNSIS)
+endif()
+
+if(ENABLE_DOC)
+find_package(Doxygen
+             REQUIRED dot
+             OPTIONAL_COMPONENTS mscgen dia)
 endif()
 
 if(HUNTER_ENABLED)
@@ -728,20 +746,8 @@ find_package(OggVorbis)
 find_package(Theora)
 endif()
 
-if(NOT ANDROID)
-find_package(X11)
-
-if(HUNTER_ENABLED)
-hunter_add_package(sqlite3)
-find_package(sqlite3 CONFIG)
-set(SQLITE_LIBRARIES sqlite3::sqlite3)
-set(SQLITE_FOUND true)
-else()
-find_package(Sqlite)
-endif()
 find_package(Doxygen)
 find_package(SelfPackers)
-endif()
 
 include(CheckTypeSize)
 include(CheckFunctionExists)
@@ -773,8 +779,6 @@ option(WITH_MNG "Compile Stratagus with MNG image library" ON)
 option(WITH_OGGVORBIS "Compile Stratagus with OGG/Vorbis sound library" ON)
 option(WITH_THEORA "Compile Stratagus with Theroa video library" ON)
 option(WITH_STACKTRACE "Compile Stratagus with StackTrace library" ON)
-
-option(WITH_X11 "Compile Stratagus with X11 clipboard pasting support" ON)
 
 option(ENABLE_DOC "Generate Stratagus source code documentation with Doxygen" OFF)
 option(ENABLE_DEV "Install Stratagus game development headers files" OFF)
@@ -847,16 +851,11 @@ if(WITH_STACKTRACE AND STACKTRACE_FOUND)
 	set(stratagus_LIBS ${stratagus_LIBS} ${STACKTRACE_LIBRARY})
 endif()
 
-if(WITH_X11 AND X11_FOUND)
-	add_definitions(-DUSE_X11)
-	include_directories(${X11_INCLUDE_DIR})
-	set(stratagus_LIBS ${stratagus_LIBS} ${X11_X11_LIB})
-endif()
-
 # Platform definitions
 
 if(WIN32)
-	add_definitions(-DUSE_WIN32)
+	# define winXP SP2 as minimum for everything
+	add_definitions(-DUSE_WIN32 -DNTDDI_VERSION=0x05010200 -D_WIN32_WINNT=0x0501 -DWINVER=0x0501)
 	set(stratagus_SRCS ${stratagus_SRCS} ${win32_SRCS})
 	set(stratagus_LIBS ${stratagus_LIBS} dsound winmm ws2_32 dbghelp)
 endif()
@@ -908,8 +907,14 @@ elseif(ANDROID)
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Profile")
-	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pg")
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pg")
+        find_package(coz-profiler)
+        if(COZ-PROFILER_FOUND)
+		add_definitions(-DHAVE_COZ_PROFILER)
+		include_directories(${COZ_INCLUDE_DIRS})
+		set(stratagus_LIBS ${stratagus_LIBS} ${COZ_LIBRARIES} -ldl)
+	endif()
+	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pg -g -ggdb")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pg -g -ggdb")
 endif()
 # TODO: Add support for other compilers
 
@@ -924,8 +929,10 @@ check_function_exists("getopt" HAVE_GETOPT)
 # so rather check if we have strcat_s in string.h file
 check_symbol_exists("strcat_s" "string.h" HAVE_STRCATS)
 
+if(NOT APPLE)
 if(HAVE_ERRNOT)
 	add_definitions(-DHAVE_ERRNOT)
+endif()
 endif()
 
 if(HAVE_STRCPYS)
@@ -954,6 +961,12 @@ endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 	add_definitions(-DDEBUG)
+	if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+		if (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+		elseif (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "GNU")
+			set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -glldb")
+		endif()
+	endif()
 endif()
 
 if(ENABLE_STRIP)
@@ -1000,6 +1013,11 @@ endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Profile")
 	message("Profiling mode: Yes (Disable by param -DCMAKE_BUILD_TYPE=Release)")
+	if(COZ-PROFILER_FOUND)
+		message("Coz profiler enabled build: Yes")
+	else()
+		message("Coz profiler enabled build: No")
+	endif()
 else()
 	message("Profiling mode: No (Enable by param -DCMAKE_BUILD_TYPE=Profile)")
 endif()
@@ -1093,7 +1111,6 @@ log_package("Mng" "MNG")
 log_package("Ogg/Vorbis" "OGGVORBIS")
 log_package("StackTrace" "STACKTRACE")
 log_package("Theora" "THEORA")
-log_package("X11" "X11")
 
 message("==================================")
 
@@ -1118,6 +1135,8 @@ else()
 	# Generate header file version-generated.h without git revision
 	# When cross compiling we cannot build host binary, so create file at cmake time
 	if(NOT "${STRATAGUS_VERSION}" STREQUAL "${STRATAGUS_VERSION_CACHED}" OR NOT EXISTS ${CMAKE_CURRENT_BINARY_DIR}/version-generated.h)
+		string(TIMESTAMP STRATAGUS_LAST_MODIFIED_DATE "%m/%d/%Y" UTC)
+		string(TIMESTAMP STRATAGUS_LAST_MODIFIED_TIME "%H:%M:%S" UTC)
 		file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/version-generated.h
 			"/* ${STRATAGUS_MAJOR_VERSION} ${STRATAGUS_MINOR_VERSION} ${STRATAGUS_PATCH_LEVEL} ${STRATAGUS_PATCH_LEVEL2} -1 */\n"
 			"/* This file is autogenerated, do not modify it! */\n"
@@ -1125,6 +1144,8 @@ else()
 			"#define StratagusMinorVersion ${STRATAGUS_MINOR_VERSION}\n"
 			"#define StratagusPatchLevel ${STRATAGUS_PATCH_LEVEL}\n"
 			"#define StratagusPatchLevel2 ${STRATAGUS_PATCH_LEVEL2}\n"
+			"#define StratagusLastModifiedDate \"${STRATAGUS_LAST_MODIFIED_DATE}\"\n"
+			"#define StratagusLastModifiedTime \"${STRATAGUS_LAST_MODIFIED_TIME}\"\n"
 		)
 		set(STRATAGUS_VERSION_CACHED ${STRATAGUS_VERSION} CACHE INTERNAL "" FORCE)
 	endif()
@@ -1149,6 +1170,9 @@ else ()
    add_executable(stratagus ${stratagus_SRCS} ${stratagus_HDRS})
 endif ()
 endif()
+if(NOT CMAKE_CROSSCOMPILING)
+add_dependencies(stratagus version-generated.h)
+endif()
 if(MINGW)
 	add_definitions(-DWIN32)
 	set(CMAKE_RC_FLAGS "-I ${CMAKE_CURRENT_SOURCE_DIR}/src/include -I ${CMAKE_CURRENT_BINARY_DIR}")
@@ -1160,6 +1184,7 @@ if(OpenMP_CXX_FOUND)
 	target_compile_options(stratagus PRIVATE ${OpenMP_CXX_FLAGS})
 	target_link_libraries(stratagus OpenMP::OpenMP_CXX)
 endif()
+
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 if(ANDROID)
@@ -1182,52 +1207,11 @@ endif()
 
 if(APPLE OR WIN32)
 if(HUNTER_ENABLED)
-	set_target_properties(stratagus PROPERTIES LINK_FLAGS "${LINK_FLAGS}")
+  set_target_properties(stratagus PROPERTIES LINK_FLAGS "${LINK_FLAGS}")
 else()
-	set_target_properties(stratagus PROPERTIES LINK_FLAGS "${LINK_FLAGS} -lSDL2main")
+  set_target_properties(stratagus PROPERTIES LINK_FLAGS "${LINK_FLAGS} -lSDL2main")
 endif()
-	set(CMAKE_EXE_LINKER_FLAGS_PROFILE "${CMAKE_EXE_LINKER_FLAGS}")
-endif()
-
-########### next target ###############
-
-set(metaserver_SRCS
-	metaserver/cmd.cpp
-	metaserver/db.cpp
-	metaserver/games.cpp
-	metaserver/main.cpp
-	metaserver/netdriver.cpp
-	src/network/net_lowlevel.cpp
-)
-
-set(metaserver_HDRS
-	metaserver/cmd.h
-	metaserver/db.h
-	metaserver/games.h
-	metaserver/netdriver.h
-)
-
-source_group(metaserver FILES ${metaserver_SRCS} ${metaserver_HDRS})
-
-if(SQLITE_FOUND)
-	add_executable(metaserver ${metaserver_SRCS} ${metaserver_HDRS})
-	if(MINGW)
-		add_definitions(-DWIN32)
-		target_link_libraries(metaserver iphlpapi mingw32)
-	endif()
-	target_link_libraries(metaserver ${SDL2_LIBRARY} ${SQLITE_LIBRARIES})
-
-	if(WIN32)
-		target_link_libraries(metaserver winmm ws2_32)
-	endif()
-
-	if(WIN32 AND MINGW)
-		target_link_libraries(metaserver dxguid)
-	endif()
-
-	if(WIN32 AND MINGW AND ENABLE_STATIC)
-		set_target_properties(metaserver PROPERTIES LINK_FLAGS "${LINK_FLAGS} -static-libgcc -static-libstdc++")
-	endif()
+  set(CMAKE_EXE_LINKER_FLAGS_PROFILE "${CMAKE_EXE_LINKER_FLAGS}")
 endif()
 
 ########### next target ###############
@@ -1266,8 +1250,6 @@ set(doxygen_FILES
 	doc/Doxyfile-header.html
 	${stratagus_SRCS}
 	${stratagus_HDRS}
-	${metaserver_SRCS}
-	${metaserver_HDRS}
 	${gameheaders_HDRS}
 	${png2stratagus_SRCS}
 )
@@ -1302,9 +1284,6 @@ endmacro()
 if(ENABLE_UPX AND SELF_PACKER_FOR_EXECUTABLE)
 	self_packer(stratagus)
 	self_packer(png2stratagus)
-	if(SQLITE_FOUND)
-		self_packer(metaserver)
-	endif()
 endif()
 
 ########### next target ###############
@@ -1329,10 +1308,6 @@ endif()
 install(TARGETS stratagus DESTINATION ${GAMEDIR})
 install(TARGETS png2stratagus DESTINATION ${BINDIR})
 
-if(SQLITE_FOUND)
-	install(TARGETS metaserver DESTINATION ${BINDIR} RENAME stratagus-metaserver)
-endif()
-
 if(ENABLE_DOC AND DOXYGEN_FOUND)
 	install(FILES doc/stratagus.6 DESTINATION ${MANDIR})
 	install(FILES
@@ -1344,7 +1319,6 @@ if(ENABLE_DOC AND DOXYGEN_FOUND)
 		doc/index.html
 		doc/install.html
 		doc/media.html
-		doc/metaserver_protocol.txt
 		doc/README-SDL.txt
 		DESTINATION share/doc/stratagus
 	)

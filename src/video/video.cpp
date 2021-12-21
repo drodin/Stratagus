@@ -267,25 +267,31 @@ void CVideo::ClearScreen()
 bool CVideo::ResizeScreen(int w, int h)
 {
 	if (!(SDL_GetWindowFlags(TheWindow) & SDL_WINDOW_FULLSCREEN_DESKTOP)
-		&& Video.Width == Video.WindowWidth
-		&& Video.Height == Video.WindowHeight) {
-		// if initially window was the same size as res, keep it that way
-		SDL_SetWindowSize(TheWindow, w, h);
+		&& Width == WindowWidth
+		&& Height == WindowHeight) {
+		// if initially window was the same size as res, keep it that way, unless we've resized
+		int ww, wh;
+		SDL_GetWindowSize(TheWindow, &ww, &wh);
+		if (ww == Width && wh == Height) {
+			WindowWidth = w;
+			WindowHeight = h;
+			SDL_SetWindowSize(TheWindow, w, h);
+		}
 	}
 	Width = w;
 	Height = h;
 
-	SDL_RenderSetLogicalSize(TheRenderer, w, h);
+	SDL_RenderSetLogicalSize(TheRenderer, w, h * VerticalPixelSize);
 
 	// new surface
 	if (TheScreen) {
 		SDL_FreeSurface(TheScreen);
 	}
 	TheScreen = SDL_CreateRGBSurface(0, w, h, 32,
-									 0x00ff0000,
-									 0x0000ff00,
-									 0x000000ff,
-									 0); // 0xff000000);
+									 RMASK,
+									 GMASK,
+									 BMASK,
+									 0); // AMASK);
 	Assert(SDL_MUSTLOCK(TheScreen) == 0);
 
 	// new texture

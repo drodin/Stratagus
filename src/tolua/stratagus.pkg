@@ -73,7 +73,6 @@ $pfile "editor.pkg"
 $pfile "font.pkg"
 $pfile "game.pkg"
 $pfile "map.pkg"
-$pfile "master.pkg"
 $pfile "minimap.pkg"
 $pfile "network.pkg"
 $pfile "particle.pkg"
@@ -101,3 +100,4 @@ void Exit(int err);
 $extern std::string CliMapName;
 extern std::string CliMapName;
 extern std::string StratagusLibPath;
+extern bool IsDebugEnabled;

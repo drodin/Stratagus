@@ -169,10 +169,10 @@ public:
 	bool Contains(const PixelPos &screenPos) const;
 
 public:
-	int X;                          /// Screen pixel left corner x coordinate
-	int Y;                          /// Screen pixel upper corner y coordinate
-	int EndX;                       /// Screen pixel right x coordinate
-	int EndY;                       /// Screen pixel bottom y coordinate
+	int X;                          /// Screen pixel left corner x coordinate adjusted for current map size
+	int Y;                          /// Screen pixel upper corner y coordinate adjusted for current map size 
+	int EndX;                       /// Screen pixel right x coordinate adjusted for current map size
+	int EndY;                       /// Screen pixel bottom y coordinate adjusted for current map size
 	int ScrollPaddingLeft;          /// Scrollable area past the left of map
 	int ScrollPaddingRight;         /// Scrollable area past the right of map
 	int ScrollPaddingTop;           /// Scrollable area past the top of map
@@ -439,7 +439,8 @@ public:
         std::vector<std::string> LifeBarColorNames;
         std::vector<int> LifeBarPercents;
         std::vector<IntColor> LifeBarColorsInt;
-        int LifeBarYOffset;
+        int8_t LifeBarYOffset;
+		int8_t LifeBarPadding;
         bool LifeBarBorder;
 
 	// Completed bar
@@ -480,6 +481,12 @@ public:
 
 	// Game timer
 	CUITimer Timer;                     /// game timer
+
+	// Offsets used by editor
+	Vec2i EditorSettingsAreaTopLeft;
+	Vec2i EditorSettingsAreaBottomRight;
+	Vec2i EditorButtonAreaTopLeft;
+	Vec2i EditorButtonAreaBottomRight;
 
 	// Offsets for 640x480 center used by menus
 	int Offset640X;                     /// Offset for 640x480 X position

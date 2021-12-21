@@ -70,9 +70,15 @@ CPreference Preference;
 ----------------------------------------------------------------------------*/
 
 /**
+** <b>Description</b>
+**
 **  Set speed of key scroll
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code><strong>SetKeyScrollSpeed</strong>(4)</code></div>
 */
 static int CclSetKeyScrollSpeed(lua_State *l)
 {
@@ -82,9 +88,16 @@ static int CclSetKeyScrollSpeed(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Get speed of key scroll
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code>scroll_speed = <strong>GetKeyScrollSpeed</strong>()
+**		print(scroll_speed)</code></div>
 */
 static int CclGetKeyScrollSpeed(lua_State *l)
 {
@@ -94,9 +107,15 @@ static int CclGetKeyScrollSpeed(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Set speed of mouse scroll
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code><strong>SetMouseScrollSpeed</strong>(2)</code></div>
 */
 static int CclSetMouseScrollSpeed(lua_State *l)
 {
@@ -106,9 +125,16 @@ static int CclSetMouseScrollSpeed(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Get speed of mouse scroll
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code>scroll_speed = <strong>GetMouseScrollSpeed</strong>()
+**		print(scroll_speed)</code></div>
 */
 static int CclGetMouseScrollSpeed(lua_State *l)
 {
@@ -203,9 +229,15 @@ static int CclSetDamageMissile(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Set the video resolution.
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code><strong>SetVideoResolution</strong>(640,480)</code></div>
 */
 static int CclSetVideoResolution(lua_State *l)
 {
@@ -221,9 +253,16 @@ static int CclSetVideoResolution(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Get the video resolution.
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code>width,height = <strong>GetVideoResolution</strong>()
+**		print("Resolution  is " .. width .. "x" .. height)</code></div>
 */
 static int CclGetVideoResolution(lua_State *l)
 {
@@ -234,9 +273,18 @@ static int CclGetVideoResolution(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Set the video fullscreen mode.
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code>-- Full Screen mode enabled
+**		<strong>SetVideoFullScreen</strong>(true)
+**		-- Full Screen mode disabled
+**		<strong>SetVideoFullScreen</strong>(false)</code></div>
 */
 static int CclSetVideoFullScreen(lua_State *l)
 {
@@ -251,15 +299,52 @@ static int CclSetVideoFullScreen(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Get the video fullscreen mode.
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code>fullscreenmode = <strong>GetVideoFullScreen</strong>()
+**		print(fullscreenmode)</code></div>
 */
 static int CclGetVideoFullScreen(lua_State *l)
 {
 	LuaCheckArgs(l, 0);
 	lua_pushboolean(l, Video.FullScreen);
 	return 1;
+}
+
+/**
+** Request a specific initial window size
+*/
+static int CclSetWindowSize(lua_State *l)
+{
+	LuaCheckArgs(l, 2);
+	if (CclInConfigFile) {
+		// May have been set from the command line
+		if (!Video.WindowWidth || !Video.WindowHeight) {
+			Video.WindowWidth = LuaToNumber(l, 1);
+			Video.WindowHeight = LuaToNumber(l, 2);
+		}
+	}
+	return 0;
+}
+
+/**
+** For games with non-square pixels, this sets the scale of vertical pixels versus horizontal pixels.
+** e.g., if your assets are 320x200, but you render at 320x240, this is 1.2.
+*/
+static int CclSetVerticalPixelSize(lua_State *l)
+{
+	LuaCheckArgs(l, 1);
+	if (CclInConfigFile) {
+		luaL_checktype(l, 1, LUA_TNUMBER);
+		Video.VerticalPixelSize = static_cast<double>(lua_tonumber(l, 1));
+	}
+	return 0;
 }
 
 static int CclShowTitleScreens(lua_State *l)
@@ -654,9 +739,18 @@ static int CclRightButtonMoves(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Enable/disable the fancy buildings.
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code>-- Enable fancy buildings
+**		  <strong>SetFancyBuildings</strong>(true)
+**		  -- Disable fancy buildings
+**		  <strong>SetFancyBuildings</strong>(false)</code></div>
 */
 static int CclSetFancyBuildings(lua_State *l)
 {
@@ -1002,6 +1096,8 @@ static int CclDefineButton(lua_State *l)
 				ba.Allowed = ButtonCheckResearch;
 			} else if (!strcmp(value, "check-single-research")) {
 				ba.Allowed = ButtonCheckSingleResearch;
+			} else if (!strcmp(value, "check-debug")) {
+				ba.Allowed = ButtonCheckDebug;
 			} else {
 				LuaError(l, "Unsupported action: %s" _C_ value);
 			}
@@ -1113,7 +1209,13 @@ static int CclSetSelectionStyle(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Add a new message.
+**
+** Example:
+**
+** <div class="example"><code><strong>AddMessage</strong>("Hello World!")</code></div>
 **
 **  @param l  Lua state.
 */
@@ -1137,9 +1239,15 @@ static int CclSetGroupKeys(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 ** Set basic map caracteristics.
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code><strong>PresentMap</strong>("Map description", 1, 128, 128, 17)</code></div>
 */
 static int CclPresentMap(lua_State *l)
 {
@@ -1155,9 +1263,16 @@ static int CclPresentMap(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 ** Define the lua file that will build the map
 **
 **  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code>-- Load map setup from file
+**		<strong>DefineMapSetup</strong>("Setup.sms")</code></div>
 */
 static int CclDefineMapSetup(lua_State *l)
 {
@@ -1191,6 +1306,8 @@ void UserInterfaceCclRegister()
 	lua_register(Lua, "GetVideoResolution", CclGetVideoResolution);
 	lua_register(Lua, "SetVideoFullScreen", CclSetVideoFullScreen);
 	lua_register(Lua, "GetVideoFullScreen", CclGetVideoFullScreen);
+	lua_register(Lua, "SetWindowSize", CclSetWindowSize);
+	lua_register(Lua, "SetVerticalPixelSize", CclSetVerticalPixelSize);
 
 	lua_register(Lua, "SetTitleScreens", CclSetTitleScreens);
 	lua_register(Lua, "ShowTitleScreens", CclShowTitleScreens);

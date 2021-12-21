@@ -41,30 +41,32 @@ void copy_dir(const char* source_folder, const char* target_folder);
 #define WIN32 1
 #endif
 
+#ifndef _CRT_SECURE_NO_DEPRECATE
+#define _CRT_SECURE_NO_DEPRECATE
+#endif
+#ifndef _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+
 #ifdef WIN32
+
+// set everything to winxp sp2 compatiblity
+#define NTDDI_VERSION 0x05010200
+#define _WIN32_WINNT 0x0501
+#define WINVER 0x0501
+
 #ifndef PATH_MAX
 #define PATH_MAX MAX_PATH
 #endif
 #include <Shlwapi.h>
+#include <Shlobj.h>
 #pragma comment(lib, "comdlg32.lib")
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "Shlwapi.lib")
 #include <direct.h>
-//#define inline __inline
-#define chdir _chdir
-#define getcwd _getcwd
-#ifndef __MINGW32__
-#define spawnvp _spawnvp
-#define stat _stat
-#endif
-#define strdup _strdup
 #define mkdir(f, m) _mkdir(f)
 // PathRemoveFileSpec on a drive (e.g. when extracting from CD) will leave the trailing \... remove that
 #define parentdir(x) PathRemoveFileSpec(x); if (x[strlen(x) - 1] == '\\') x[strlen(x) - 1] = '\0'
-#ifndef __MINGW32__
-#define execvp _execvp
-#endif
-#define unlink(x) _unlink(x)
 #else
 #if defined(USE_MAC)
 #define parentdir(x) strcpy(x, dirname(x))
@@ -74,9 +76,6 @@ void copy_dir(const char* source_folder, const char* target_folder);
 #endif
 
 #ifdef WIN32
-#ifndef WINVER
-#define WINVER 0x0501
-#endif
 #include <windows.h>
 #include <wincon.h>
 #include <process.h>
@@ -96,11 +95,28 @@ void copy_dir(const char* source_folder, const char* target_folder);
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <string>
+#include <vector>
+#include <iostream>
+#include <sstream>
+#include <istream>
+#if __has_include(<filesystem>)
+    #include <filesystem>
+    namespace fs = std::filesystem;
+#elif __has_include(<experimental/filesystem>)
+    #include <experimental/filesystem> 
+    namespace fs = std::experimental::filesystem;
+#else
+    error "Missing the <filesystem> header."
+#endif
+
 #include "stratagus-tinyfiledialogs.h"
 
+#ifdef WIN32
+#define BUFF_SIZE MAX_PATH
+#else
 #define BUFF_SIZE 4096
-char dst_root[BUFF_SIZE];
-char src_root[BUFF_SIZE];
+#endif
 
 void error(const char* title, const char* text) {
 	tinyfd_messageBox(title, text, "ok", "error", 1);
@@ -108,107 +124,201 @@ void error(const char* title, const char* text) {
 }
 
 void mkdir_p(const char* path) {
-	int error = 0;	
-	printf("mkdir %s\n", path);
-	if (mkdir(path, 0777)) {
-		error = errno;
-		if (error == ENOENT) {	
-			char *sep = strrchr((char*)path, '/');
-			if (sep == NULL) {
-				sep = strrchr((char*)path, SLASH[0]);
-			}
-			if (sep != NULL) {
-				*sep = '\0';
-				if (strlen(path) > 0) {
-					// will be null if the we reach the first /
-					mkdir_p(path);
-				}
-				*sep = SLASH[0];
-				mkdir(path, 0777);
-			}
-		} else if (error != EEXIST) {
-			if (mkdir(path, 0777)) {
-				printf("Error while trying to create '%s'\n", path);
-			}
+	fs::create_directories(path);
+}
+
+void copy_dir(fs::path source_folder, fs::path target_folder) {
+	if (fs::exists(target_folder)) {
+		if (fs::equivalent(source_folder, target_folder)) {
+			return;
 		}
+		// first delete the target_folder, if it exists, to ensure clean slate
+		fs::remove_all(target_folder);
+	} else {
+		// make the parentdir of the target folder
+		fs::create_directories(target_folder.parent_path());
 	}
+	// now copy the new folder in its place
+	fs::copy(source_folder, target_folder, fs::copy_options::recursive | fs::copy_options::overwrite_existing);
 }
 
 #ifdef WIN32
-#include <wchar.h>
-#include <string>
-void copy_dir(const char* source_folder, const char* target_folder)
-{
-	// make the parentdir of the target folder
-	char* ptarget = strdup(target_folder);
-	parentdir(ptarget);
-	mkdir_p(ptarget);
-	// convert source and target folder strings to windows wide strings
-	wchar_t *wsource_folder = new wchar_t[strlen(source_folder) + 1];
-	size_t convertedChars = 0;
-	mbstowcs_s(&convertedChars, wsource_folder, strlen(source_folder) + 1, source_folder, _TRUNCATE);
-	wchar_t *wtarget_folder = new wchar_t[strlen(target_folder) + 1];
-	mbstowcs_s(&convertedChars, wtarget_folder, strlen(target_folder) + 1, target_folder, _TRUNCATE);
-	WCHAR sf[MAX_PATH + 1];
-	WCHAR tf[MAX_PATH + 1];
-	wcscpy_s(sf, MAX_PATH, wsource_folder);
-	wcscpy_s(tf, MAX_PATH, wtarget_folder);
-	// ensure we have double-null terminated strings like Windows docs demand
-	sf[lstrlenW(sf) + 1] = 0;
-	tf[lstrlenW(tf) + 1] = 0;
-	// first delete the target_folder, if it exists
-	SHFILEOPSTRUCTW deleteS = { 0 };
-	deleteS.wFunc = FO_DELETE;
-	deleteS.pTo = tf;
-	deleteS.pFrom = tf;
-	deleteS.fFlags = FOF_SILENT | FOF_NOCONFIRMMKDIR | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_NO_UI;
-	SHFileOperationW(&deleteS);
-	// now copy the new folder in its place
-	SHFILEOPSTRUCTW s = { 0 };
-	s.wFunc = FO_COPY;
-	s.pTo = tf;
-	s.pFrom = sf;
-	s.fFlags = FOF_SILENT | FOF_NOCONFIRMMKDIR | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_NO_UI;
-	SHFileOperationW(&s);
-}
-#else
-int copy_file(const char* src_path, const struct stat* sb, int typeflag) {
-	char dst_path[BUFF_SIZE];
-	printf("%s to %s\n", src_path, dst_root);
-	strcpy(dst_path, dst_root);
-	strcat(dst_path, src_path + strlen(src_root));
-	switch(typeflag) {
-	case FTW_D:
-		mkdir_p(dst_path);
-		break;
-	case FTW_F:
-		mkdir_p(parentdir(strdup(dst_path)));
-		FILE* in = fopen(src_path, "rb");
-		FILE* out = fopen(dst_path, "wb");
-		char buf[4096];
-		int c = 0;
-		if (!in) {
-			error("Extraction error", "Could not open source folder for reading.");
-		}
-		if (!out) {
-			error("Extraction error", "Could not open data folder for writing.");
-		}
-		while ((c = fread(buf, sizeof(char), 4096, in))) {
-			fwrite(buf, sizeof(char), c, out);
-		}
-		fclose(in);
-		fclose(out);
-		break;
+char* GetExtractionLogPath(const char* game_name, char* data_path) {
+	static char *marker = (char*)calloc(MAX_PATH, sizeof(char));
+	if (marker[0] != '\0') {
+		return marker;
 	}
-	return 0;
+	char logname[MAX_PATH];
+	strcpy(logname, game_name);
+	strcat(logname, "-extraction.log");
+	if (PathCombine(marker, data_path, "portable-install")) {
+		if (PathFileExists(marker)) {
+			PathCombine(marker, data_path, logname);
+			return marker;
+		}
+	}
+	SHGetFolderPathA(NULL, CSIDL_PERSONAL|CSIDL_FLAG_CREATE, NULL, 0, marker);
+	PathAppend(marker, "Stratagus");
+	mkdir_p(marker);
+	PathAppend(marker, logname);
+	return marker;
+}
+#endif
+
+#ifdef WIN32
+// quoting logic taken from "Everyone quotes command line arguments the wrong way" by Daniel Colascione
+/*++
+    
+Routine Description:
+    
+    This routine appends the given argument to a command line such
+    that CommandLineToArgvW will return the argument string unchanged.
+    Arguments in a command line should be separated by spaces; this
+    function does not add these spaces.
+    
+Arguments:
+    
+    Argument - Supplies the argument to encode.
+
+    CommandLine - Supplies the command line to which we append the encoded argument string.
+
+    Force - Supplies an indication of whether we should quote
+            the argument even if it does not contain any characters that would
+            ordinarily require quoting.
+    
+Return Value:
+    
+    None.
+    
+Environment:
+    
+    Arbitrary.
+    
+--*/
+void ArgvQuote(const std::wstring& Argument, std::wstring& CommandLine, bool Force) {
+    //
+    // Unless we're told otherwise, don't quote unless we actually
+    // need to do so --- hopefully avoid problems if programs won't
+    // parse quotes properly
+    //
+    if (Force == false && Argument.empty () == false && Argument.find_first_of(L" \t\n\v\"") == Argument.npos) {
+        CommandLine.append(Argument);
+    } else {
+        CommandLine.push_back(L'"');
+
+        for (auto It = Argument.begin(); ; ++It) {
+            unsigned NumberBackslashes = 0;
+
+            while (It != Argument.end() && *It == L'\\') {
+                ++It;
+                ++NumberBackslashes;
+            }
+
+            if (It == Argument.end()) {
+                //
+                // Escape all backslashes, but let the terminating
+                // double quotation mark we add below be interpreted
+                // as a metacharacter.
+                //
+                CommandLine.append(NumberBackslashes * 2, L'\\');
+                break;
+            } else if (*It == L'"') {
+                //
+                // Escape all backslashes and the following
+                // double quotation mark.
+                //
+                CommandLine.append(NumberBackslashes * 2 + 1, L'\\');
+                CommandLine.push_back(*It);
+            } else {  
+                //
+                // Backslashes aren't special here.
+                //
+                CommandLine.append(NumberBackslashes, L'\\');
+                CommandLine.push_back(*It);
+            }
+        }
+        CommandLine.push_back(L'"');
+    }
 }
 
-void copy_dir(const char* src_path, const char* dst_path) {
-	printf("Copying %s to %s\n", src_path, dst_path);
-	mkdir_p(parentdir(strdup(dst_path)));
-	strcpy(dst_root, dst_path);
-	strcpy(src_root, src_path);
-	ftw(src_path, copy_file, 20);
+int runCommand(std::wstring& file, std::vector<std::wstring> argv, bool echo = false, std::wstring *outputCommandline = NULL) {
+	std::wstring cmdline;
+	std::wstring executable;
+
+	ArgvQuote(file, executable, false);
+
+	for (size_t i = 0; i < argv.size(); i++) {
+		std::wstring arg = argv[i];
+		ArgvQuote(arg, cmdline, false);
+		if (i + 1 < argv.size()) {
+			cmdline.push_back(L' ');
+		}
+	}
+	std::wstring cmdcmdline;
+	for (auto c : cmdline) {
+		if (c == L'(' || c == L')' || c == L'%' || c == L'!' || c == L'^' || c == L'"' || c == L'<' || c == L'>' || c == L'&' || c == L'|') {
+			cmdcmdline.push_back(L'^');
+		}
+		cmdcmdline.push_back(c);
+	}
+
+	if (argv.size() > 0) {
+		cmdcmdline = std::wstring(L"@") + executable + std::wstring(L" ") + cmdcmdline;
+	} else {
+		cmdcmdline = std::wstring(L"@") + executable;
+	}
+
+	if (outputCommandline != NULL) {
+		outputCommandline->append(cmdcmdline);
+	}
+	if (echo) {
+		std::wcout << executable << L' ' << cmdline << L'\n';
+		std::wcout << cmdcmdline << L'\n';
+	}
+	_flushall();
+	int code = _wsystem(cmdcmdline.c_str());
+	if (code == -1) {
+		std::wcout << _wcserror(errno) << L'\n';
+	}
+	return code;
+}
+#else
+#include <sys/types.h>
+#include <unistd.h>
+#include <sys/wait.h>
+
+int runCommand(const char *file, char *const argv[], bool echo = false, std::string *outputCommandline = NULL) {
+	pid_t pid = fork();
+
+	if (echo || outputCommandline) {
+		std::string commandline = file;
+		for (int i = 0; ; i++) {
+			if (argv[i] == NULL) {
+				break;
+			}
+			commandline += " ";
+			commandline += argv[i];
+		}
+		if (echo) {
+			std::cout << commandline << std::endl;
+		}
+		if (outputCommandline) {
+			outputCommandline->append(commandline);
+		}
+	}
+
+	if (pid == 0) {
+		// child
+		exit(execvp(file, argv));
+	} else {
+		int status;
+		waitpid(pid, &status, 0);
+		if (WIFEXITED(status)) {
+			return WEXITSTATUS(status);
+		} else {
+			return -1;
+		}
+	}
 }
 #endif
 

@@ -1,3 +1,4 @@
+.cache
 debian/*.debhelper
 debian/*.log
 debian/*.substvars
@@ -27,6 +28,10 @@ obj-*
 ./tolua.cpp
 ./tolua.cpp.rule
 build
-.vscode
+.vscode/*
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/scripts
 .clangd
 compile_commands.json
+pytorchenv

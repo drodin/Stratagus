@@ -538,6 +538,19 @@ void CUnit::Release(bool final)
 	}
 	Orders.clear();
 
+	if (SavedOrder != NULL) {
+		delete SavedOrder;
+		SavedOrder = NULL;
+	}
+	if (NewOrder != NULL) {
+		delete NewOrder;
+		NewOrder = NULL;
+	}
+	if (CriticalOrder != NULL) {
+		delete CriticalOrder;
+		CriticalOrder = NULL;
+	}
+
 	// Remove the unit from the global units table.
 	UnitManager.ReleaseUnit(this);
 }
@@ -783,17 +796,17 @@ CUnit *MakeUnit(const CUnitType &type, CPlayer *player)
 **  @param width   Width of the first container of unit.
 **  @param height  Height of the first container of unit.
 **  @param f       Function to (un)mark for normal vision.
-**  @param f2        Function to (un)mark for cloaking vision.
+**  @param f2      Function to (un)mark for cloaking vision.
 */
 static void MapMarkUnitSightRec(const CUnit &unit, const Vec2i &pos, int width, int height,
 								MapMarkerFunc *f, MapMarkerFunc *f2)
 {
 	Assert(f);
-	MapSight(*unit.Player, pos, width, height,
+	MapSight(*unit.Player, unit, pos, width, height,
 			 unit.Container ? unit.Container->CurrentSightRange : unit.CurrentSightRange, f);
 
 	if (unit.Type && unit.Type->BoolFlag[DETECTCLOAK_INDEX].value && f2) {
-		MapSight(*unit.Player, pos, width, height,
+		MapSight(*unit.Player, unit, pos, width, height,
 				 unit.Container ? unit.Container->CurrentSightRange : unit.CurrentSightRange, f2);
 	}
 
@@ -838,11 +851,11 @@ void MapMarkUnitSight(CUnit &unit)
 	// Never mark radar, except if the top unit, and unit is usable
 	if (&unit == container && !unit.IsUnusable()) {
 		if (unit.Stats->Variables[RADAR_INDEX].Value) {
-			MapMarkRadar(*unit.Player, unit.tilePos, unit.Type->TileWidth,
+			MapMarkRadar(*unit.Player, unit, unit.tilePos, unit.Type->TileWidth,
 						 unit.Type->TileHeight, unit.Stats->Variables[RADAR_INDEX].Value);
 		}
 		if (unit.Stats->Variables[RADARJAMMER_INDEX].Value) {
-			MapMarkRadarJammer(*unit.Player, unit.tilePos, unit.Type->TileWidth,
+			MapMarkRadarJammer(*unit.Player, unit, unit.tilePos, unit.Type->TileWidth,
 							   unit.Type->TileHeight, unit.Stats->Variables[RADARJAMMER_INDEX].Value);
 		}
 	}
@@ -868,12 +881,65 @@ void MapUnmarkUnitSight(CUnit &unit)
 	// Never mark radar, except if the top unit?
 	if (&unit == container && !unit.IsUnusable()) {
 		if (unit.Stats->Variables[RADAR_INDEX].Value) {
-			MapUnmarkRadar(*unit.Player, unit.tilePos, unit.Type->TileWidth,
+			MapUnmarkRadar(*unit.Player, unit, unit.tilePos, unit.Type->TileWidth,
 						   unit.Type->TileHeight, unit.Stats->Variables[RADAR_INDEX].Value);
 		}
 		if (unit.Stats->Variables[RADARJAMMER_INDEX].Value) {
-			MapUnmarkRadarJammer(*unit.Player, unit.tilePos, unit.Type->TileWidth,
+			MapUnmarkRadarJammer(*unit.Player, unit, unit.tilePos, unit.Type->TileWidth,
 								 unit.Type->TileHeight, unit.Stats->Variables[RADARJAMMER_INDEX].Value);
+		}
+	}
+}
+
+/**
+**  Mark/Unmark on vision table the Sight for the units 
+**  around the tilePos
+**  (and units inside for transporter)
+**
+**  @param tilePos    Position of the tile around which to update units vision for
+**  @param resetSight Unmark sight if True, Mark otherwise
+**
+**  @see MapUnmarkUnitSight/MapMarkUnitSight
+*/
+void MapRefreshUnitsSight(const Vec2i &tilePos, const bool resetSight /*= false*/)
+{
+	const CMapField *mapField = Map.Field(tilePos);
+	for (const CPlayer &player : Players) {
+		if(!mapField->playerInfo.Visible[player.Index]) {
+			continue;
+		}
+		for (CUnit *const unit : player.GetUnits()) {
+			if (!unit->Destroyed) {
+				const auto dist = unit->Container ? unit->Container->MapDistanceTo(tilePos) 
+												  : unit->MapDistanceTo(tilePos);
+				if (dist <= unit->CurrentSightRange) {
+					if (resetSight) {
+						MapUnmarkUnitSight(*unit);
+					} else {
+						MapMarkUnitSight(*unit);
+					}
+				}
+			}
+		}
+	}
+}
+
+/**
+**  Mark/Unmark on vision table the Sight for all units on the map
+**
+**  @param resetSight Unmark sight if True, Mark otherwise
+**
+**  @see MapUnmarkUnitSight/MapMarkUnitSight
+*/
+void MapRefreshUnitsSight(const bool resetSight /*= false*/)
+{
+	for (CUnit *const unit : UnitManager.GetUnits()) {
+		if (!unit->Destroyed) {
+			if (resetSight) {
+				MapUnmarkUnitSight(*unit);
+			} else {
+				MapMarkUnitSight(*unit);
+			}
 		}
 	}
 }
@@ -1662,14 +1728,12 @@ void UnitCountSeen(CUnit &unit)
 */
 bool CUnit::IsVisible(const CPlayer &player) const
 {
-	if (VisCount[player.Index]) {
+	if (this->VisCount[player.Index]) {
 		return true;
 	}
-	for (const int p : player.GetSharedVision()) {
-		if (player.HasMutualSharedVisionWith(Players[p])) {
-			if (VisCount[p]) {
-				return true;
-			}
+	for (const uint8_t p : player.GetSharedVision()) {
+		if (this->VisCount[p]) {
+			return true;
 		}
 	}
 
@@ -2373,13 +2437,14 @@ void LetUnitDie(CUnit &unit, bool suicide)
 
 		MakeMissile(*type->Explosion.Missile, pixelPos, pixelPos);
 	}
-	if (type->DeathExplosion) {
+	if (type->OnDeath) {
 		const PixelPos pixelPos = unit.GetMapPixelPosCenter();
 
-		type->DeathExplosion->pushPreamble();
-		type->DeathExplosion->pushInteger(pixelPos.x);
-		type->DeathExplosion->pushInteger(pixelPos.y);
-		type->DeathExplosion->run();
+		type->OnDeath->pushPreamble();
+		type->OnDeath->pushInteger(UnitNumber(unit));
+		type->OnDeath->pushInteger(pixelPos.x);
+		type->OnDeath->pushInteger(pixelPos.y);
+		type->OnDeath->run();
 	}
 	if (suicide) {
 		const PixelPos pixelPos = unit.GetMapPixelPosCenter();
@@ -2566,11 +2631,12 @@ int TargetPriorityCalculate(const CUnit *const attacker, const CUnit *const dest
 
 	// is Threat?
 	/// Check if target attacks us (or has us as goal for any action)
-	if (dest->CurrentOrder()->HasGoal() && dest->CurrentOrder()->GetGoal() == attacker) {
+	if (dest->CurrentOrder()->HasGoal() && dest->CurrentOrder()->GetGoal() == attacker 
+		&& InAttackRange(*dest, *attacker)) {
 		priority |= AT_ATTACKED_BY_FACTOR;
 	}
-	// FIXME: Add alwaysThreat property to CUnitType
-	// Unit can attack back.
+	
+	/// Unit can attack back.
 	if (CanTarget(dtype, type) || dtype.BoolFlag[ALWAYSTHREAT_INDEX].value) {
 		priority |= AT_THREAT_FACTOR;
 	}
@@ -2628,8 +2694,7 @@ bool InReactRange(const CUnit &unit, const CUnit &target)
 }
 
 /**
-**  Returns true, if target is in attack range of the unit and there is no obstacles between them (when inside caves)
-**  @todo: Do we have to check range from unit.Container pos if unit is bunkered or in transport?
+**  Returns true, if target is in attack range of the unit and there are no obstacles between them (when inside caves)
 **
 **  @param unit    Unit to check for.
 **  @param target  Checked target.
@@ -2641,7 +2706,8 @@ bool InAttackRange(const CUnit &unit, const CUnit &target)
 	Assert(&target != NULL);
 	const int range 	= unit.Stats->Variables[ATTACKRANGE_INDEX].Max;
 	const int minRange 	= unit.Type->MinAttackRange;
-	const int distance 	= unit.MapDistanceTo(target);
+	const int distance 	= unit.Container ? unit.Container->MapDistanceTo(target) 
+										 : unit.MapDistanceTo(target);
 
 	return (minRange <= distance && distance <= range)
 		   && (!GameSettings.Inside
@@ -2649,8 +2715,7 @@ bool InAttackRange(const CUnit &unit, const CUnit &target)
 }
 
 /**
-**  Returns true, if tile is in attack range of the unit and there is no obstacles between them (when inside caves)
-**  @todo: Do we have to check range from unit.Container pos if unit is bunkered or in transport?
+**  Returns true, if tile is in attack range of the unit and there are no obstacles between them (when inside caves)
 **
 **  @param unit    Unit to check for.
 **  @param pos     Checked position.
@@ -2662,7 +2727,8 @@ bool InAttackRange(const CUnit &unit, const Vec2i &tilePos)
 	Assert(Map.Info.IsPointOnMap(tilePos));
 	const int range 	= unit.Stats->Variables[ATTACKRANGE_INDEX].Max;
 	const int minRange 	= unit.Type->MinAttackRange;
-	const int distance 	= unit.MapDistanceTo(tilePos);
+	const int distance 	= unit.Container ? unit.Container->MapDistanceTo(tilePos)
+										 : unit.MapDistanceTo(tilePos);
 
 	return (minRange <= distance && distance <= range)
 		   && (!GameSettings.Inside
@@ -2674,7 +2740,7 @@ bool InAttackRange(const CUnit &unit, const Vec2i &tilePos)
 **  Returns end position of randomly generated vector form srcPos in direction to/from dirUnit
 **	
 **  @param srcPos   Vector origin
-**  @param dirUnit   Position to determine vector direction
+**  @param dirUnit  Position to determine vector direction
 **	@param dirFrom	Direction of src-dir. True if "from" dirPos, false if "to" dirPos
 **  @param minRange Minimal range to new position
 **	@param devRadius Diviation radius
@@ -3299,46 +3365,6 @@ bool CUnit::IsAllied(const CUnit &unit) const
 }
 
 /**
-**  Check if unit shares vision with the player
-**
-**  @param x  Player to check
-*/
-bool CUnit::HasSharedVisionWith(const CPlayer &player) const
-{
-	return this->Player->HasSharedVisionWith(player);
-}
-
-/**
-**  Check if the unit shares vision with the unit
-**
-**  @param x  Unit to check
-*/
-bool CUnit::HasSharedVisionWith(const CUnit &unit) const
-{
-	return this->HasSharedVisionWith(*unit.Player);
-}
-
-/**
-**  Check if both players share vision
-**
-**  @param x  Player to check
-*/
-bool CUnit::HasMutualSharedVisionWith(const CPlayer &player) const
-{
-	return this->Player->HasMutualSharedVisionWith(player);
-}
-
-/**
-**  Check if both units share vision
-**
-**  @param x  Unit to check
-*/
-bool CUnit::HasMutualSharedVisionWith(const CUnit &unit) const
-{
-	return this->HasMutualSharedVisionWith(*unit.Player);
-}
-
-/**
 **  Check if the player is on the same team
 **
 **  @param x  Player to check
@@ -3422,18 +3448,18 @@ void CleanUnits()
 	std::vector<CUnit *> units(UnitManager.begin(), UnitManager.end());
 
 	for (std::vector<CUnit *>::iterator it = units.begin(); it != units.end(); ++it) {
-		CUnit &unit = **it;
+		CUnit *unit = *it;
 
-		if (&unit == NULL) {
+		if (unit == NULL) {
 			continue;
 		}
-		if (!unit.Destroyed) {
-			if (!unit.Removed) {
-				unit.Remove(NULL);
+		if (!unit->Destroyed) {
+			if (!unit->Removed) {
+				unit->Remove(NULL);
 			}
-			UnitClearOrders(unit);
+			UnitClearOrders(*unit);
 		}
-		unit.Release(true);
+		unit->Release(true);
 	}
 
 	UnitManager.Init();

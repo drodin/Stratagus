@@ -35,6 +35,7 @@
 ----------------------------------------------------------------------------*/
 
 #include "stratagus.h"
+#include "online_service.h"
 
 #ifdef DEBUG
 #include <signal.h>
@@ -102,9 +103,14 @@ double FrameTicks;     /// Frame length in ms
 
 const EventCallback *Callbacks;
 
-static bool CanUseShaders = false;
-
 bool IsSDLWindowVisible = true;
+
+/// Just a counter to cache window data on in other places when the size changes
+uint8_t SizeChangeCounter = 0;
+
+static bool dummyRenderer = false;
+
+uint32_t SDL_CUSTOM_KEY_UP;
 
 /*----------------------------------------------------------------------------
 --  Sync
@@ -252,6 +258,60 @@ static void InitKey2Str()
 	Key2Str[SDLK_UNDO] = "undo";
 }
 
+#ifdef USE_WIN32
+typedef enum PROCESS_DPI_AWARENESS {
+    PROCESS_DPI_UNAWARE = 0,
+    PROCESS_SYSTEM_DPI_AWARE = 1,
+    PROCESS_PER_MONITOR_DPI_AWARE = 2
+} PROCESS_DPI_AWARENESS;
+
+static void setDpiAware() {
+	void* userDLL;
+	BOOL(WINAPI *SetProcessDPIAware)(void); // Vista and later
+	void* shcoreDLL;
+	HRESULT(WINAPI *SetProcessDpiAwareness)(PROCESS_DPI_AWARENESS dpiAwareness); // Windows 8.1 and later
+
+	userDLL = SDL_LoadObject("USER32.DLL");
+	if (userDLL) {
+		SetProcessDPIAware = (BOOL(WINAPI *)(void)) SDL_LoadFunction(userDLL, "SetProcessDPIAware");
+	} else {
+		SetProcessDPIAware = NULL;
+	}
+
+	shcoreDLL = SDL_LoadObject("SHCORE.DLL");
+	if (shcoreDLL) {
+		SetProcessDpiAwareness = (HRESULT(WINAPI *)(PROCESS_DPI_AWARENESS)) SDL_LoadFunction(shcoreDLL, "SetProcessDpiAwareness");
+	} else {
+		SetProcessDpiAwareness = NULL;
+	}
+
+	if (SetProcessDpiAwareness) {
+		/* Try Windows 8.1+ version */
+		HRESULT result = SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
+		DebugPrint("called SetProcessDpiAwareness: %d" _C_ (result == S_OK) ? 1 : 0);
+	} else {
+		if (SetProcessDPIAware) {
+			/* Try Vista - Windows 8 version.
+			   This has a constant scale factor for all monitors.
+			*/
+			BOOL success = SetProcessDPIAware();
+			DebugPrint("called SetProcessDPIAware: %d" _C_ (int)success);
+		}
+		// In any case, on these old Windows versions we have to do a bit of
+		// compatibility hacking. Windows 7 and below don't play well with
+		// opengl rendering and (for some odd reason) fullscreen.
+		fprintf(stdout, "\n!!! Detected old Windows version - forcing software renderer and windowed mode !!!\n\n");
+		SDL_SetHintWithPriority(SDL_HINT_RENDER_DRIVER, "software", SDL_HINT_OVERRIDE);
+		VideoForceFullScreen = 1;
+		Video.FullScreen = 0;
+	}
+
+}
+#else
+static void setDpiAware() {
+}
+#endif
+
 /**
 **  Initialize the video part for SDL.
 */
@@ -268,11 +328,14 @@ void InitVideoSdl()
 		SDL_setenv("SDL_MOUSE_RELATIVE", "0", 1);
 		int res = SDL_Init(
 					  SDL_INIT_AUDIO | SDL_INIT_VIDEO |
-					  SDL_INIT_TIMER);
+					  SDL_INIT_EVENTS | SDL_INIT_TIMER);
 		if (res < 0) {
 			fprintf(stderr, "Couldn't initialize SDL: %s\n", SDL_GetError());
 			exit(1);
 		}
+
+		SDL_CUSTOM_KEY_UP = SDL_RegisterEvents(1);
+		SDL_StartTextInput();
 
 		// Clean up on exit
 		atexit(SDL_Quit);
@@ -286,6 +349,8 @@ void InitVideoSdl()
 	}
 
 	// Initialize the display
+
+	setDpiAware();
 
 	// Sam said: better for windows.
 	/* SDL_HWSURFACE|SDL_HWPALETTE | */
@@ -331,13 +396,16 @@ void InitVideoSdl()
 #endif
 	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
 	if (!TheRenderer) {
-		TheRenderer = SDL_CreateRenderer(TheWindow, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_TARGETTEXTURE);
+		TheRenderer = SDL_CreateRenderer(TheWindow, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_TARGETTEXTURE | SDL_RENDERER_PRESENTVSYNC);
 	}
 	SDL_RendererInfo rendererInfo;
 	SDL_GetRendererInfo(TheRenderer, &rendererInfo);
+	printf("[Renderer] %s\n", rendererInfo.name);
+	if (strlen(rendererInfo.name) == 0) {
+		dummyRenderer = true;
+	}
 	if(!strncmp(rendererInfo.name, "opengl", 6)) {
-		puts("[Renderer] Got OpenGL");
-		CanUseShaders = LoadShaderExtensions();
+		LoadShaderExtensions();
 	}
 	SDL_SetRenderDrawColor(TheRenderer, 0, 0, 0, 255);
 	Video.ResizeScreen(Video.Width, Video.Height);
@@ -486,8 +554,8 @@ void Invalidate()
 	NumRects = 1;
 }
 
-// Switch to the shader currently stored in Video.ShaderIndex without changing it
-void SwitchToShader() {
+static bool isTextInput(int key) {
+	return key >= 32 && key <= 128 && !(KeyModifiers & (ModifierAlt | ModifierControl | ModifierSuper));
 }
 
 /**
@@ -498,6 +566,8 @@ void SwitchToShader() {
 */
 static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
 {
+	unsigned int keysym = 0;
+
 	switch (event.type) {
 #ifdef ANDROID
 		case SDL_FINGERDOWN:
@@ -534,8 +604,43 @@ static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
 			InputMouseMove(callbacks, SDL_GetTicks(), event.motion.x, event.motion.y);
 			break;
 
+		case SDL_MOUSEWHEEL:
+			{   // similar to Squeak, we fabricate Ctrl+Alt+PageUp/Down for wheel events
+				SDL_Keycode key = event.wheel.y > 0 ? SDLK_PAGEUP : SDLK_PAGEDOWN;
+				SDL_Event event;
+				SDL_zero(event);
+				event.type = SDL_KEYDOWN;
+				event.key.keysym.sym = SDLK_LCTRL;
+				SDL_PushEvent(&event);
+				SDL_zero(event);
+				event.type = SDL_KEYDOWN;
+				event.key.keysym.sym = SDLK_LALT;
+				SDL_PushEvent(&event);
+				SDL_zero(event);
+				event.type = SDL_KEYDOWN;
+				event.key.keysym.sym = key;
+				SDL_PushEvent(&event);
+				SDL_zero(event);
+				event.type = SDL_KEYUP;
+				event.key.keysym.sym = SDLK_PAGEUP;
+				SDL_PushEvent(&event);
+				SDL_zero(event);
+				event.type = SDL_KEYUP;
+				event.key.keysym.sym = SDLK_LALT;
+				SDL_PushEvent(&event);
+				SDL_zero(event);
+				event.type = SDL_KEYUP;
+				event.key.keysym.sym = SDLK_LCTRL;
+				SDL_PushEvent(&event);
+			}
+			break;
+
 		case SDL_WINDOWEVENT:
 			switch (event.window.event) {
+				case SDL_WINDOWEVENT_SIZE_CHANGED:
+				SizeChangeCounter++;
+				break;
+
 				case SDL_WINDOWEVENT_ENTER:
 				case SDL_WINDOWEVENT_LEAVE:
 				{
@@ -573,14 +678,46 @@ static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
 			}
 			break;
 
+		case SDL_TEXTINPUT:
+			{
+				char* text = event.text.text;
+				if (isTextInput((uint8_t)text[0])) {
+					// we only accept US-ascii chars for now
+					char lastKey = text[0];
+					InputKeyButtonPress(callbacks, SDL_GetTicks(), lastKey, lastKey);
+					// fabricate a keyup event for later
+					SDL_Event event;
+					SDL_zero(event);
+					event.type = SDL_USEREVENT;
+					event.user.code = lastKey;
+					event.user.data1 = reinterpret_cast<void*>(SDL_CUSTOM_KEY_UP);
+					SDL_PushEvent(&event);
+				}
+			}
+			break;
+
+		case SDL_USEREVENT:
+			{
+				Assert(reinterpret_cast<uintptr_t>(event.user.data1) == SDL_CUSTOM_KEY_UP);
+				char key = static_cast<char>(event.user.code);
+				InputKeyButtonRelease(callbacks, SDL_GetTicks(), key, key);
+			}
+			break;
+
 		case SDL_KEYDOWN:
-			InputKeyButtonPress(callbacks, SDL_GetTicks(),
-								event.key.keysym.sym, event.key.keysym.sym < 128 ? event.key.keysym.sym : 0);
+			keysym = event.key.keysym.sym;
+			if (!isTextInput(keysym)) {
+				// only report non-printing keys here, the characters will be reported with the textinput event
+				InputKeyButtonPress(callbacks, SDL_GetTicks(), keysym, keysym < 128 ? keysym : 0);
+			}
 			break;
 
 		case SDL_KEYUP:
-			InputKeyButtonRelease(callbacks, SDL_GetTicks(),
-								  event.key.keysym.sym, event.key.keysym.sym < 128 ? event.key.keysym.sym : 0);
+			keysym = event.key.keysym.sym;
+			if (!isTextInput(keysym)) {
+				// only report non-printing keys here, the characters will be reported with the textinput event
+				InputKeyButtonRelease(callbacks, SDL_GetTicks(), keysym, keysym < 128 ? keysym : 0);
+			}
 			break;
 
 		case SDL_QUIT:
@@ -623,6 +760,10 @@ void WaitEventsOneFrame()
 {
 	++FrameCounter;
 
+	if (dummyRenderer) {
+		return;
+	}
+
 	Uint32 ticks = SDL_GetTicks();
 	if (ticks > NextFrameTicks) { // We are too slow :(
 		++SlowFrameCounter;
@@ -660,6 +801,10 @@ void WaitEventsOneFrame()
 				GetCallbacks()->NetworkEvent();
 			}
 		}
+
+		// Online session
+		OnlineContextHandler->doOneStep();
+
 		// No more input and time for frame over: return
 		if (!i && s <= 0 && interrupts) {
 			break;
@@ -680,12 +825,13 @@ static Uint32 LastTick = 0;
 
 void RealizeVideoMemory()
 {
+	if (dummyRenderer) {
+		return;
+	}
 	if (NumRects) {
 		//SDL_UpdateWindowSurfaceRects(TheWindow, Rects, NumRects);
 		SDL_UpdateTexture(TheTexture, NULL, TheScreen->pixels, TheScreen->pitch);
-		if (CanUseShaders) {
-			RenderWithShader(TheRenderer, TheWindow, TheTexture);
-		} else {
+		if (!RenderWithShader(TheRenderer, TheWindow, TheTexture)) {
 			SDL_RenderClear(TheRenderer);
 			//for (int i = 0; i < NumRects; i++)
 			//    SDL_UpdateTexture(TheTexture, &Rects[i], TheScreen->pixels, TheScreen->pitch);

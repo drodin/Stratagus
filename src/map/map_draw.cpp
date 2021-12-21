@@ -34,6 +34,7 @@
 #include "viewport.h"
 
 #include "font.h"
+#include "fow.h"
 #include "map.h"
 #include "missile.h"
 #include "particle.h"
@@ -43,6 +44,9 @@
 #include "unittype.h"
 #include "ui.h"
 #include "video.h"
+
+
+bool CViewport::ShowGrid = false;
 
 
 CViewport::CViewport() : MapWidth(0), MapHeight(0), Unit(NULL)
@@ -55,6 +59,7 @@ CViewport::CViewport() : MapWidth(0), MapHeight(0), Unit(NULL)
 
 CViewport::~CViewport()
 {
+	this->Clean();
 }
 
 bool CViewport::Contains(const PixelPos &screenPos) const
@@ -236,6 +241,20 @@ void CViewport::Center(const PixelPos &mapPixelPos)
 ** (in pixels)
 ** </PRE>
 */
+/// Draw the map grid for dubug purposes
+void CViewport::DrawMapGridInViewport() const
+{
+	int x0 = this->TopLeftPos.x - this->Offset.x;
+	int y0 = this->TopLeftPos.y - this->Offset.y;
+
+	for (int x = ((x0 % PixelTileSize.x != 0) ? x0 + PixelTileSize.x : x0) ; x <= this->BottomRightPos.x ; x += PixelTileSize.x) {
+		Video.DrawLineClip(ColorDarkGray, {x, this->TopLeftPos.y - this->Offset.y}, {x, this->BottomRightPos.y});
+	}
+	for(int y = ((y0 % PixelTileSize.y != 0) ? y0 + PixelTileSize.y : y0) ; y <= this->BottomRightPos.y ; y += PixelTileSize.y) {
+		Video.DrawLineClip(ColorDarkGray, {this->TopLeftPos.x - this->Offset.x, y}, {this->BottomRightPos.x, y});
+	}
+}
+
 void CViewport::DrawMapBackgroundInViewport() const
 {
 	int ex = this->BottomRightPos.x;
@@ -272,6 +291,9 @@ void CViewport::DrawMapBackgroundInViewport() const
 		}
 		sy += Map.Info.MapWidth;
 		dy += PixelTileSize.y;
+	}
+	if (CViewport::isGridEnabled()) {
+		DrawMapGridInViewport();
 	}
 }
 
@@ -322,7 +344,7 @@ static void ShowUnitName(const CViewport &vp, PixelPos pos, CUnit *unit, bool hi
 /**
 **  Draw a map viewport.
 */
-void CViewport::Draw() const
+void CViewport::Draw()
 {
 	PushClipping();
 	this->SetClipping();
@@ -419,7 +441,8 @@ void CViewport::Draw() const
 		}
 		ParticleManager.endDraw();
 	}
-
+	
+	/// Draw Fog of War
 	this->DrawMapFogOfWar();
 
 	// If there was a click missile, draw it again here above the fog

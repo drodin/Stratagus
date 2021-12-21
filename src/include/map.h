@@ -175,19 +175,24 @@ public:
 		return Field(pos.x, pos.y);
 	}
 
+	bool isInitialized() const
+	{
+		return this->isMapInitialized;
+	}
+
 	/// Alocate and initialise map table.
 	void Create();
 	/// Build tables for map
 	void Init();
+	/// Build tables for fog of war
+	void InitLegacyFogOfWar();
 	/// Clean the map
-	void Clean();
+	void Clean(const bool isHardClean = false);
 	/// Cleanup memory for fog of war tables
-	void CleanFogOfWar();
+	void CleanLegacyFogOfWar(const bool isHardClean = false);
 
-	/// Remove wood from the map.
-	void ClearWoodTile(const Vec2i &pos);
-	/// Remove rock from the map.
-	void ClearRockTile(const Vec2i &pos);
+	/// Remove wood, rock or wall from the map and update nearby unit's vision if needed
+	void ClearTile(const Vec2i &tilePos);
 
 	/// convert map pixelpos coordonates into tilepos
 	Vec2i MapPixelPosToTilePos(const PixelPos &mapPos) const;
@@ -244,8 +249,10 @@ public:
 	}
 
 private:
-	/// Build tables for fog of war
-	void InitFogOfWar();
+	/// Remove wood from the map.
+	void ClearWoodTile(const Vec2i &pos);
+	/// Remove rock from the map.
+	void ClearRockTile(const Vec2i &pos);
 
 	/// Correct the surrounding seen wood fields
 	void FixNeighbors(unsigned short type, int seen, const Vec2i &pos);
@@ -256,15 +263,16 @@ private:
 	void RegenerateForestTile(const Vec2i &pos);
 
 public:
-	CMapField *Fields;              /// fields on map
-	bool NoFogOfWar;           /// fog of war disabled
+	CMapField *Fields;              	/// fields on map
+	bool NoFogOfWar;           			/// fog of war disabled
 
-	CTileset *Tileset;          /// tileset data
-	std::string TileModelsFileName; /// lua filename that loads all tilemodels
-	CGraphic *TileGraphic;     /// graphic for all the tiles
-	static CGraphic *FogGraphic;      /// graphic for fog of war
+	CTileset *Tileset;          		/// tileset data
+	std::string TileModelsFileName; 	/// lua filename that loads all tilemodels
+	CGraphic *TileGraphic;     			/// graphic for all the tiles
+	static CGraphic *LegacyFogGraphic;  /// graphic for legacy fog of war
+	bool isMapInitialized { false };
 
-	CMapInfo Info;             /// descriptive information
+	CMapInfo Info;             			/// descriptive information
 };
 
 
@@ -281,6 +289,8 @@ extern int FogOfWarOpacity;
 extern CColor FogOfWarColor;
 /// Forest regeneration
 extern int ForestRegeneration;
+/// Forest regeneration
+extern int ForestRegenerationFrequency;
 /// Flag must reveal the map
 extern int FlagRevealMap;
 /// Flag must reveal map when in replay
@@ -289,16 +299,11 @@ extern int ReplayRevealMap;
 /*----------------------------------------------------------------------------
 --  Functions
 ----------------------------------------------------------------------------*/
-#define MARKER_ON_INDEX
 //
 // in map_fog.c
 //
 /// Function to (un)mark the vision table.
-#ifndef MARKER_ON_INDEX
-typedef void MapMarkerFunc(const CPlayer &player, const Vec2i &pos);
-#else
 typedef void MapMarkerFunc(const CPlayer &player, const unsigned int index);
-#endif
 
 /// Filter map flags through fog
 extern int MapFogFilterFlags(CPlayer &player, const Vec2i &pos, int mask);
@@ -313,7 +318,7 @@ extern MapMarkerFunc MapMarkTileDetectCloak;
 extern MapMarkerFunc MapUnmarkTileDetectCloak;
 
 /// Mark sight changes
-extern void MapSight(const CPlayer &player, const Vec2i &pos, int w,
+extern void MapSight(const CPlayer &player, const CUnit &unit, const Vec2i &pos, int w,
 					 int h, int range, MapMarkerFunc *marker);
 /// Update fog of war
 extern void UpdateFogOfWarChange();
@@ -363,7 +368,8 @@ extern void MapCclRegister();
 // mixed sources
 //
 /// Save a stratagus map (smp format)
-extern int SaveStratagusMap(const std::string &filename, CMap &map, int writeTerrain);
+extern int SaveStratagusMap(const std::string &filename, CMap &map, int writeTerrain,
+							Vec2i newSize = {0, 0}, Vec2i offset = {0, 0});
 
 
 /// Load map presentation
@@ -380,11 +386,16 @@ extern bool UnitCanBeAt(const CUnit &unit, const Vec2i &pos);
 extern void PreprocessMap();
 
 // in unit.c
+//typedef void MapClearField(const Vec2i &tilePos);
 
 /// Mark on vision table the Sight of the unit.
 void MapMarkUnitSight(CUnit &unit);
 /// Unmark on vision table the Sight of the unit.
 void MapUnmarkUnitSight(CUnit &unit);
+///Mark/Unmark on vision table the Sight for the units around the tilePos
+void MapRefreshUnitsSight(const Vec2i &tilePos, const bool resetSight = false);
+///Mark/Unmark on vision table the Sight for all units on the map
+void MapRefreshUnitsSight(const bool resetSight = false);
 
 /*----------------------------------------------------------------------------
 --  Defines
@@ -397,22 +408,22 @@ inline bool CanMoveToMask(const Vec2i &pos, int mask)
 }
 
 /// Handle Marking and Unmarking of radar vision
-inline void MapMarkRadar(const CPlayer &player, const Vec2i &pos, int w, int h, int range)
+inline void MapMarkRadar(const CPlayer &player, const CUnit &unit, const Vec2i &pos, int w, int h, int range)
 {
-	MapSight(player, pos, w, h, range, MapMarkTileRadar);
+	MapSight(player, unit, pos, w, h, range, MapMarkTileRadar);
 }
-inline void MapUnmarkRadar(const CPlayer &player, const Vec2i &pos, int w, int h, int range)
+inline void MapUnmarkRadar(const CPlayer &player, const CUnit &unit, const Vec2i &pos, int w, int h, int range)
 {
-	MapSight(player, pos, w, h, range, MapUnmarkTileRadar);
+	MapSight(player, unit, pos, w, h, range, MapUnmarkTileRadar);
 }
 /// Handle Marking and Unmarking of radar vision
-inline void MapMarkRadarJammer(const CPlayer &player, const Vec2i &pos, int w, int h, int range)
+inline void MapMarkRadarJammer(const CPlayer &player, const CUnit &unit, const Vec2i &pos, int w, int h, int range)
 {
-	MapSight(player, pos, w, h, range, MapMarkTileRadarJammer);
+	MapSight(player, unit, pos, w, h, range, MapMarkTileRadarJammer);
 }
-inline void MapUnmarkRadarJammer(const CPlayer &player, const Vec2i &pos, int w, int h, int range)
+inline void MapUnmarkRadarJammer(const CPlayer &player, const CUnit &unit, const Vec2i &pos, int w, int h, int range)
 {
-	MapSight(player, pos, w, h, range, MapUnmarkTileRadarJammer);
+	MapSight(player, unit, pos, w, h, range, MapUnmarkTileRadarJammer);
 }
 
 //@}

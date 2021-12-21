@@ -109,6 +109,7 @@ public:
 
 extern CEditor Editor;
 
+extern bool TileToolNoFixup;
 extern char TileToolRandom;
 
 /*----------------------------------------------------------------------------
@@ -125,6 +126,7 @@ extern void EditorUpdateDisplay();
 
 /// Save a map from editor
 extern int EditorSaveMap(const std::string &file);
+extern int EditorSaveMapWithResize(const std::string &file, Vec2i sz = {0, 0}, Vec2i off = {0, 0});
 
 /// Register ccl features
 extern void EditorCclRegister();

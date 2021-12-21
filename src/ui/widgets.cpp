@@ -1425,13 +1425,13 @@ void ImageListBox::setSelected(int selected)
 			mSelected = selected;
 		}
 
-		Widget *par = getParent();
-		if (par == NULL)
-		{
-			return;
+		Widget *par = this;
+		while (par != NULL) {
+			par->setDirty(true);
+			par = par->getParent();
 		}
 
-		gcn::ScrollArea* scrollArea = dynamic_cast<gcn::ScrollArea *>(par);
+		gcn::ScrollArea* scrollArea = dynamic_cast<gcn::ScrollArea *>(getParent());
 		if (scrollArea != NULL)
 		{
 			gcn::Rectangle scroll;
@@ -2432,8 +2432,11 @@ void MenuScreen::stop(int result, bool stopAll)
 {
 	if (!this->runLoop) {
 		Gui->setTop(this->oldtop);
-		Assert(MenuStack.top() == this);
-		MenuStack.pop();
+		if (MenuStack.size() > 0 && MenuStack.top() == this) {
+			MenuStack.pop();
+		} else {
+			DebugPrint("ALARM! A menu we're trying to stop is NOT at the top of the menu stack!!");
+		}
 		if (stopAll) {
 			while (!MenuStack.empty()) {
 				MenuStack.pop();

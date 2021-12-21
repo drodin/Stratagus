@@ -31,6 +31,8 @@
 
 #include "util.h"
 
+#include "SDL.h"
+
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
@@ -49,11 +51,6 @@
 #include "st_backtrace.h"
 #endif
 
-#ifdef USE_X11
-#include <X11/Xlib.h>
-#include <X11/Xatom.h>
-#endif
-
 /*----------------------------------------------------------------------------
 --  Random
 ----------------------------------------------------------------------------*/
@@ -67,6 +64,11 @@ uint32_t FileChecksums = 0;              /// checksums of all loaded lua files
 void InitSyncRand()
 {
 	SyncRandSeed = 0x87654321;
+	if (EnableDebugPrint) {
+		fprintf(stderr, "GameCycle: %lud, init seed: %x\n", GameCycle, SyncRandSeed);
+		print_backtrace();
+		fflush(stderr);
+	}
 }
 
 /**
@@ -82,7 +84,12 @@ int SyncRand()
 	val = SyncRandSeed >> 16;
 
 	SyncRandSeed = SyncRandSeed * (0x12345678 * 4 + 1) + 1;
-
+	
+	if (EnableDebugPrint) {
+		fprintf(stderr, "GameCycle: %lud, seed: %x, Sync rand: %d\n", GameCycle, SyncRandSeed, val);
+		print_backtrace();
+		fflush(stderr);
+	}
 	return val;
 }
 
@@ -155,11 +162,27 @@ long isqrt(long num)
 	return root;
 }
 
-// from wikipedia, simple checksumming of our lua files
+// from wikipedia, simple checksumming of our lua files. only considers a subset of 7-bit
+// ascii chars to hopefully avoid issues with filesystem encodings
 uint32_t fletcher32(const std::string &content)
 {
-	const uint16_t *data = (const uint16_t*)content.c_str();
-	size_t shorts = content.size() / 2;
+	uint16_t *alphas = new uint16_t[content.size() / 2];
+	size_t shorts = 0;
+	size_t consideredChars = 0;
+	for (size_t i = 0; i < content.size(); i++) {
+		uint16_t c = content[i];
+		if (c >= 'A' && c <= 'z') {
+			consideredChars++;
+			if ((consideredChars % 2) == 0) {
+				alphas[shorts] = c << 8;
+			} else {
+				alphas[shorts] = alphas[shorts] || c;
+				shorts++;
+			}
+		}
+	}
+
+	uint16_t *data = alphas;
 	uint32_t sum1 = 0xffff, sum2 = 0xffff;
 	size_t tlen;
 
@@ -173,6 +196,7 @@ uint32_t fletcher32(const std::string &content)
 		sum1 = (sum1 & 0xffff) + (sum1 >> 16);
 		sum2 = (sum2 & 0xffff) + (sum2 >> 16);
 	}
+	delete[] alphas;
 	/* Second reduction step to reduce sums to 16 bits */
 	sum1 = (sum1 & 0xffff) + (sum1 >> 16);
 	sum2 = (sum2 & 0xffff) + (sum2 >> 16);
@@ -336,8 +360,8 @@ static void getopt_err(const char *argv0, const char *str, char opt)
 int getopt(int argc, char *const *argv, const char *opts)
 {
 	static int sp = 1;
-	register int c;
-	register const char *cp;
+	int c;
+	const char *cp;
 
 	optarg = NULL;
 
@@ -384,92 +408,14 @@ int getopt(int argc, char *const *argv, const char *opts)
 */
 int GetClipboard(std::string &str)
 {
-#if defined(USE_WIN32) || defined(USE_X11)
-	int i;
-	unsigned char *clipboard;
-#ifdef USE_WIN32
-	HGLOBAL handle;
-#elif defined(USE_X11)
-	Display *display;
-	Window window;
-	Atom rettype;
-	unsigned long nitem;
-	unsigned long dummy;
-	int retform;
-	XEvent event;
-#endif
-
-#ifdef USE_WIN32
-	if (!IsClipboardFormatAvailable(CF_TEXT) || !OpenClipboard(NULL)) {
+	char* txt = SDL_GetClipboardText();
+	if (txt) {
+		str = txt;
+		free(txt);
+		return 0;
+	} else {
 		return -1;
 	}
-	handle = GetClipboardData(CF_TEXT);
-	if (!handle) {
-		CloseClipboard();
-		return -1;
-	}
-	clipboard = (unsigned char *)GlobalLock(handle);
-	if (!clipboard) {
-		CloseClipboard();
-		return -1;
-	}
-#elif defined(USE_X11)
-	if (!(display = XOpenDisplay(NULL))) {
-		return -1;
-	}
-
-	// Creates a non maped temporary X window to hold the selection
-	if (!(window = XCreateSimpleWindow(display,
-									   DefaultRootWindow(display), 0, 0, 1, 1, 0, 0, 0))) {
-		XCloseDisplay(display);
-		return -1;
-	}
-
-	XConvertSelection(display, XA_PRIMARY, XA_STRING, XA_STRING,
-					  window, CurrentTime);
-
-	XNextEvent(display, &event);
-
-	if (event.type != SelectionNotify || event.xselection.property != XA_STRING) {
-		return -1;
-	}
-
-	XGetWindowProperty(display, window, XA_STRING, 0, 1024, False,
-					   XA_STRING, &rettype, &retform, &nitem, &dummy, &clipboard);
-
-	XDestroyWindow(display, window);
-	XCloseDisplay(display);
-
-	if (rettype != XA_STRING || retform != 8) {
-		if (clipboard != NULL) {
-			XFree(clipboard);
-		}
-		clipboard = NULL;
-	}
-
-	if (clipboard == NULL) {
-		return -1;
-	}
-#endif
-	// Only allow ascii characters
-	for (i = 0; clipboard[i] != '\0'; ++i) {
-		if (clipboard[i] < 32 || clipboard[i] > 126) {
-			return -1;
-		}
-	}
-	str = (char *)clipboard;
-#ifdef USE_WIN32
-	GlobalUnlock(handle);
-	CloseClipboard();
-#elif defined(USE_X11)
-	if (clipboard != NULL) {
-		XFree(clipboard);
-	}
-#endif
-	return 0;
-#else
-	return -1;
-#endif
 }
 
 
@@ -497,7 +443,7 @@ int UTF8GetPrev(const std::string &text, int curpos)
 
 int UTF8GetNext(const std::string &text, int curpos)
 {
-	if (curpos == (int)text.size()) {
+	if (curpos >= (int)text.size()) {
 		return curpos + 1;
 	}
 	char c = text[curpos];

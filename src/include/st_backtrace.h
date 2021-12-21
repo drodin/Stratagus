@@ -6,17 +6,17 @@
 #ifdef __GLIBC__
 
 #include "execinfo.h"
-inline void print_backtrace(void) {
+inline void print_backtrace(int sz = 100) {
     int j, nptrs;
-    void *buffer[100];
-    nptrs = backtrace(buffer, 100);
+    void *buffer[sz];
+    nptrs = backtrace(buffer, sz);
     fprintf(stderr, "backtrace() returned %d addresses\n", nptrs);
-    backtrace_symbols_fd(buffer, 100, 2);
+    backtrace_symbols_fd(buffer, sz, 2);
 }
 
 #elif defined(USE_WIN32)
 
-#if 0 // the below would mean we give up XP support
+#if 1 // the below would mean we give up XP support
 #include "windows.h"
 #include "winbase.h"
 #include "dbghelp.h"
@@ -51,9 +51,9 @@ inline void print_backtrace(void) {
             name = "<unknown frame>";
         }
         if (SymGetLineFromAddr64(process, (DWORD64)(stack[i]), &displacement, line)) {
-            fprintf(stderr, srder, "%d: %s in %s:%d 0x%x\n", frames - i - 1, name, line->FileName, line->LineNumber, symbol->Address);
+            fprintf(stderr, "%d: %s in %s:%d 0x%llx\n", frames - i - 1, name, line->FileName, line->LineNumber, symbol->Address);
         } else {
-            fprintf(stderr, "%d: %s 0x%x\n", frames - i - 1, name, symbol->Address);
+            fprintf(stderr, "%d: %s 0x%llx\n", frames - i - 1, name, symbol->Address);
         }
     }
     free(symbol);

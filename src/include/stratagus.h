@@ -30,6 +30,10 @@
 #ifndef __STRATAGUS_H__
 #define __STRATAGUS_H__
 
+#ifdef HAVE_COZ_PROFILER
+#include <coz.h>
+#endif
+
 //@{
 
 /*============================================================================
@@ -108,6 +112,8 @@ extern void PrintLocation(const char *file, int line, const char *funcName);
 extern bool EnableDebugPrint;
 extern bool EnableAssert;
 extern bool EnableUnitDebug;
+extern bool IsDebugEnabled;
+extern bool EnableWallsInSinglePlayer;
 
 extern void AbortAt(const char *file, int line, const char *funcName, const char *conditionStr);
 extern void PrintOnStdOut(const char *format, ...);

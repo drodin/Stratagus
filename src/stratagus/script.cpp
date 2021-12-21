@@ -159,12 +159,37 @@ static int luatraceback(lua_State *L)
 int LuaCall(int narg, int clear, bool exitOnError)
 {
 	const int base = lua_gettop(Lua) - narg;  // function index
-	lua_pushcfunction(Lua, luatraceback);  // push traceback function
-	lua_insert(Lua, base);  // put it under chunk and args
+	return LuaCall(Lua, narg, clear ? 0 : LUA_MULTRET, base, exitOnError);
+}
+
+/**
+**  Call a lua function
+**
+**  @param L            Pointer to Lua state
+**  @param narg         Number of arguments
+**  @param nresults     Number of return values
+**  @param base         Stack index of the function to call
+**  @param exitOnError  Exit the program when an error occurs
+**
+**  @return             0 in success, else exit.
+*/
+int LuaCall(lua_State *L, int narg, int nresults, int base, bool exitOnError)
+{
+#if 0
+	lua_getglobal(L, "debug");
+	lua_getfield(L, -1, "traceback");
+	lua_call(L, 0, 1); 
+	const char *str = lua_tostring(L, -1);
+	lua_pop(L, 2);
+	fprintf(stderr, "\n===============\n%s\n\n", str);
+#endif
+
+	lua_pushcfunction(L, luatraceback);  // push traceback function
+	lua_insert(L, base);  // put it under chunk and args
 	signal(SIGINT, laction);
-	const int status = lua_pcall(Lua, narg, (clear ? 0 : LUA_MULTRET), base);
+	const int status = lua_pcall(L, narg, nresults, base);
 	signal(SIGINT, SIG_DFL);
-	lua_remove(Lua, base);  // remove traceback function
+	lua_remove(L, base);  // remove traceback function
 
 	return report(status, exitOnError);
 }
@@ -217,13 +242,9 @@ int LuaLoadFile(const std::string &file, const std::string &strArg)
 	if (GetFileContent(file, content) == false) {
 		return -1;
 	}
-	if (file.rfind("stratagus.lua") != -1 && file.find("scripts/") != -1) {
-		// First, remove '\r' characters from the input. These are
-		// added, for example, by Windows Git, and should be ignored
-		content.erase(std::remove(content.begin(), content.end(), '\r'), content.end());
-		// FileChecksums ^= fletcher32(content);
-		// https://github.com/Wargus/stratagus/issues/196, disable for now.
-		FileChecksums = 0;
+	if ((file.rfind("stratagus.lua") != -1 || file.find("scripts/") != -1) && (file.rfind("-config.lua") == -1)) {
+		FileChecksums ^= fletcher32(content);
+		DebugPrint("FileChecksums after loading %s: %x\n" _C_ file.c_str() _C_ FileChecksums);
 	}
 	const int status = luaL_loadbuffer(Lua, content.c_str(), content.size(), file.c_str());
 
@@ -319,6 +340,21 @@ int LuaToNumber(lua_State *l, int narg)
 {
 	luaL_checktype(l, narg, LUA_TNUMBER);
 	return static_cast<int>(lua_tonumber(l, narg));
+}
+
+/**
+**  Convert lua number in C float.
+**  It checks also type and exit in case of error.
+**
+**  @param l     Lua state.
+**  @param narg  Argument number.
+**
+**  @return      C number from lua.
+*/
+float LuaToFloat(lua_State *l, int narg)
+{
+	luaL_checktype(l, narg, LUA_TNUMBER);
+	return static_cast<float>(lua_tonumber(l, narg));
 }
 
 /**
@@ -1968,8 +2004,8 @@ static int CclFilteredListDirectory(lua_State *l, int type, int mask)
 	if (args < 1 || args > 2) {
 		LuaError(l, "incorrect argument");
 	}
-	const char *userdir = lua_tostring(l, 1);
-	const int rel = args > 1 ? lua_toboolean(l, 2) : 0;
+	const char *userdir = LuaToString(l, 1);
+	const bool rel = args > 1 ? lua_toboolean(l, 2) : false;
 	int n = strlen(userdir);
 
 	int pathtype = 0; // path relative to stratagus dir
@@ -1995,11 +2031,9 @@ static int CclFilteredListDirectory(lua_State *l, int type, int mask)
 	} else if (rel) {
 		std::string dir = LibraryFileName(userdir);
 		snprintf(directory, sizeof(directory), "%s", dir.c_str());
-		lua_pop(l, 1);
 	} else {
 		snprintf(directory, sizeof(directory), "%s/%s", StratagusLibPath.c_str(), userdir);
 	}
-	lua_pop(l, 1);
 	lua_newtable(l);
 	std::vector<FileList> flp;
 	n = ReadDataDirectory(directory, flp);
@@ -2008,7 +2042,7 @@ static int CclFilteredListDirectory(lua_State *l, int type, int mask)
 		if ((flp[i].type & mask) == type) {
 			lua_pushnumber(l, j + 1);
 			lua_pushstring(l, flp[i].name.c_str());
-			lua_settable(l, 1);
+			lua_settable(l, -3);
 			++j;
 		}
 	}

@@ -247,6 +247,14 @@ bool EnableDebugPrint;           /// if enabled, print the debug messages
 bool EnableAssert;               /// if enabled, halt on assertion failures
 bool EnableUnitDebug;            /// if enabled, a unit info dump will be created
 
+#ifdef DEBUG
+bool IsDebugEnabled {true};      /// Is debug enabled? Flag to pass into lua code. 
+#else
+bool IsDebugEnabled {false};     /// Is debug enabled? Flag to pass into lua code.
+#endif
+bool EnableWallsInSinglePlayer {false}; /// Enables ability to build walls in the single player games
+										/// used for debug purposes
+
 /*============================================================================
 ==  MAIN
 ============================================================================*/
@@ -343,9 +351,6 @@ static void PrintHeader()
 #ifdef USE_MAC
 		"MAC "
 #endif
-#ifdef USE_X11
-		"X11 "
-#endif
 		"";
 
 	fprintf(stdout,
@@ -440,6 +445,7 @@ static void Usage()
 		"\t-e\t\tStart editor (instead of game)\n"
 		"\t-E file.lua\tEditor configuration start file (default editor.lua)\n"
 		"\t-F\t\tFull screen video mode\n"
+		"\t-g\t\tForce software rendering (implies no shaders)\n"
 		"\t-G \"options\"\tGame options (passed to game scripts)\n"
 		"\t-h\t\tHelp shows this page\n"
 		"\t-i\t\tEnables unit info dumping into log (for debugging)\n"
@@ -450,7 +456,7 @@ static void Usage()
 		"\t-P port\t\tNetwork port to use\n"
 		"\t-s sleep\tNumber of frames for the AI to sleep before it starts\n"
 		"\t-S speed\tSync speed (100 = 30 frames/s)\n"
-		"\t-u userpath\tPath where stratagus saves preferences, log and savegame\n"
+		"\t-u userpath\tPath where stratagus saves preferences, log and savegame. Use 'userhome' to force platform-default userhome directory.\n"
 		"\t-v mode\t\tVideo mode resolution in format <xres>x<yres>\n"
 		"\t-W\t\tWindowed video mode. Optionally takes a window size in <xres>x<yres>\n"
 		"map is relative to StratagusLibPath=datapath, use ./map for relative to cwd\n",
@@ -499,7 +505,7 @@ void ParseCommandLine(int argc, char **argv, Parameters &parameters)
 {
 	char *sep;
 	for (;;) {
-		switch (getopt(argc, argv, "ac:d:D:eE:FG:hiI:lN:oOP:ps:S:u:v:W?-")) {
+		switch (getopt(argc, argv, "ac:d:D:eE:FgG:hiI:lN:oOP:ps:S:u:v:W?-")) {
 			case 'a':
 				EnableAssert = true;
 				continue;
@@ -531,6 +537,9 @@ void ParseCommandLine(int argc, char **argv, Parameters &parameters)
 				VideoForceFullScreen = 1;
 				Video.FullScreen = 1;
 				continue;
+			case 'g':
+				SDL_SetHintWithPriority(SDL_HINT_RENDER_DRIVER, "software", SDL_HINT_OVERRIDE);
+				continue;
 			case 'G':
 				parameters.luaScriptArguments = optarg;
 				continue;
@@ -559,7 +568,11 @@ void ParseCommandLine(int argc, char **argv, Parameters &parameters)
 				VideoSyncSpeed = atoi(optarg);
 				continue;
 			case 'u':
-				Parameters::Instance.SetUserDirectory(optarg);
+				if (!strcmp(optarg, "userhome")) {
+					Parameters::Instance.SetUserDirectory("");
+				} else {
+					Parameters::Instance.SetUserDirectory(optarg);
+				}
 				continue;
 			case 'v': {
 				sep = strchr(optarg, 'x');
