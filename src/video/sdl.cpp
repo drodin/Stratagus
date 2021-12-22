@@ -335,7 +335,8 @@ void InitVideoSdl()
 		}
 
 		SDL_CUSTOM_KEY_UP = SDL_RegisterEvents(1);
-		SDL_StartTextInput();
+		if (!SDL_HasScreenKeyboardSupport())
+			SDL_StartTextInput();
 
 		// Clean up on exit
 		atexit(SDL_Quit);

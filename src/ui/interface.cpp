@@ -600,6 +600,8 @@ static bool CommandKey(int key)
 		// Return enters chat/input mode.
 		case SDLK_RETURN:
 		case SDLK_KP_ENTER: // RETURN
+			if (SDL_HasScreenKeyboardSupport())
+				SDL_StartTextInput();
 			UiBeginInput();
 			return true;
 
@@ -901,6 +903,8 @@ static void InputKey(int key)
 		case SDLK_ESCAPE:
 			KeyState = KeyStateCommand;
 			UI.StatusLine.Clear();
+			if (SDL_HasScreenKeyboardSupport())
+				SDL_StopTextInput();
 			break;
 
 #ifdef USE_MAC

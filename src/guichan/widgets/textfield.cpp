@@ -8,7 +8,7 @@
  *
  * Copyright (c) 2004, 2005 darkbits                        Js_./
  * Per Larsson a.k.a finalman                          _RqZ{a<^_aa
- * Olof Naessén a.k.a jansem/yakslem                _asww7!uY`>  )\a//
+ * Olof Naessï¿½n a.k.a jansem/yakslem                _asww7!uY`>  )\a//
  *                                                 _Qhm`] _f "'c  1!5m
  * Visit: http://guichan.darkbits.org             )Qk<P ` _: :+' .'  "{[
  *                                               .)j(] .d_/ '-(  P .   S
@@ -61,6 +61,7 @@
 #include "guichan/widgets/textfield.h"
 #include "guichan/exception.h"
 #include "util.h"
+#include "SDL.h"
 
 namespace gcn
 {
@@ -183,6 +184,8 @@ namespace gcn
     {
         if (hasMouse() && button == MouseInput::LEFT)
         {
+            if (SDL_HasScreenKeyboardSupport())
+                SDL_StartTextInput();
             mCaretPosition = getFont()->getStringIndexAt(mText, x + mXScroll);
 			mSelectStart = mCaretPosition;
 			mSelectEndOffset = 0;
@@ -301,6 +304,8 @@ namespace gcn
 
         else if (key.getValue() == Key::K_ENTER)
         {
+            if (SDL_HasScreenKeyboardSupport())
+                SDL_StopTextInput();
             generateAction();
             ret = true;
         }
