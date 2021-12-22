@@ -1181,6 +1181,7 @@ endif()
 target_link_libraries(stratagus ${stratagus_LIBS})
 
 if(OpenMP_CXX_FOUND)
+	add_definitions(-DUSE_OPENMP)
 	target_compile_options(stratagus PRIVATE ${OpenMP_CXX_FLAGS})
 	target_link_libraries(stratagus OpenMP::OpenMP_CXX)
 endif()

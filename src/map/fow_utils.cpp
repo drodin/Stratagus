@@ -35,7 +35,12 @@
 
 #include <string.h>
 #include <algorithm>
+#ifdef USE_OPENMP
 #include <omp.h>
+#else
+#define omp_get_thread_num() 1
+#define omp_get_num_threads() 1
+#endif
 
 #include "stratagus.h"
 #include "fow_utils.h"
