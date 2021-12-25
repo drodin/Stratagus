@@ -707,7 +707,6 @@ int stratagusMain(int argc, char **argv)
 		// FIXME: Parse options before or after scripts?
 		ParseCommandLine(argc, argv, parameters);
 #ifdef ANDROID
-		parameters.SetDefaultValues();
 		SDL_setenv("TIMIDITY_CFG", (StratagusLibPath + "/timidity.cfg").c_str(), 1);
 #endif
 		// Init the random number generator.

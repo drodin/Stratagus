@@ -1,25 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-	<string name="scaled">Scaled</string>
+	<string name="data_missing">No game data files found!</string>
+	<string name="data_present">Click to start, long click to uninstall</string>
+	<string name="name_unknown">Unknown Game</string>
+	<string name="version_unknown">Unknown Version</string>
+	<string name="version_number">Version: %1$s</string>
+	<string name="select_zip">Install game data from .zip archive</string>
+	<string name="scaled">Use scaled graphics mode</string>
+	<string name="remove_data">Remove game data</string>
+	<string name="extracting">Extracting:\n%1$s</string>
+	<string name="extract_success">Successfully extracted game data files!</string>
+	<string name="extract_failure">Cant\'t extract archive file!\n%1$s</string>
+	<string name="extract_no_data">No game data files were found in the archive!\nPlease select another archive.</string>
+	<string name="no_file_manager">No file manager found!\nPlease install one.</string>
 
-	<string name="select_folder">Please select folder containing game data files:
-	</string>
-	<string name="browse">Browse</string>
-	<string name="start_game">Start Game</string>
-
-	<string name="current_folder">Current folder: </string>
-	<string name="select">Select</string>
-
-	<string name="nodatadir_msg">No Stratagus data files were found in </string>
-	<string name="nodatadir_btn">Select another folder</string>
-
-	<string name="help">Stratagus is a real-time strategy gaming engine.\
-Games which use Stratagus:\
+	<string name="help">Stratagus is a real-time strategy gaming engine that supports following games:\
 Wargus, War1gus, Stargus, Aleona\'s Tales and Wyrmsun\n\
-To actually play anything you will need to generate \'game data files\' on your PC and copy them to your device.\
+To actually play anything you will need to generate \'game data files\' on your computer and copy them to your device.
 Please visit <b><i>https://drodin.com/stratagus</i></b> for instructions.\n\
 Controls: Touch/click a unit to select it, touch/click and drag to select multiple units.\
 Use on-screen controls (bottom left) or keyboard for unit actions.\
 Drag map with two fingers or by pressing and holding middle mouse button.</string>
-
 </resources>

@@ -1,36 +1,55 @@
 <?xml version="1.0" encoding="utf-8"?>
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
-	android:layout_width="fill_parent" android:layout_height="fill_parent"
+	xmlns:tools="http://schemas.android.com/tools"
+	android:layout_width="fill_parent"
+	android:layout_height="fill_parent"
 	android:padding="5dp">
 
-	<TextView android:id="@+id/folder_label" android:text="@string/select_folder"
-		android:layout_width="match_parent" android:layout_height="wrap_content"
-		android:layout_alignParentTop="true" />
+	<TextView
+		android:id="@+id/game_data_status"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:layout_alignParentTop="true"
+		android:text="@string/data_missing"
+		android:textSize="16sp" />
 
-	<Button android:text="@string/start_game" android:id="@+id/start_btn"
-		android:layout_width="match_parent" android:layout_height="wrap_content"
-		android:layout_alignParentBottom="true" android:textStyle="bold" />
+	<ListView
+		android:id="@+id/games_list"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:layout_below="@+id/game_data_status"
+		android:layout_marginTop="5dp"
+		tools:layout_height="120dp"
+		tools:listitem="@layout/game" />
 
-	<Button android:id="@+id/browse_btn" android:text="@string/browse"
-		android:layout_width="100dp" android:layout_height="wrap_content"
-		android:layout_alignRight="@id/folder_label"
-		android:layout_below="@id/folder_label" />
+	<Button
+		android:id="@+id/select_zip"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:layout_below="@id/games_list"
+		android:text="@string/select_zip" />
 
-	<EditText android:id="@+id/folder" android:text=""
-		android:layout_width="wrap_content" android:layout_height="wrap_content"
-		android:layout_toLeftOf="@id/browse_btn" android:layout_alignTop="@id/browse_btn"
-		android:layout_alignBottom="@id/browse_btn" android:layout_alignLeft="@id/folder_label" />
+	<Switch
+		android:id="@+id/scaled_switch"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:layout_below="@+id/select_zip"
+		android:minHeight="48dp"
+		android:switchMinWidth="100dp"
+		android:text="@string/scaled"
+		android:textSize="16sp"
+		android:textStyle="bold" />
 
-	<TextView android:id="@+id/help_text" android:text="@string/help"
-		android:layout_width="wrap_content" android:layout_height="wrap_content"
-		android:layout_alignRight="@id/folder" android:layout_alignLeft="@id/folder"
-		android:layout_below="@id/folder" android:layout_above="@id/start_btn"
-		android:autoLink="web" android:textColorLink="@color/blue" />
-
-	<ToggleButton android:id="@+id/scaled_btn"
-		android:textOn="@string/scaled" android:textOff="@string/scaled"
-		android:layout_width="wrap_content" android:layout_height="wrap_content"
-		android:layout_alignRight="@id/browse_btn" android:layout_alignLeft="@id/browse_btn"
-		android:layout_below="@id/browse_btn" />
+	<TextView
+		android:id="@+id/help_text"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:layout_below="@id/scaled_switch"
+		android:layout_alignParentBottom="true"
+		android:autoLink="web"
+		android:scrollbars="vertical"
+		android:text="@string/help"
+		android:textColorLink="@android:color/holo_blue_dark"
+		android:textSize="16sp" />
 
 </RelativeLayout>

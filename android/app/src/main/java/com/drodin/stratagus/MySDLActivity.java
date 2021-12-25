@@ -1,15 +1,16 @@
 package com.drodin.stratagus;
 
-import android.content.SharedPreferences;
-import android.preference.PreferenceManager;
 import android.os.Build;
 import android.view.Display;
 import android.graphics.Point;
 
 import org.libsdl.app.SDLActivity;
 
+import java.io.File;
+import java.util.ArrayList;
+
 public class MySDLActivity extends SDLActivity {
-    public static int scaledHeight = 512;
+    final int scaledHeight = 512;
 
     @Override
     protected String[] getLibraries() {
@@ -20,9 +21,16 @@ public class MySDLActivity extends SDLActivity {
 
     @Override
     protected String[] getArguments() {
-        SharedPreferences settings = PreferenceManager.getDefaultSharedPreferences(this);
-        String dataDir = settings.getString("dataDir", StartMenu.dataDir);
-        boolean scaled = settings.getBoolean("scaled", StartMenu.scaled);
+        String dataDir = getIntent().getStringExtra("dataDir");
+        if (dataDir == null || dataDir.isEmpty()) {
+            ArrayList<File> dataDirs = FileUtils.findRecursive(getFilesDir(), StartMenu.scriptName);
+            if (!dataDirs.isEmpty())
+                dataDir = dataDirs.get(0).getPath();
+            else
+                finish();
+        }
+
+        boolean scaled = getIntent().getBooleanExtra("scaled", true);
 
         Display display = getWindowManager().getDefaultDisplay();
         Point size = new Point();
@@ -43,6 +51,8 @@ public class MySDLActivity extends SDLActivity {
         return new String[] {
                 "-d",
                 dataDir,
+                "-u",
+                getFilesDir().getPath(),
                 "-v",
                 videoMode,
                 "-F" // Full screen video mode

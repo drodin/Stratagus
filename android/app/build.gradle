@@ -10,8 +10,8 @@ android {
         resValue "string", "app_name", "Stratagus"
 
         applicationId "com.drodin.stratagus"
-        versionCode = 15
-        versionName = "v3.1.2-dev1"
+        versionCode = 16
+        versionName = "v3.2.0-dev1"
 
         minSdkVersion 14
         targetSdkVersion 30
@@ -43,8 +43,13 @@ android {
     externalNativeBuild {
         cmake {
             path file('../../CMakeLists.txt')
+            buildStagingDirectory "${project.buildDir}/../.cxx"
             version "3.18.1"
         }
     }
+}
+
+dependencies {
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.2'
 }
 
