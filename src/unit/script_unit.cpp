@@ -670,8 +670,10 @@ static int CclRemoveUnit(lua_State *l)
 	lua_pushvalue(l, 1);
 	CUnit *unit = CclGetUnit(l);
 	lua_pop(l, 1);
-	unit->Remove(NULL);
-	LetUnitDie(*unit);
+	if (unit) {
+		unit->Remove(NULL);
+		LetUnitDie(*unit);
+	}
 	lua_pushvalue(l, 1);
 	return 1;
 }
@@ -760,7 +762,9 @@ static int CclTransformUnit(lua_State *l)
 	lua_pushvalue(l, 2);
 	const CUnitType *unittype = TriggerGetUnitType(l);
 	lua_pop(l, 1);
-	CommandUpgradeTo(*targetUnit, *(CUnitType*)unittype, 1, true);
+	if (unittype && targetUnit) {
+		CommandUpgradeTo(*targetUnit, *(CUnitType*)unittype, 1, true);
+	}
 	lua_pushvalue(l, 1);
 	return 1;
 }
@@ -1081,11 +1085,19 @@ static int CclGetUnits(lua_State *l)
 }
 
 /**
+** <b>Description</b>
+**
 **  Get a player's units in rectangle box specified with 2 coordinates
 **
 **  @param l  Lua state.
 **
 **  @return   Array of units.
+**
+** Example:
+**
+** <div class="example"><code>circlePower = CreateUnit("unit-circle-of-power", 15, {59, 4})
+**		-- Get the units near the circle of power.
+**      unitsOnCircle = <strong>GetUnitsAroundUnit</strong>(circle,1,true)</code></div>
 */
 static int CclGetUnitsAroundUnit(lua_State *l)
 {
@@ -1181,6 +1193,8 @@ static int CclGetUnitVariable(lua_State *l)
 	const char *const value = LuaToString(l, 2);
 	if (!strcmp(value, "RegenerationRate")) {
 		lua_pushnumber(l, unit->Variable[HP_INDEX].Increase);
+	} else if (!strcmp(value, "RegenerationFrequency")) {
+		lua_pushnumber(l, std::max((int)unit->Variable[HP_INDEX].IncreaseFrequency, 1));
 	} else if (!strcmp(value, "Ident")) {
 		lua_pushstring(l, unit->Type->Ident.c_str());
 	} else if (!strcmp(value, "ResourcesHeld")) {
@@ -1220,8 +1234,25 @@ static int CclGetUnitVariable(lua_State *l)
 	} else if (!strcmp(value, "Idle")) {
 		lua_pushboolean(l, unit->IsIdle());
 		return 1;
+	} else if (!strcmp(value, "PixelPos")) {
+		PixelPos pos = unit->GetMapPixelPosCenter();
+		lua_newtable(l);
+		lua_pushnumber(l, pos.x);
+		lua_setfield(l, -2, "x");
+		lua_pushnumber(l, pos.y);
+		lua_setfield(l, -2, "y");
+		return 1;
 	} else {
 		int index = UnitTypeVar.VariableNameLookup[value];// User variables
+		if (index == -1) {
+			if (nargs == 2) {
+				index = UnitTypeVar.BoolFlagNameLookup[value];
+				if (index != -1) {
+					lua_pushboolean(l, unit->Type->BoolFlag[index].value);
+					return 1;
+				}
+			}
+		}
 		if (index == -1) {
 			LuaError(l, "Bad variable name '%s'\n" _C_ value);
 		}
@@ -1236,7 +1267,7 @@ static int CclGetUnitVariable(lua_State *l)
 			} else if (!strcmp(type, "Increase")) {
 				lua_pushnumber(l, unit->Variable[index].Increase);
 			} else if (!strcmp(type, "IncreaseFrequency")) {
-				lua_pushnumber(l, unit->Variable[index].IncreaseFrequency);
+				lua_pushnumber(l, std::max((int)unit->Variable[index].IncreaseFrequency, 1));
 			} else if (!strcmp(type, "Enable")) {
 				lua_pushnumber(l, unit->Variable[index].Enable);
 			} else {
@@ -1283,8 +1314,10 @@ static int CclSetUnitVariable(lua_State *l)
 		value = LuaToNumber(l, 3);
 		unit->Summoned = value;
 	} else if (!strcmp(name, "RegenerationRate")) {
+		value = LuaToNumber(l, 3);
 		unit->Variable[HP_INDEX].Increase = std::min(unit->Variable[HP_INDEX].Max, value);
 	} else if (!strcmp(name, "RegenerationFrequency")) {
+		value = LuaToNumber(l, 3);
 		unit->Variable[HP_INDEX].IncreaseFrequency = value;
 		if (unit->Variable[HP_INDEX].IncreaseFrequency != value) {
 			LuaError(l, "RegenerationFrequency out of range!");

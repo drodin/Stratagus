@@ -221,7 +221,7 @@ static bool CanShowContent(const ConditionPanel *condition, const CUnit &unit)
 	if ((condition->ShowOnlySelected && !unit.Selected)
 		|| (unit.Player->Type == PlayerNeutral && condition->HideNeutral)
 		|| (ThisPlayer->IsEnemy(unit) && !condition->ShowOpponent)
-		|| (ThisPlayer->IsAllied(unit) && (unit.Player != ThisPlayer) && condition->HideAllied)) {
+		|| ((ThisPlayer->IsAllied(unit) || unit.Player == ThisPlayer) && condition->HideAllied)) {
 		return false;
 	}
 	if (condition->BoolFlags && !unit.Type->CheckUserBoolFlags(condition->BoolFlags)) {
@@ -1060,7 +1060,7 @@ static void InfoPanel_draw_no_selection()
 		&& !UnitUnderCursor->Type->BoolFlag[ISNOTSELECTABLE_INDEX].value) {
 		// FIXME: not correct for enemies units
 		DrawUnitInfo(*UnitUnderCursor);
-	} else {
+	} else if (Preference.ShowNoSelectionStats) {
 		// FIXME: need some cool ideas for this.
 		int x = UI.InfoPanel.X + 16;
 		int y = UI.InfoPanel.Y + 8;

@@ -32,9 +32,9 @@
 # Stratagus major version
 set(STRATAGUS_MAJOR_VERSION 3)
 # Stratagus minor version (maximum 99)
-set(STRATAGUS_MINOR_VERSION 1)
+set(STRATAGUS_MINOR_VERSION 2)
 # Stratagus patch level (maximum 99)
-set(STRATAGUS_PATCH_LEVEL 2)
+set(STRATAGUS_PATCH_LEVEL 0)
 # Stratagus patch level 2
 set(STRATAGUS_PATCH_LEVEL2 0)
 #########################
@@ -70,11 +70,18 @@ HunterGate(
 )
 endif()
 
+###############################
+# Build vendored dependencies #
+###############################
+# Build lua 5.1
+option(BUILD_VENDORED_LUA OFF)
+###############################
+
 project(stratagus)
 if(HUNTER_ENABLED)
 cmake_minimum_required(VERSION 3.9.2)
 else()
-cmake_minimum_required(VERSION 2.6)
+cmake_minimum_required(VERSION 2.9)
 endif()
 cmake_policy(VERSION 3.10..3.20.2)
 
@@ -702,12 +709,34 @@ set(SDL2_IMAGE_LIBRARIES SDL_image::SDL_image)
 set(TOLUA++_LIBRARY toluapp::toluapp)
 set(ZLIB_LIBRARIES ZLIB::zlib)
 else()
-find_package(Lua51 REQUIRED)
+if(APPLE)
+list(APPEND CMAKE_PREFIX_PATH /opt/homebrew/)
+endif()
+
+include(ExternalProject)
+if(BUILD_VENDORED_LUA)
+  ExternalProject_Add( Lua51B
+    SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}/third-party/lua-5.1.5/
+    PREFIX "${CMAKE_CURRENT_BINARY_DIR}/lua/"
+    INSTALL_COMMAND ""
+  )
+
+  set(Lua51_FOUND true)
+  set(LUA_LIBRARIES "${CMAKE_CURRENT_BINARY_DIR}/lua/src/Lua51B-build/liblua51.a")
+  set(LUA_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/lua/src/Lua51B-build/")
+  set(TOLUA++_FOUND true)
+  set(TOLUA++_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/third-party/lua-5.1.5/toluapp/include/)
+  set(TOLUA++_LIBRARY "${CMAKE_CURRENT_BINARY_DIR}/lua/src/Lua51B-build/libtoluapp51.a")
+  set(TOLUA++_APP "${CMAKE_CURRENT_BINARY_DIR}/lua/src/Lua51B-build/toluapp")
+else()
+  find_package(Lua51 REQUIRED)
+  find_package(Tolua++ REQUIRED)
+endif()
+
 find_package(PNG REQUIRED)
 find_package(SDL2 REQUIRED)
 find_package(SDL2_mixer REQUIRED)
 find_package(SDL2_image REQUIRED)
-find_package(Tolua++ REQUIRED)
 find_package(ZLIB REQUIRED)
 endif()
 find_package(OpenMP)
@@ -894,10 +923,10 @@ endif()
 
 # Stratagus needs to have char by default signed
 # No idea how to tell this to other compilers
-if(CMAKE_COMPILER_IS_GNUCXX)
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsigned-char -Werror")
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsigned-char")
 endif()
-if(CMAKE_COMPILER_IS_GNUC)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsigned-char")
 endif()
 if(WIN32 AND MSVC)
@@ -1206,13 +1235,27 @@ if(WIN32 AND MINGW AND ENABLE_STATIC)
 	set_target_properties(stratagus PROPERTIES LINK_FLAGS "${LINK_FLAGS} -static-libgcc -static-libstdc++ -Wl,--stack,10485760")
 endif()
 
-if(APPLE OR WIN32)
-if(HUNTER_ENABLED)
-  set_target_properties(stratagus PROPERTIES LINK_FLAGS "${LINK_FLAGS}")
-else()
+if(WIN32)
+  if(MSVC)
+	target_compile_options(stratagus PRIVATE "$<$<CONFIG:Release>:/Zi>")
+	target_link_options(stratagus PRIVATE "$<$<CONFIG:Release>:/DEBUG>")
+	target_link_options(stratagus PRIVATE "$<$<CONFIG:Release>:/OPT:REF>")
+	target_link_options(stratagus PRIVATE "$<$<CONFIG:Release>:/OPT:ICF>")
+  endif()
+  if(NOT HUNTER_ENABLED)
   set_target_properties(stratagus PROPERTIES LINK_FLAGS "${LINK_FLAGS} -lSDL2main")
-endif()
+  endif()
   set(CMAKE_EXE_LINKER_FLAGS_PROFILE "${CMAKE_EXE_LINKER_FLAGS}")
+endif()
+if(APPLE)
+  if(NOT HUNTER_ENABLED)
+  set_target_properties(stratagus PROPERTIES LINK_FLAGS "${LINK_FLAGS} ${SDL2main_LIBRARY}")
+  endif()
+  set(CMAKE_EXE_LINKER_FLAGS_PROFILE "${CMAKE_EXE_LINKER_FLAGS}")
+endif()
+
+if(BUILD_VENDORED_LUA)
+  add_dependencies(stratagus Lua51B)
 endif()
 
 ########### next target ###############

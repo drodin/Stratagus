@@ -122,6 +122,9 @@ static int report(int status, bool exitOnError)
 		fprintf(stderr, "%s\n", msg);
 		if (exitOnError) {
 			::exit(1);
+		} else {
+			lua_pushstring(Lua, msg);
+			lua_setglobal(Lua, "__last_error__");
 		}
 		lua_pop(Lua, 1);
 	}
@@ -234,7 +237,7 @@ static bool GetFileContent(const std::string &file, std::string &content)
 **
 **  @return      0 for success, else exit.
 */
-int LuaLoadFile(const std::string &file, const std::string &strArg)
+int LuaLoadFile(const std::string &file, const std::string &strArg, bool exitOnError)
 {
 	DebugPrint("Loading '%s'\n" _C_ file.c_str());
 
@@ -242,22 +245,29 @@ int LuaLoadFile(const std::string &file, const std::string &strArg)
 	if (GetFileContent(file, content) == false) {
 		return -1;
 	}
-	if ((file.rfind("stratagus.lua") != -1 || file.find("scripts/") != -1) && (file.rfind("-config.lua") == -1)) {
+	if (file.rfind("stratagus.lua") != -1) {
 		FileChecksums ^= fletcher32(content);
 		DebugPrint("FileChecksums after loading %s: %x\n" _C_ file.c_str() _C_ FileChecksums);
 	}
+	// save the current __file__
+	lua_getglobal(Lua, "__file__");
+
 	const int status = luaL_loadbuffer(Lua, content.c_str(), content.size(), file.c_str());
 
 	if (!status) {
+		lua_pushstring(Lua, file.c_str());
+		lua_setglobal(Lua, "__file__");
 		if (!strArg.empty()) {
 			lua_pushstring(Lua, strArg.c_str());
-			LuaCall(1, 1);
+			LuaCall(1, 1, exitOnError);
 		} else {
-			LuaCall(0, 1);
+			LuaCall(0, 1, exitOnError);
 		}
 	} else {
-		report(status, true);
+		report(status, exitOnError);
 	}
+	// restore the old __file__
+	lua_setglobal(Lua, "__file__");
 	return status;
 }
 
@@ -282,9 +292,13 @@ static int CclSavePreferences(lua_State *l)
 */
 static int CclLoad(lua_State *l)
 {
-	LuaCheckArgs(l, 1);
+	const int arg = lua_gettop(l);
+	if (arg < 1 || arg > 2) {
+		LuaError(l, "incorrect argument");
+	}
 	const std::string filename = LibraryFileName(LuaToString(l, 1));
-	if (LuaLoadFile(filename) == -1) {
+	bool exitOnError = arg == 2 ? LuaToBoolean(l, 2) : true;
+	if (LuaLoadFile(filename, "", exitOnError) == -1) {
 		DebugPrint("Load failed: %s\n" _C_ filename.c_str());
 	}
 	return 0;
@@ -2145,9 +2159,11 @@ void InitLua()
 	// For security we don't load all libs
 	static const luaL_Reg lualibs[] = {
 		{"", luaopen_base},
-		//{LUA_LOADLIBNAME, luaopen_package},
 		{LUA_TABLIBNAME, luaopen_table},
-		//{LUA_IOLIBNAME, luaopen_io},
+#ifdef DEBUG
+		{LUA_IOLIBNAME, luaopen_io},
+		{LUA_LOADLIBNAME, luaopen_package},
+#endif
 		{LUA_OSLIBNAME, luaopen_os},
 		{LUA_STRLIBNAME, luaopen_string},
 		{LUA_MATHLIBNAME, luaopen_math},
@@ -2167,6 +2183,20 @@ void InitLua()
 		lua_call(Lua, 1, 0);
 #endif
 	}
+#if defined(DEBUG) && !defined(WIN32)
+	static const char* mobdebug =
+#include "./lua/mobdebug.h"
+;
+	int status = luaL_loadbuffer(Lua, mobdebug, strlen(mobdebug), "mobdebug.lua");
+	if (!status) {
+		status = LuaCall(0, 0, false);
+		if (!status) {
+			fprintf(stderr, "mobdebug loaded and available via mobdebug.start()\n");
+			lua_setglobal(Lua, "mobdebug");
+		}
+	}
+	report(status, false);
+#endif
 	tolua_stratagus_open(Lua);
 	lua_settop(Lua, 0);  // discard any results
 }
