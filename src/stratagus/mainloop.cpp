@@ -52,6 +52,7 @@
 #include "ui.h"
 #include "unit.h"
 #include "video.h"
+#include "parameters.h"
 
 #include <guichan.h>
 void DrawGuichanWidgets();
@@ -184,6 +185,8 @@ void UpdateDisplay()
 		// to prevent empty spaces in the UI
 		Video.FillRectangleClip(ColorBlack, 0, 0, Video.Width, Video.Height);
 		DrawMapArea();
+		// TODO: for e.g. environmental effects, we want to push to the renderer here with appropriate shaders set,
+		// then do the rest.
 		DrawMessages();
 
 		if (CursorState == CursorStateRectangle) {
@@ -307,7 +310,7 @@ static void GameLogicLoop()
 			}
 		}
 		
-		if (Preference.AutosaveMinutes != 0 && !IsNetworkGame() && GameCycle > 0 && (GameCycle % (CYCLES_PER_SECOND * 60 * Preference.AutosaveMinutes)) == 0) { // autosave every X minutes (default is 5), if the option is enabled
+		if (Preference.AutosaveMinutes != 0 && !IsNetworkGame() && !IsReplayGame() && GameCycle > 0 && (GameCycle % (CYCLES_PER_SECOND * 60 * Preference.AutosaveMinutes)) == 0) { // autosave every X minutes (default is 5), if the option is enabled
 		//Wyrmgus end
 			UI.StatusLine.Set(_("Autosave"));
 			SaveGame("autosave.sav");
@@ -316,7 +319,6 @@ static void GameLogicLoop()
 
 	UpdateMessages();     // update messages
 	ParticleManager.update(); // handle particles
-	CheckMusicFinished(); // Check for next song
 
 	if (FastForwardCycle <= GameCycle || !(GameCycle & CallPeriod::cEvery256th)) {
 		WaitEventsOneFrame();
@@ -368,7 +370,7 @@ static void DisplayLoop()
 		// program, as we now still have a game on the background and
 		// need to go through the game-menu or supply a map file
 
-		FogOfWar.Update(FastForwardCycle > GameCycle ? true : false);
+		FogOfWar->Update(FastForwardCycle > GameCycle ? true : false);
 
 		UpdateDisplay();
 		RealizeVideoMemory();
@@ -420,6 +422,8 @@ void GameMainLoop()
 
 	CclCommand("if (GameStarting ~= nil) then GameStarting() end");
 
+	long ticks = SDL_GetTicks();
+
 	MultiPlayerReplayEachCycle();
 
 	SingleGameLoop();
@@ -443,6 +447,12 @@ void GameMainLoop()
 #endif
 	NetworkQuitGame();
 	EndReplayLog();
+
+	if (Parameters::Instance.benchmark) {
+		ticks = SDL_GetTicks() - ticks;
+		double fps = FrameCounter * 1000.0 / ticks;
+		fprintf(stderr, "BENCHMARK RESULT: %f fps, %f cps (%ldms for %ldframes in %ldcycles)\n", fps, GameCycle * 1000.0 / ticks, ticks, FrameCounter, GameCycle);
+	}
 
 	GameCycle = 0;
 	CParticleManager::exit();

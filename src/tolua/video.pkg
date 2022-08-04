@@ -26,15 +26,17 @@ public:
 	static CGraphic *ForceNew(const std::string file, int w = 0, int h = 0);
 	static CGraphic *Get(const std::string file);
 	static void Free(CGraphic *);
-	void Load();
+	void Load(bool grayscale = false);
 	void Resize(int w, int h);
-        void SetPaletteColor(int idx, int r, int g, int b);
+	void SetPaletteColor(int idx, int r, int g, int b);
+	void OverlayGraphic(CGraphic *g, bool mask = false);
 };
 
 class CPlayerColorGraphic : public CGraphic
 {
 public:
 	static CPlayerColorGraphic *New(const std::string file, int w = 0, int h = 0);
+	static CPlayerColorGraphic *ForceNew(const std::string file, int w = 0, int h = 0);
 	static CPlayerColorGraphic *Get(const std::string file);
 };
 
@@ -51,14 +53,18 @@ class CColor {
 void SetColorCycleAll(bool value);
 void ClearAllColorCyclingRange();
 void AddColorCyclingRange(unsigned int startColorIndex, unsigned int endColorIndex);
+unsigned int SetColorCycleSpeed(unsigned int speed);
 
 class Mng
 {
 public:
-        Mng();
-        bool Load(const std::string name);
+		static Mng *New(const std::string name);
+		static void Free(Mng *mng);
+        bool Load();
         void Draw(int x, int y);
         void Reset();
+
+		static int MaxFPS;
 }
 
 class Movie

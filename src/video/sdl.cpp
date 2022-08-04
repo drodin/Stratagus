@@ -396,17 +396,22 @@ void InitVideoSdl()
 	SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
 #endif
 	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+	int rendererFlags = SDL_RENDERER_ACCELERATED | SDL_RENDERER_TARGETTEXTURE;
+	if (!Parameters::Instance.benchmark) {
+		rendererFlags |= SDL_RENDERER_PRESENTVSYNC;
+	}
 	if (!TheRenderer) {
-		TheRenderer = SDL_CreateRenderer(TheWindow, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_TARGETTEXTURE | SDL_RENDERER_PRESENTVSYNC);
+		TheRenderer = SDL_CreateRenderer(TheWindow, -1, rendererFlags);
 	}
 	SDL_RendererInfo rendererInfo;
-	SDL_GetRendererInfo(TheRenderer, &rendererInfo);
-	printf("[Renderer] %s\n", rendererInfo.name);
-	if (strlen(rendererInfo.name) == 0) {
-		dummyRenderer = true;
-	}
-	if(!strncmp(rendererInfo.name, "opengl", 6)) {
-		LoadShaderExtensions();
+	if (!SDL_GetRendererInfo(TheRenderer, &rendererInfo)) {
+		printf("[Renderer] %s\n", rendererInfo.name);
+		if (strlen(rendererInfo.name) == 0) {
+			dummyRenderer = true;
+		}
+		if(!strncmp(rendererInfo.name, "opengl", 6)) {
+			LoadShaderExtensions();
+		}
 	}
 	SDL_SetRenderDrawColor(TheRenderer, 0, 0, 0, 255);
 	Video.ResizeScreen(Video.Width, Video.Height);
@@ -506,10 +511,6 @@ void InitVideoSdl()
 	ColorGreen = Video.MapRGB(TheScreen->format, 0, 252, 0);
 	ColorYellow = Video.MapRGB(TheScreen->format, 252, 252, 0);
 
-	for(std::vector<std::string>::iterator it = UI.LifeBarColorNames.begin(); it != UI.LifeBarColorNames.end(); ++it) {
-		UI.LifeBarColorsInt.push_back(IndexToColor(GetColorIndexByName((*it).c_str())));
-	}
-
 	UI.MouseWarpPos.x = UI.MouseWarpPos.y = -1;
 }
 
@@ -594,14 +595,17 @@ static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
 			break;
 #endif
 		case SDL_MOUSEBUTTONDOWN:
+			event.button.y = static_cast<int>(std::floor(event.button.y / Video.VerticalPixelSize + 0.5));
 			InputMouseButtonPress(callbacks, SDL_GetTicks(), event.button.button);
 			break;
 
 		case SDL_MOUSEBUTTONUP:
+			event.button.y = static_cast<int>(std::floor(event.button.y / Video.VerticalPixelSize + 0.5));
 			InputMouseButtonRelease(callbacks, SDL_GetTicks(), event.button.button);
 			break;
 
 		case SDL_MOUSEMOTION:
+			event.motion.y = static_cast<int>(std::floor(event.button.y / Video.VerticalPixelSize + 0.5));
 			InputMouseMove(callbacks, SDL_GetTicks(), event.motion.x, event.motion.y);
 			break;
 
@@ -623,7 +627,7 @@ static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
 				SDL_PushEvent(&event);
 				SDL_zero(event);
 				event.type = SDL_KEYUP;
-				event.key.keysym.sym = SDLK_PAGEUP;
+				event.key.keysym.sym = key;
 				SDL_PushEvent(&event);
 				SDL_zero(event);
 				event.type = SDL_KEYUP;
@@ -663,14 +667,14 @@ static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
 					if (IsSDLWindowVisible && (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST)) {
 						IsSDLWindowVisible = false;
 						if (!GamePaused) {
-							DoTogglePause = true;
+							DoTogglePause = !GamePaused;
 							GamePaused = true;
 						}
 					} else if (!IsSDLWindowVisible && (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED)) {
 						IsSDLWindowVisible = true;
 						if (GamePaused && DoTogglePause) {
 							DoTogglePause = false;
-							GamePaused = true;
+							GamePaused = false;
 						}
 					}
 				}
@@ -689,19 +693,10 @@ static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
 					// fabricate a keyup event for later
 					SDL_Event event;
 					SDL_zero(event);
-					event.type = SDL_USEREVENT;
+					event.type = SDL_CUSTOM_KEY_UP;
 					event.user.code = lastKey;
-					event.user.data1 = reinterpret_cast<void*>(SDL_CUSTOM_KEY_UP);
-					SDL_PushEvent(&event);
+					SDL_PeepEvents(&event, 1, SDL_ADDEVENT, SDL_FIRSTEVENT, SDL_LASTEVENT);
 				}
-			}
-			break;
-
-		case SDL_USEREVENT:
-			{
-				Assert(reinterpret_cast<uintptr_t>(event.user.data1) == SDL_CUSTOM_KEY_UP);
-				char key = static_cast<char>(event.user.code);
-				InputKeyButtonRelease(callbacks, SDL_GetTicks(), key, key);
 			}
 			break;
 
@@ -723,6 +718,15 @@ static void SdlDoEvent(const EventCallback &callbacks, SDL_Event &event)
 
 		case SDL_QUIT:
 			Exit(0);
+			break;
+
+		default:
+			if (event.type == SDL_SOUND_FINISHED) {
+				HandleSoundEvent(event);
+			} else if (event.type == SDL_CUSTOM_KEY_UP) {
+				char key = static_cast<char>(event.user.code);
+				InputKeyButtonRelease(callbacks, SDL_GetTicks(), key, key);
+			}
 			break;
 	}
 
@@ -759,8 +763,6 @@ const EventCallback *GetCallbacks()
 */
 void WaitEventsOneFrame()
 {
-	++FrameCounter;
-
 	if (dummyRenderer) {
 		return;
 	}
@@ -774,7 +776,7 @@ void WaitEventsOneFrame()
 	InputKeyTimeout(*GetCallbacks(), ticks);
 	CursorAnimate(ticks);
 
-	int interrupts = 0;
+	int interrupts = Parameters::Instance.benchmark;
 
 	for (;;) {
 		// Time of frame over? This makes the CPU happy. :(
@@ -799,7 +801,9 @@ void WaitEventsOneFrame()
 		if (IsNetworkGame()) {
 			s = NetworkFildes.HasDataToRead(0);
 			if (s > 0) {
-				GetCallbacks()->NetworkEvent();
+				if (GetCallbacks()->NetworkEvent) {
+					GetCallbacks()->NetworkEvent();
+				}
 			}
 		}
 
@@ -823,10 +827,47 @@ void WaitEventsOneFrame()
 */
 
 static Uint32 LastTick = 0;
+static int RefreshRate = 0;
+
+static void RenderBenchmarkOverlay()
+{
+	if (!RefreshRate) {
+		int displayCount = SDL_GetNumVideoDisplays();
+		SDL_DisplayMode mode;
+		for (int i = 0; i < displayCount; i++) {
+			SDL_GetDesktopDisplayMode(0, &mode);
+			if (mode.refresh_rate > RefreshRate) {
+				RefreshRate = mode.refresh_rate;
+			}
+		}
+	}
+
+	// show a bar representing fps, where the entire bar is the max refresh rate of attached displays
+	Uint32 nextTick = SDL_GetTicks();
+	Uint32 frameTime = nextTick - LastTick;
+	int fps = std::min(RefreshRate, static_cast<int>(frameTime > 0 ? (1000.0 / frameTime) : 0));
+	LastTick = nextTick;
+
+	// draw the full bar
+	SDL_SetRenderDrawColor(TheRenderer, 255, 0, 0, 255);
+	SDL_Rect frame = { Video.Width - 10, 2, 8, RefreshRate };
+	SDL_RenderDrawRect(TheRenderer, &frame);
+
+	// draw the inner fps gage
+	SDL_SetRenderDrawColor(TheRenderer, 0, 255, 0, 255);
+	SDL_Rect bar = { Video.Width - 8, 2 + RefreshRate - fps, 4, fps };
+	SDL_RenderFillRect(TheRenderer, &bar);
+
+	SDL_SetRenderDrawColor(TheRenderer, 0, 0, 0, 255);
+}
 
 void RealizeVideoMemory()
 {
+	++FrameCounter;
 	if (dummyRenderer) {
+		return;
+	}
+	if (Preference.FrameSkip && (FrameCounter & Preference.FrameSkip)) {
 		return;
 	}
 	if (NumRects) {
@@ -837,20 +878,16 @@ void RealizeVideoMemory()
 			//for (int i = 0; i < NumRects; i++)
 			//    SDL_UpdateTexture(TheTexture, &Rects[i], TheScreen->pixels, TheScreen->pitch);
 			SDL_RenderCopy(TheRenderer, TheTexture, NULL, NULL);
-			if (EnableDebugPrint) {
-				// show a bar representing fps scaled by 10
-				SDL_SetRenderDrawColor(TheRenderer, 255, 0, 0, 255);
-				Uint32 nextTick = SDL_GetTicks();
-				double fps = 10000.0 / (nextTick - LastTick);
-				SDL_RenderDrawLine(TheRenderer, 0, 0, floorl(fps), 0);
-				SDL_SetRenderDrawColor(TheRenderer, 0, 0, 0, 255);
-				LastTick = nextTick;
-			}
-			SDL_RenderPresent(TheRenderer);
 		}
+		if (Parameters::Instance.benchmark) {
+			RenderBenchmarkOverlay();
+		}
+		SDL_RenderPresent(TheRenderer);
 		NumRects = 0;
 	}
-	HideCursor();
+	if (!Preference.HardwareCursor) {
+		HideCursor();
+	}
 }
 
 /**

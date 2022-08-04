@@ -36,12 +36,6 @@
 
 #include <string.h>
 #include <algorithm>
-#ifdef USE_OPENMP
-#include <omp.h>
-#else
-#define omp_get_thread_num() 1
-#define omp_get_num_threads() 1
-#endif
 
 #include "stratagus.h"
 
@@ -61,7 +55,7 @@
 --  Variables
 ----------------------------------------------------------------------------*/
 /// FIXME: Maybe move it into CMap
-CFogOfWar FogOfWar; /// Fog of war itself
+CFogOfWar *FogOfWar; /// Fog of war itself
 CGraphic *CFogOfWar::TiledFogSrc {nullptr}; // Graphic tiles set for tiled fog
 
 /*----------------------------------------------------------------------------
@@ -308,8 +302,7 @@ void CFogOfWar::GenerateFog()
             playersToRenderView.insert(playersSharedVision);
         }
     }
-    CurrUpscaleTableExplored = GameSettings.RevealMap ? UpscaleTableRevealed
-                                                      : UpscaleTableExplored;
+    CurrUpscaleTableExplored = GameSettings.RevealMap != MapRevealModes::cHidden ? UpscaleTableRevealed : UpscaleTableExplored;
 
     const uint8_t visibleThreshold = Map.NoFogOfWar ? 1 : 2;
     
@@ -324,7 +317,7 @@ void CFogOfWar::GenerateFog()
         for (uint16_t row = lBound; row < uBound; row++) {
 
             const size_t visIndex = VisTable_Index0 + row * VisTableWidth;
-            const size_t mapIndex = size_t(row) * Map.Info.MapHeight;
+            const size_t mapIndex = size_t(row) * Map.Info.MapWidth;
 
             for (uint16_t col = 0; col < Map.Info.MapWidth; col++) {
 
@@ -761,7 +754,7 @@ void CFogOfWar::GetFogTile(const size_t visIndex, const  size_t mapIndex, const 
 		}
 	}
 
-	if (mapIndexBase + w < Map.Info.MapHeight * w) {
+	if (mapIndexBase + w < static_cast<unsigned int>(Map.Info.MapHeight) * w) {
 		const size_t index = visIndexBase + VisTableWidth;
 		if (mapIndex != mapIndexBase) {
 			if (!IsMapFieldExplored(x - 1 + index)) {
@@ -817,11 +810,11 @@ void CFogOfWar::DrawFogTile(const size_t visIndex, const size_t mapIndex, const 
                                                                        vpFogSurface);
             }
         } else {
-            DrawFullShroudOfFog(dx, dy, FogOfWar.GetExploredOpacity(), vpFogSurface);
+            DrawFullShroudOfFog(dx, dy, FogOfWar->GetExploredOpacity(), vpFogSurface);
         }
         if (blackFogTile) {
             TiledAlphaFog->DrawFrameClipCustomMod(blackFogTile, dx, dy, PixelModifier::CopyWithSrcAlphaKey, 
-                                                                        GameSettings.RevealMap ? GetRevealedOpacity() 
+                                                                        GameSettings.RevealMap != MapRevealModes::cHidden ? GetRevealedOpacity() 
                                                                                                : GetUnseenOpacity(),
                                                                         vpFogSurface);
         }
@@ -887,7 +880,7 @@ void CFogOfWar::DrawTiled(CViewport &viewport)
                 if (VisTable[visIndex]) {
                     DrawFogTile(visIndex, mapIndex, mapIndexBase, dx, dy, viewport.GetFogSurface());
                 } else {
-                    DrawFullShroudOfFog(dx, dy, GameSettings.RevealMap ? GetRevealedOpacity() 
+                    DrawFullShroudOfFog(dx, dy, GameSettings.RevealMap != MapRevealModes::cHidden ? GetRevealedOpacity() 
                                                                        : GetUnseenOpacity(),
                                                 viewport.GetFogSurface());
                 }

@@ -85,7 +85,7 @@ void CConstruction::Clean()
 	this->ShadowFile.Height = 0;
 }
 
-void CConstruction::Load()
+void CConstruction::Load(bool force)
 {
 	if (this->Ident.empty()) {
 		return;
@@ -94,6 +94,11 @@ void CConstruction::Load()
 
 	this->Width = this->File.Width;
 	this->Height = this->File.Height;
+#ifdef DYNAMIC_LOAD
+	if (!force) {
+		return;
+	}
+#endif
 	if (!file.empty()) {
 		ShowLoadProgress(_("Construction %s"), file.c_str());
 		this->Sprite = CPlayerColorGraphic::New(file, this->Width, this->Height);
@@ -108,7 +113,7 @@ void CConstruction::Load()
 		this->ShadowSprite = CGraphic::ForceNew(file, this->ShadowWidth, this->ShadowHeight);
 		this->ShadowSprite->Load();
 		this->ShadowSprite->Flip();
-		this->ShadowSprite->MakeShadow();
+		this->ShadowSprite->MakeShadow(0, 0); // FIXME: TODO: (timfel): construction shadows don't have X offset, so no shear?
 	}
 }
 

@@ -34,6 +34,16 @@
 #include <coz.h>
 #endif
 
+#include <string>
+#include <vector>
+
+#ifdef USE_OPENMP
+#include <omp.h>
+#else
+#define omp_get_thread_num() 0
+#define omp_get_num_threads() 1
+#endif
+
 //@{
 
 /*============================================================================
@@ -49,7 +59,11 @@
 
 #ifdef _MSC_VER
 
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
+
+#include <Shlobj.h>
 
 #if _MSC_VER >= 1800
 // From VS2013 onwards, std::min/max are only defined if algorithm is included
@@ -59,6 +73,7 @@
 #pragma warning(disable:4244)               /// Conversion from double to uchar
 #pragma warning(disable:4761)               /// Integral size mismatch
 #pragma warning(disable:4786)               /// Truncated to 255 chars
+#pragma warning(disable:4996)               /// Warning about POSIX names
 
 #ifndef __func__
 #define __func__ __FUNCTION__
@@ -112,8 +127,11 @@ extern void PrintLocation(const char *file, int line, const char *funcName);
 extern bool EnableDebugPrint;
 extern bool EnableAssert;
 extern bool EnableUnitDebug;
+extern bool IsRestart;
 extern bool IsDebugEnabled;
 extern bool EnableWallsInSinglePlayer;
+
+extern std::vector<std::string> OriginalArgv;
 
 extern void AbortAt(const char *file, int line, const char *funcName, const char *conditionStr);
 extern void PrintOnStdOut(const char *format, ...);
@@ -134,11 +152,8 @@ extern void PrintOnStdOut(const char *format, ...);
 ==  Definitions
 ============================================================================*/
 
-#include <string.h>
-
-#ifndef __UTIL_H__
 #include "util.h"
-#endif
+#include "settings.h"
 
 inline char *new_strdup(const char *str)
 {
@@ -154,20 +169,6 @@ inline char *new_strdup(const char *str)
 
 /// Text string: Name, Version, Copyright
 extern const char NameLine[];
-
-/*----------------------------------------------------------------------------
---  Some limits
-----------------------------------------------------------------------------*/
-
-#define PlayerMax    16                 /// How many players are supported
-#define UnitTypeMax  2048                /// How many unit types supported
-#define UpgradeMax   2048                /// How many upgrades supported
-#define MAX_RACES 8
-
-/// Frames per second to display (original 30-40)
-#define FRAMES_PER_SECOND  30  // 1/30s
-/// Game cycles per second to simulate (original 30-40)
-#define CYCLES_PER_SECOND  30  // 1/30s 0.33ms
 
 /*----------------------------------------------------------------------------
 --  stratagus.cpp

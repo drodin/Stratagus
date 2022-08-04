@@ -550,6 +550,8 @@ static CContentType *CclParseContent(lua_State *l)
 				content = new CContentTypeFormattedText2;
 			} else if (!strcmp(key, "Icon")) {
 				content = new CContentTypeIcon;
+			} else if (!strcmp(key, "Graphic")) {
+				content = new CContentTypeGraphic;
 			} else if (!strcmp(key, "LifeBar")) {
 				content = new CContentTypeLifeBar;
 			} else if (!strcmp(key, "CompleteBar")) {
@@ -703,7 +705,7 @@ static int CclDefineViewports(lua_State *l)
 			UI.Viewports[i].MapPos.y = LuaToNumber(l, j + 1, 2);
 			const int slot = LuaToNumber(l, j + 1, 3);
 			if (slot != -1) {
-				UI.Viewports[i].Unit = &UnitManager.GetSlotUnit(slot);
+				UI.Viewports[i].Unit = &UnitManager->GetSlotUnit(slot);
 			}
 			++i;
 		} else {
@@ -1080,6 +1082,8 @@ static int CclDefineButton(lua_State *l)
 				ba.Allowed = ButtonCheckUnitsAnd;
 			} else if (!strcmp(value, "check-units-not")) {
 				ba.Allowed = ButtonCheckUnitsNot;
+			} else if (!strcmp(value, "check-units-nor")) {
+				ba.Allowed = ButtonCheckUnitsNor;
 			} else if (!strcmp(value, "check-network")) {
 				ba.Allowed = ButtonCheckNetwork;
 			} else if (!strcmp(value, "check-no-network")) {
@@ -1156,6 +1160,32 @@ static int CclDefineButton(lua_State *l)
 	return 0;
 }
 
+static int CclCopyButtonsForUnitType(lua_State *l)
+{
+	LuaCheckArgs(l, 2);
+
+	// Slot identifier
+	const char* fromName = LuaToString(l, 1);
+	CUnitType *from = UnitTypeByIdent(fromName);
+	const char* toName = LuaToString(l, 2);
+	CUnitType *to = UnitTypeByIdent(toName);
+	if (!to) {
+		LuaError(l, "Unknown unit-type '%s'\n" _C_ toName);
+	}
+	if (!from) {
+		LuaError(l, "Unknown unit-type '%s'\n" _C_ fromName);
+	}
+
+	for (auto btn : UnitButtonTable) {
+		if (btn->UnitMask.find(fromName) != std::string::npos) {
+			btn->UnitMask += toName;
+			btn->UnitMask += ",";
+		}
+	}
+
+	return 0;
+}
+
 /**
 **  Run the set-selection-changed-hook.
 */
@@ -1189,19 +1219,30 @@ void SelectedUnitChanged()
 */
 static int CclSetSelectionStyle(lua_State *l)
 {
-	LuaCheckArgs(l, 1);
+	if (lua_gettop(l) < 1) {
+		LuaError(l, "incorrect argument");
+	}
 
 	const char *style = LuaToString(l, 1);
 	if (!strcmp(style, "rectangle")) {
+		LuaCheckArgs(l, 1);
 		DrawSelection = DrawSelectionRectangle;
 	} else if (!strcmp(style, "alpha-rectangle")) {
+		LuaCheckArgs(l, 1);
 		DrawSelection = DrawSelectionRectangleWithTrans;
 	} else if (!strcmp(style, "circle")) {
+		LuaCheckArgs(l, 1);
 		DrawSelection = DrawSelectionCircle;
 	} else if (!strcmp(style, "alpha-circle")) {
+		LuaCheckArgs(l, 1);
 		DrawSelection = DrawSelectionCircleWithTrans;
 	} else if (!strcmp(style, "corners")) {
+		LuaCheckArgs(l, 1);
 		DrawSelection = DrawSelectionCorners;
+	} else if (!strcmp(style, "ellipse")) {
+		LuaCheckArgs(l, 2);
+		float factor = LuaToFloat(l, 2);
+		DrawSelection = DrawSelectionEllipse(factor);
 	} else {
 		LuaError(l, "Unsupported selection style");
 	}
@@ -1281,6 +1322,27 @@ static int CclDefineMapSetup(lua_State *l)
 
 	return 0;
 }
+/**
+** <b>Description</b>
+**
+** Declare which codepage the font files are in. Text is handled internally
+** as UTF-8 everywhere, but the font rendering system uses graphics with 256
+** symbols. Commonly, DOS and early Windows games used codepage 437 or 1252 for
+** western European languages, or 866 for Russian and some other cyrillic
+** writing systems. These are the only ones that are currently supported, but
+** more can easily be added. All text is mapped into the codepage that is set
+** for the font files. If the codepage is not one of the supported ones, or if
+** something doesn't map (for example, some accented characters with codepage
+** 866, or cyrillic letters with codepage 437), a simple "visual" mapping to
+** 7-bit ASCII is used to at least print something that may be recognizable.
+*/
+static int CclSetFontCodePage(lua_State *l)
+{
+	LuaCheckArgs(l, 1);
+	FontCodePage = LuaToNumber(l, 1);
+
+	return 0;
+}
 
 /**
 **  Register CCL features for UI.
@@ -1309,6 +1371,8 @@ void UserInterfaceCclRegister()
 	lua_register(Lua, "SetWindowSize", CclSetWindowSize);
 	lua_register(Lua, "SetVerticalPixelSize", CclSetVerticalPixelSize);
 
+	lua_register(Lua, "SetFontCodePage", CclSetFontCodePage);
+
 	lua_register(Lua, "SetTitleScreens", CclSetTitleScreens);
 	lua_register(Lua, "ShowTitleScreens", CclShowTitleScreens);
 
@@ -1322,6 +1386,8 @@ void UserInterfaceCclRegister()
 
 	lua_register(Lua, "DefineButton", CclDefineButton);
 	lua_register(Lua, "ClearButtons", CclClearButtons);
+
+	lua_register(Lua, "CopyButtonsForUnitType", CclCopyButtonsForUnitType);
 
 	lua_register(Lua, "DefineButtonStyle", CclDefineButtonStyle);
 

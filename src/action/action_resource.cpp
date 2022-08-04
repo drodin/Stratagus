@@ -134,13 +134,28 @@ static bool FindNearestReachableTerrainType(int movemask, int resmask, int range
 	COrder_Resource *order = new COrder_Resource(harvester);
 	Vec2i ressourceLoc;
 
+	int targetFlag;
+	CMapField *mf = Map.Field(pos);
+	if (mf->Cost4OnMap()) {
+		order->CurrentResource = Cost4;
+		targetFlag = MapFieldCost4;
+	} else if (mf->Cost5OnMap()) {
+		order->CurrentResource = Cost5;
+		targetFlag = MapFieldCost5;
+	} else if (mf->Cost6OnMap()) {
+		order->CurrentResource = Cost6;
+		targetFlag = MapFieldCost6;
+	} else {
+		order->CurrentResource = WoodCost;
+		targetFlag = MapFieldForest;
+	}
+
 	//  Find the closest piece of wood next to a tile where the unit can move
-	if (!FindNearestReachableTerrainType(harvester.Type->MovementMask, MapFieldForest, 20, *harvester.Player, pos, &ressourceLoc)) {
+	if (!FindNearestReachableTerrainType(harvester.Type->MovementMask, targetFlag, 20, *harvester.Player, pos, &ressourceLoc)) {
 		DebugPrint("FIXME: Give up???\n");
 		ressourceLoc = pos;
 	}
 	order->goalPos = ressourceLoc;
-	order->CurrentResource = WoodCost; // Hard-coded resource.
 	return order;
 }
 
@@ -165,15 +180,6 @@ static bool FindNearestReachableTerrainType(int movemask, int resmask, int range
 	}
 	order->CurrentResource = harvester.CurrentResource;
 	order->DoneHarvesting = true;
-
-	if (harvester.CurrentResource) {
-		const ResourceInfo &resinfo = *harvester.Type->ResInfo[harvester.CurrentResource];
-		if (resinfo.TerrainHarvester && harvester.ResourcesHeld < resinfo.ResourceCapacity) {
-			// Need to finish harvesting first!
-			delete order;
-			return NewActionResource(harvester, harvester.tilePos);
-		}
-	}
 
 	if (depot == NULL) {
 		depot = FindDeposit(harvester, 1000, harvester.CurrentResource);
@@ -220,6 +226,8 @@ COrder_Resource::~COrder_Resource()
 	if (mine && mine->IsAlive()) {
 		worker->DeAssignWorkerFromMine(*mine);
 	}
+
+	Depot = NULL;
 
 	CUnit *goal = this->GetGoal();
 	if (goal) {
@@ -733,11 +741,18 @@ int COrder_Resource::GatherResource(CUnit &unit)
 		}
 
 		if (resinfo.TerrainHarvester) {
+			CMapField *mf = Map.Field(this->goalPos);
+			addload = std::min((int)mf->Value, addload);
 			unit.ResourcesHeld += addload;
-
-			if (addload && unit.ResourcesHeld == resinfo.ResourceCapacity) {
+			mf->Value -= addload;
+			if (mf->Value == 0) {
 				Map.ClearTile(this->goalPos);
+				this->DoneHarvesting = true;
+			} else if (unit.ResourcesHeld == resinfo.ResourceCapacity) {
+				// Mark as complete.
+				this->DoneHarvesting = true;
 			}
+			return 0;
 		} else {
 			if (resinfo.HarvestFromOutside) {
 				source = this->GetGoal();
@@ -790,14 +805,6 @@ int COrder_Resource::GatherResource(CUnit &unit)
 				source = NULL;
 				return 0;
 			}
-		}
-		if (resinfo.TerrainHarvester) {
-			if (unit.ResourcesHeld == resinfo.ResourceCapacity) {
-				// Mark as complete.
-				this->DoneHarvesting = true;
-			}
-			return 0;
-		} else {
 			if (resinfo.HarvestFromOutside) {
 				if ((unit.ResourcesHeld == resinfo.ResourceCapacity) || (source == NULL)) {
 					// Mark as complete.
@@ -908,10 +915,19 @@ int COrder_Resource::StopGathering(CUnit &unit)
 
 	// Find and send to resource deposit.
 	CUnit *depot = FindDeposit(unit, 1000, unit.CurrentResource);
+	// There's a bug in the traversal that leads to workers "sometimes" not finding their way to the old depot.
+	// timfel: of course, maybe it's actually nice that workers drop out towards their last depot...
+	if (!depot && (!(resinfo.HarvestFromOutside || resinfo.TerrainHarvester)) && Depot && Depot->IsAlive()) {
+		CUnit *depot = FindDeposit(unit, 1000, unit.CurrentResource);
+		Assert(unit.Container);
+		DropOutNearest(unit, Depot->tilePos + Depot->Type->GetHalfTileSize(), source);
+	}
+	Depot = depot;
 	if (!depot || !unit.ResourcesHeld || this->Finished) {
 		if (!(resinfo.HarvestFromOutside || resinfo.TerrainHarvester)) {
-			Assert(unit.Container);
-			DropOutOnSide(unit, LookingW, source);
+			if (unit.Container) {
+				DropOutOnSide(unit, LookingW, source);
+			}
 		}
 		CUnit *mine = this->Resource.Mine;
 
@@ -921,13 +937,15 @@ int COrder_Resource::StopGathering(CUnit &unit)
 		}
 
 		DebugPrint("%d: Worker %d report: Can't find a resource [%d] deposit.\n"
-				   _C_ unit.Player->Index _C_ UnitNumber(unit) _C_ unit.CurrentResource);
+				_C_ unit.Player->Index _C_ UnitNumber(unit) _C_ unit.CurrentResource);
 		this->Finished = true;
 		return 0;
 	} else {
 		if (!(resinfo.HarvestFromOutside || resinfo.TerrainHarvester)) {
-			Assert(unit.Container);
-			DropOutNearest(unit, depot->tilePos + depot->Type->GetHalfTileSize(), source);
+			if (unit.Container) {
+				// may have dropped out above
+				DropOutNearest(unit, depot->tilePos + depot->Type->GetHalfTileSize(), source);
+			}
 		}
 		UnitGotoGoal(unit, depot, SUB_MOVE_TO_DEPOT);
 	}

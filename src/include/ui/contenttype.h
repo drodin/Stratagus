@@ -142,6 +142,24 @@ public:
 
 private:
 	EnumUnit UnitRef;           /// Which unit icon to display.(itself, container, ...)
+	unsigned ButtonIcon:1;
+	unsigned SingleSelectionIcon:1;
+	unsigned GroupSelectionIcon:1;
+	unsigned TransportIcon:1;
+};
+
+/**
+**  Show a graphic
+*/
+class CContentTypeGraphic : public CContentType
+{
+public:
+	virtual void Draw(const CUnit &unit, CFont *defaultfont) const;
+	virtual void Parse(lua_State *l);
+
+private:
+	std::string graphic;
+	int frame;
 };
 
 /**

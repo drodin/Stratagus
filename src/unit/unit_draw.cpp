@@ -130,6 +130,7 @@ const CViewport *CurrentViewport;  /// FIXME: quick hack for split screen
 void DrawUnitSelection(const CViewport &vp, const CUnit &unit)
 {
 	IntColor color;
+	IntColor color2 = 0;
 
 	// FIXME: make these colors customizable with scripts.
 
@@ -141,14 +142,15 @@ void DrawUnitSelection(const CViewport &vp, const CUnit &unit)
 		} else if ((unit.Selected || (unit.Blink & 1))
 				   && (unit.Player == ThisPlayer || ThisPlayer->IsTeamed(unit))) {
 			color = ColorGreen;
+			color2 = ColorRed;
 		} else if (ThisPlayer->IsEnemy(unit)) {
 			color = ColorRed;
 		} else {
-			color = PlayerColors[GameSettings.Presets[unit.Player->Index].PlayerColor][0];
+			color = PlayerColorsRGB[GameSettings.Presets[unit.Player->Index].PlayerColor][0];
 
 			for (int i = 0; i < PlayerMax; ++i) {
 				if (unit.TeamSelected & (1 << i)) {
-					color = PlayerColors[GameSettings.Presets[i].PlayerColor][0];
+					color = PlayerColorsRGB[GameSettings.Presets[i].PlayerColor][0];
 				}
 			}
 		}
@@ -165,6 +167,11 @@ void DrawUnitSelection(const CViewport &vp, const CUnit &unit)
 	const PixelPos screenPos = vp.MapToScreenPixelPos(unit.GetMapPixelPosCenter());
 	const int x = screenPos.x - type.BoxWidth / 2 - (type.Width - (type.Sprite ? type.Sprite->Width : 0)) / 2;
 	const int y = screenPos.y - type.BoxHeight / 2 - (type.Height - (type.Sprite ? type.Sprite->Height : 0)) / 2;
+
+	if (color2 && Preference.SelectionRectangleIndicatesDamage) {
+		float fraction = (float)unit.Variable[HP_INDEX].Value / unit.Variable[HP_INDEX].Max;
+		color = InterpolateColor(color2, color, fraction);
+	}
 
 	DrawSelection(color, x + type.BoxOffsetX, y + type.BoxOffsetY, x + type.BoxWidth + type.BoxOffsetX, y + type.BoxHeight + type.BoxOffsetY);
 }
@@ -258,6 +265,29 @@ void DrawSelectionCorners(IntColor color, int x1, int y1, int x2, int y2)
 	Video.DrawHLineClip(color, x2 - CORNER_PIXELS + 1, y2, CORNER_PIXELS - 1);
 }
 
+/**
+**  Show selected units with ellipse. (Useful for fake-isometric views)
+**
+**  @param color  Color to draw circle
+**  @param x1,y1  Coordinates of the top left corner.
+**  @param x2,y2  Coordinates of the bottom right corner.
+**  @param factor Stretch factor in horizontal direction
+*/
+static float DrawSelectionEllipseFactor = 0.0f;
+void DrawSelectionEllipseFunc(IntColor color, int x1, int y1, int x2, int y2)
+{
+	float rx = (x2 - x1) / 2.0f;
+	float ry = (y2 - y1) * DrawSelectionEllipseFactor / 2.0f;
+	int xc = static_cast<int>(x1 + rx);
+	int yc = static_cast<int>(y2 - ry);
+
+	Video.DrawEllipseClip(color, xc, yc, static_cast<int>(rx), static_cast<int>(ry));
+}
+void (*DrawSelectionEllipse(float factor))(IntColor, int, int, int, int)
+{
+	DrawSelectionEllipseFactor = factor;
+	return DrawSelectionEllipseFunc;
+}
 
 /**
 **  Return the index of the sprite named SpriteName.
@@ -365,6 +395,21 @@ void CleanDecorations()
 }
 
 /**
+ * @brief Check if this decoration defines a condition on boolean flags and if so, if that condition matches.
+ * 
+ * @param type the unit type to check against
+ * @return true if the decoration has a condition on a boolean variable and that condition matches, false otherwise
+ */
+bool CDecoVar::BoolFlagMatches(const CUnitType &type) const
+{
+	if (BoolFlag != -1) {
+		return type.BoolFlag[BoolFlag].value != BoolFlagInvert;
+	} else {
+		return false;
+	}
+}
+
+/**
 **  Draw bar for variables.
 **
 **  @param x       X screen pixel position
@@ -376,6 +421,11 @@ void CDecoVarBar::Draw(int x, int y,
 					   const CUnitType &type, const CVariable &var) const
 {
 	Assert(var.Max);
+	
+	int percentage = var.Value * 100 / var.Max;
+	if (MinValue > percentage || MaxValue < percentage) {
+		return;
+	}
 
 	int height = this->Height;
 	if (height == 0) { // Default value
@@ -390,8 +440,14 @@ void CDecoVarBar::Draw(int x, int y,
 	if (this->IsVertical)  { // Vertical
 		w = width;
 		h = var.Value * height / var.Max;
+		if (Invert) {
+			h = height - h;
+		}
 	} else {
 		w = var.Value * width / var.Max;
+		if (Invert) {
+			w = width - w;
+		}
 		h = height;
 	}
 	if (this->IsCenteredInX) {
@@ -533,6 +589,35 @@ void CDecoVarStaticSprite::Draw(int x, int y, const CUnitType &/*type*/, const C
 }
 
 /**
+**  Draw an animated sprite.
+**
+**  @param x       X screen pixel position
+**  @param y       Y screen pixel position
+**  @param unit    Unit pointer
+**
+**  @todo fix sprite configuration configuration.
+*/
+void CDecoVarAnimatedSprite::Draw(int x, int y, const CUnitType &/*type*/, const CVariable &var) const
+{
+	Decoration &decosprite = DecoSprite.SpriteArray[(int)this->NSprite];
+	CGraphic &sprite = *decosprite.Sprite;
+
+	x += decosprite.HotPos.x; // in addition of OffsetX... Useful ?
+	y += decosprite.HotPos.y; // in addition of OffsetY... Useful ?
+	if (this->IsCenteredInX) {
+		x -= sprite.Width / 2;
+	}
+	if (this->IsCenteredInY) {
+		y -= sprite.Height / 2;
+	}
+	sprite.DrawFrameClip(this->n / this->WaitFrames, x, y);
+	if (this->lastFrame != (char)GameCycle) {
+		const_cast<CDecoVarAnimatedSprite*>(this)->lastFrame = (char)GameCycle;
+		const_cast<CDecoVarAnimatedSprite*>(this)->n = (this->n + 1) % (sprite.NumFrames * this->WaitFrames);
+	}	
+}
+
+/**
 **  Draw decoration (invis, for the unit.)
 **
 **  @param unit       Pointer to the unit.
@@ -545,7 +630,9 @@ static void DrawDecoration(const CUnit &unit, const CUnitType &type, const Pixel
 	int y = screenPos.y;
 #ifdef DEBUG
 	// Show the number of references.
-	CLabel(GetGameFont()).DrawClip(x + 1, y + 1, unit.Refs);
+	if (EnableDebugPrint) {
+		CLabel(GetGameFont()).DrawClip(x + 1, y + 1, unit.Refs);
+	}
 #endif
 
 	UpdateUnitVariables(const_cast<CUnit &>(unit));
@@ -561,9 +648,10 @@ static void DrawDecoration(const CUnit &unit, const CUnitType &type, const Pixel
 			  || (var.HideHalf && value != 0 && value != max)
 			  || (!var.ShowIfNotEnable && !unit.Variable[var.Index].Enable)
 			  || (var.ShowOnlySelected && !unit.Selected)
-			  || (unit.Player->Type == PlayerNeutral && var.HideNeutral)
+			  || (unit.Player->Type == PlayerTypes::PlayerNeutral && var.HideNeutral)
 			  || (ThisPlayer->IsEnemy(unit) && !var.ShowOpponent)
 			  || (ThisPlayer->IsAllied(unit) && (unit.Player != ThisPlayer) && var.HideAllied)
+			  || var.BoolFlagMatches(type)
 			  || max == 0)) {
 			var.Draw(
 				x + var.OffsetX + var.OffsetXPercent * unit.Type->TileWidth * PixelTileSize.x / 100,
@@ -573,7 +661,7 @@ static void DrawDecoration(const CUnit &unit, const CUnitType &type, const Pixel
 	}
 
 	// Draw group number
-	if (unit.Selected && unit.GroupId != 0
+	if (Preference.ShowOrders && unit.Selected && unit.GroupId != 0
 #ifndef DEBUG
 		&& unit.Player == ThisPlayer
 #endif
@@ -715,7 +803,7 @@ static void DrawInformations(const CUnit &unit, const CUnitType &type, const Pix
 		}
 		if (type.CanAttack) {
 			if (Preference.ShowReactionRange) {
-				const int value = (unit.Player->Type == PlayerPerson) ? type.ReactRangePerson : type.ReactRangeComputer;
+				const int value = (unit.Player->Type == PlayerTypes::PlayerPerson) ? type.ReactRangePerson : type.ReactRangeComputer;
 				const int radius = value * PixelTileSize.x + (type.TileWidth - 1) * PixelTileSize.x / 2;
 
 				if (value) {
@@ -796,9 +884,14 @@ static void DrawConstruction(const int player, const CConstructionFrame *cframe,
 {
 	PixelPos pos = screenPos;
 	if (cframe->File == ConstructionFileConstruction) {
-		const CConstruction &construction = *type.Construction;
+		CConstruction &construction = *type.Construction;
 		pos.x -= construction.Width / 2;
 		pos.y -= construction.Height / 2;
+#ifdef DYNAMIC_LOAD
+		if (!construction.Sprite) {
+			construction.Load(true);
+		}
+#endif
 		if (frame < 0) {
 			construction.Sprite->DrawPlayerColorFrameClipX(player, -frame - 1, pos.x, pos.y);
 		} else {
@@ -914,6 +1007,9 @@ void CUnit::Draw(const CViewport &vp) const
 				sprite = resinfo->SpriteWhenEmpty;
 			}
 		}
+	} else if (type->AltSprite && this->Variable[HP_INDEX].Value < (this->Variable[HP_INDEX].Max >> 1)) {
+		// TODO: (timfel) do we need more configurability? This at least is pretty fast to check
+		sprite = type->AltSprite;
 	}
 
 	//
@@ -931,7 +1027,7 @@ void CUnit::Draw(const CViewport &vp) const
 		// Draw the future unit type, if upgrading to it.
 		//
 	} else {
-		DrawUnitType(*type, sprite, GameSettings.Presets[player].PlayerColor, frame, screenPos);
+		DrawUnitType(*type, sprite, Colors < 0 ? GameSettings.Presets[player].PlayerColor : Colors, frame, screenPos);
 	}
 
 	// Unit's extras not fully supported.. need to be decorations themselves.

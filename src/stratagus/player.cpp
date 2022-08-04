@@ -318,10 +318,10 @@ bool NoRescueCheck;               /// Disable rescue check
 /**
 **  Colors used for minimap.
 */
-std::vector<CColor> PlayerColorsRGB[PlayerMax];
-std::vector<IntColor> PlayerColors[PlayerMax];
+std::vector<std::vector<CColor>> PlayerColorsRGB;
+std::vector<std::vector<SDL_Color>> PlayerColorsSDL;
 
-std::string PlayerColorNames[PlayerMax];
+std::vector<std::string> PlayerColorNames;
 
 /**
 **  Which indexes to replace with player color
@@ -372,11 +372,8 @@ void InitPlayers()
 {
 	for (int p = 0; p < PlayerMax; ++p) {
 		Players[p].Index = p;
-		if (!Players[p].Type) {
-			Players[p].Type = PlayerNobody;
-		}
-		for (int x = 0; x < PlayerColorIndexCount; ++x) {
-			PlayerColors[p][x] = Video.MapRGB(TheScreen->format, PlayerColorsRGB[p][x]);
+		if (Players[p].Type == PlayerTypes::PlayerUnset) {
+			Players[p].Type = PlayerTypes::PlayerNobody;
 		}
 	}
 }
@@ -398,10 +395,9 @@ void CleanPlayers()
 void FreePlayerColors()
 {
 	for (int i = 0; i < PlayerMax; ++i) {
-		Players[i].UnitColors.Colors.clear();
-		PlayerColorsRGB[i].clear();
-		PlayerColors[i].clear();
+		Players[i].ClearUnitColors();
 	}
+	PlayerColorsRGB.clear();
 }
 
 /**
@@ -451,13 +447,13 @@ void CPlayer::Save(CFile &file) const
 	file.printf("  \"name\", \"%s\",\n", p.Name.c_str());
 	file.printf("  \"type\", ");
 	switch (p.Type) {
-		case PlayerNeutral:       file.printf("\"neutral\",");         break;
-		case PlayerNobody:        file.printf("\"nobody\",");          break;
-		case PlayerComputer:      file.printf("\"computer\",");        break;
-		case PlayerPerson:        file.printf("\"person\",");          break;
-		case PlayerRescuePassive: file.printf("\"rescue-passive\","); break;
-		case PlayerRescueActive:  file.printf("\"rescue-active\","); break;
-		default:                  file.printf("%d,", p.Type); break;
+		case PlayerTypes::PlayerNeutral:       file.printf("\"neutral\",");         break;
+		case PlayerTypes::PlayerNobody:        file.printf("\"nobody\",");          break;
+		case PlayerTypes::PlayerComputer:      file.printf("\"computer\",");        break;
+		case PlayerTypes::PlayerPerson:        file.printf("\"person\",");          break;
+		case PlayerTypes::PlayerRescuePassive: file.printf("\"rescue-passive\","); break;
+		case PlayerTypes::PlayerRescueActive:  file.printf("\"rescue-active\","); break;
+		default:                  file.printf("%d,", (int)p.Type); break;
 	}
 	file.printf(" \"race\", \"%s\",", PlayerRaces.Name[p.Race].c_str());
 	file.printf(" \"ai-name\", \"%s\",\n", p.AiName.c_str());
@@ -604,7 +600,7 @@ void CPlayer::Save(CFile &file) const
 **
 **  @param type  Player type (Computer,Human,...).
 */
-void CreatePlayer(int type)
+void CreatePlayer(PlayerTypes type)
 {
 	if (NumPlayers == PlayerMax) { // already done for bigmaps!
 		return;
@@ -615,18 +611,18 @@ void CreatePlayer(int type)
 	player.Init(type);
 }
 
-void CPlayer::Init(/* PlayerTypes */ int type)
+void CPlayer::Init(PlayerTypes type)
 {
 	std::vector<CUnit *>().swap(this->Units);
 	std::vector<CUnit *>().swap(this->FreeWorkers);
 
 	//  Take first slot for person on this computer,
 	//  fill other with computer players.
-	if (type == PlayerPerson && !NetPlayers) {
+	if (type == PlayerTypes::PlayerPerson && !NetPlayers) {
 		if (!ThisPlayer) {
 			ThisPlayer = this;
 		} else {
-			type = PlayerComputer;
+			type = PlayerTypes::PlayerComputer;
 		}
 	}
 	if (NetPlayers && NumPlayers == NetLocalPlayerNumber) {
@@ -647,22 +643,22 @@ void CPlayer::Init(/* PlayerTypes */ int type)
 	//  All person players are enemies.
 	int team;
 	switch (type) {
-		case PlayerNeutral:
-		case PlayerNobody:
+		case PlayerTypes::PlayerNeutral:
+		case PlayerTypes::PlayerNobody:
 		default:
 			team = 0;
 			this->SetName("Neutral");
 			break;
-		case PlayerComputer:
+		case PlayerTypes::PlayerComputer:
 			team = 1;
 			this->SetName("Computer");
 			break;
-		case PlayerPerson:
+		case PlayerTypes::PlayerPerson:
 			team = 2 + NumPlayers;
 			this->SetName("Person");
 			break;
-		case PlayerRescuePassive:
-		case PlayerRescueActive:
+		case PlayerTypes::PlayerRescuePassive:
+		case PlayerTypes::PlayerRescueActive:
 			// FIXME: correct for multiplayer games?
 			this->SetName("Computer");
 			team = 2 + NumPlayers;
@@ -680,43 +676,43 @@ void CPlayer::Init(/* PlayerTypes */ int type)
 	//  Calculate enemy/allied mask.
 	for (int i = 0; i < NumPlayers; ++i) {
 		switch (type) {
-			case PlayerNeutral:
-			case PlayerNobody:
+			case PlayerTypes::PlayerNeutral:
+			case PlayerTypes::PlayerNobody:
 			default:
 				break;
-			case PlayerComputer:
+			case PlayerTypes::PlayerComputer:
 				// Computer allied with computer and enemy of all persons.
-				if (Players[i].Type == PlayerComputer) {
+				if (Players[i].Type == PlayerTypes::PlayerComputer) {
 					this->Allied |= (1 << i);
 					Players[i].Allied |= (1 << NumPlayers);
-				} else if (Players[i].Type == PlayerPerson || Players[i].Type == PlayerRescueActive) {
+				} else if (Players[i].Type == PlayerTypes::PlayerPerson || Players[i].Type == PlayerTypes::PlayerRescueActive) {
 					this->Enemy |= (1 << i);
 					Players[i].Enemy |= (1 << NumPlayers);
 				}
 				break;
-			case PlayerPerson:
+			case PlayerTypes::PlayerPerson:
 				// Humans are enemy of all?
-				if (Players[i].Type == PlayerComputer || Players[i].Type == PlayerPerson) {
+				if (Players[i].Type == PlayerTypes::PlayerComputer || Players[i].Type == PlayerTypes::PlayerPerson) {
 					this->Enemy |= (1 << i);
 					Players[i].Enemy |= (1 << NumPlayers);
-				} else if (Players[i].Type == PlayerRescueActive || Players[i].Type == PlayerRescuePassive) {
+				} else if (Players[i].Type == PlayerTypes::PlayerRescueActive || Players[i].Type == PlayerTypes::PlayerRescuePassive) {
 					this->Allied |= (1 << i);
 					Players[i].Allied |= (1 << NumPlayers);
 				}
 				break;
-			case PlayerRescuePassive:
+			case PlayerTypes::PlayerRescuePassive:
 				// Rescue passive are allied with persons
-				if (Players[i].Type == PlayerPerson) {
+				if (Players[i].Type == PlayerTypes::PlayerPerson) {
 					this->Allied |= (1 << i);
 					Players[i].Allied |= (1 << NumPlayers);
 				}
 				break;
-			case PlayerRescueActive:
+			case PlayerTypes::PlayerRescueActive:
 				// Rescue active are allied with persons and enemies of computer
-				if (Players[i].Type == PlayerComputer) {
+				if (Players[i].Type == PlayerTypes::PlayerComputer) {
 					this->Enemy |= (1 << i);
 					Players[i].Enemy |= (1 << NumPlayers);
-				} else if (Players[i].Type == PlayerPerson) {
+				} else if (Players[i].Type == PlayerTypes::PlayerPerson) {
 					this->Allied |= (1 << i);
 					Players[i].Allied |= (1 << NumPlayers);
 				}
@@ -742,9 +738,9 @@ void CPlayer::Init(/* PlayerTypes */ int type)
 	this->NumBuildings = 0;
 	this->Score = 0;
 
-	this->Color = PlayerColors[NumPlayers][0];
+	this->Color = PlayerColorsRGB[NumPlayers][0];
 
-	if (Players[NumPlayers].Type == PlayerComputer || Players[NumPlayers].Type == PlayerRescueActive) {
+	if (Players[NumPlayers].Type == PlayerTypes::PlayerComputer || Players[NumPlayers].Type == PlayerTypes::PlayerRescueActive) {
 		this->AiEnabled = true;
 	} else {
 		this->AiEnabled = false;
@@ -774,7 +770,7 @@ void CPlayer::Clear()
 {
 	Index = 0;
 	Name.clear();
-	Type = 0;
+	Type = PlayerTypes::PlayerUnset;
 	Race = 0;
 	AiName.clear();
 	Team = 0;
@@ -855,6 +851,36 @@ void CPlayer::RemoveUnit(CUnit &unit)
 	Assert(last == &unit || this->Units[last->PlayerSlot] == last);
 }
 
+std::vector<CUnit *>::const_iterator CPlayer::FreeWorkersBegin() const
+{
+	return FreeWorkers.begin();
+}
+
+std::vector<CUnit *>::iterator CPlayer::FreeWorkersBegin()
+{
+	return FreeWorkers.begin();
+}
+
+std::vector<CUnit *>::const_iterator CPlayer::FreeWorkersEnd() const
+{
+	return FreeWorkers.end();
+}
+
+std::vector<CUnit *>::iterator CPlayer::FreeWorkersEnd()
+{
+	return FreeWorkers.end();
+}
+
+CUnit *CPlayer::GetFreeWorker(int index) const
+{
+	return FreeWorkers[index];
+}
+
+int CPlayer::GetFreeWorkersCount() const
+{
+	return static_cast<int>(FreeWorkers.size());
+}
+
 void CPlayer::UpdateFreeWorkers()
 {
 	FreeWorkers.clear();
@@ -868,14 +894,13 @@ void CPlayer::UpdateFreeWorkers()
 
 	for (int i = 0; i < nunits; ++i) {
 		CUnit &unit = this->GetUnit(i);
-		if (unit.IsAlive() && unit.Type->BoolFlag[HARVESTER_INDEX].value && unit.Type->ResInfo && !unit.Removed) {
+		if (unit.IsAlive() && unit.Type->BoolFlag[HARVESTER_INDEX].value && !unit.Removed) {
 			if (unit.CurrentAction() == UnitActionStill) {
 				FreeWorkers.push_back(&unit);
 			}
 		}
 	}
 }
-
 
 std::vector<CUnit *>::const_iterator CPlayer::UnitBegin() const
 {
@@ -1212,7 +1237,7 @@ void PlayersEachCycle()
 			if (p.LostMainFacilityTimer && !p.IsRevealed() && p.LostMainFacilityTimer < ((int) GameCycle)) {
 				p.SetRevealed(true);
 				for (int j = 0; j < NumPlayers; ++j) {
-					if (player != j && Players[j].Type != PlayerNobody) {
+					if (player != j && Players[j].Type != PlayerTypes::PlayerNobody) {
 						Players[j].Notify(_("%s has not rebuilt their base and is being revealed!"), p.Name.c_str());
 					} else {
 						Players[j].Notify("%s", _("You have not rebuilt your base and have been revealed!"));
@@ -1257,12 +1282,14 @@ void PlayersEachSecond(int playerIdx)
 **  @param player  Pointer to player.
 **  @param sprite  The sprite in which the colors should be changed.
 */
-void GraphicPlayerPixels(CPlayer &player, const CGraphic &sprite)
+void GraphicPlayerPixels(int colorIndex, const CGraphic &sprite)
 {
 	Assert(PlayerColorIndexCount);
 
 	Assert(SDL_MUSTLOCK(sprite.Surface) == 0);
-	std::vector<SDL_Color> sdlColors(player.UnitColors.Colors.begin(), player.UnitColors.Colors.end());
+	// TODO: This vector allocation is costly in profiles
+	std::vector<SDL_Color> sdlColors = PlayerColorsSDL[colorIndex];
+	Assert(!sprite.Surface->format->palette || sprite.Surface->format->palette->ncolors > PlayerColorIndexStart + PlayerColorIndexCount);
 	SDL_SetPaletteColors(sprite.Surface->format->palette, &sdlColors[0], PlayerColorIndexStart, PlayerColorIndexCount);
 	if (sprite.SurfaceFlip) {
 		SDL_SetPaletteColors(sprite.SurfaceFlip->format->palette, &sdlColors[0], PlayerColorIndexStart, PlayerColorIndexCount);
@@ -1276,8 +1303,10 @@ void GraphicPlayerPixels(CPlayer &player, const CGraphic &sprite)
 */
 void SetPlayersPalette()
 {
+	PlayerColorsSDL.clear();
 	for (int i = 0; i < PlayerMax; ++i) {
-		Players[i].UnitColors.Colors = PlayerColorsRGB[i];
+		Players[i].SetUnitColors(PlayerColorsRGB[i]);
+		PlayerColorsSDL.push_back(std::vector<SDL_Color>(PlayerColorsRGB[i].begin(), PlayerColorsRGB[i].end()));
 	}
 }
 
@@ -1290,20 +1319,19 @@ void DebugPlayers()
 	DebugPrint("Nr   Color   I Name     Type         Race    Ai\n");
 	DebugPrint("--  -------- - -------- ------------ ------- -----\n");
 	for (int i = 0; i < PlayerMax; ++i) {
-		if (Players[i].Type == PlayerNobody) {
+		if (Players[i].Type == PlayerTypes::PlayerNobody) {
 			continue;
 		}
 		const char *playertype;
 
 		switch (Players[i].Type) {
-			case 0: playertype = "Don't know 0"; break;
-			case 1: playertype = "Don't know 1"; break;
-			case 2: playertype = "neutral     "; break;
-			case 3: playertype = "nobody      "; break;
-			case 4: playertype = "computer    "; break;
-			case 5: playertype = "person      "; break;
-			case 6: playertype = "rescue pas. "; break;
-			case 7: playertype = "rescue akt. "; break;
+			case PlayerTypes::PlayerUnset: playertype = "unset     "; break;
+			case PlayerTypes::PlayerNeutral: playertype = "neutral     "; break;
+			case PlayerTypes::PlayerNobody: playertype = "nobody      "; break;
+			case PlayerTypes::PlayerComputer: playertype = "computer    "; break;
+			case PlayerTypes::PlayerPerson: playertype = "person      "; break;
+			case PlayerTypes::PlayerRescuePassive: playertype = "rescue pas. "; break;
+			case PlayerTypes::PlayerRescueActive: playertype = "rescue akt. "; break;
 			default : playertype = "?unknown?   "; break;
 		}
 		DebugPrint("%2d: %8.8s %c %-8.8s %s %7s %s\n" _C_ i _C_ PlayerColorNames[i].c_str() _C_
@@ -1313,6 +1341,11 @@ void DebugPlayers()
 				   PlayerRaces.Name[Players[i].Race].c_str() _C_
 				   Players[i].AiName.c_str());
 	}
+	DebugPrint("GameSettings\n");
+	DebugPrint("--  -------- - -------- ------------ ------- -----\n");
+	GameSettings.Save(+[](std::string f) {
+		DebugPrint("%s\n" _C_ f.c_str());
+	}, true);
 #endif
 }
 
@@ -1492,6 +1525,16 @@ bool CPlayer::IsTeamed(const CPlayer &player) const
 bool CPlayer::IsTeamed(const CUnit &unit) const
 {
 	return this->IsTeamed(*unit.Player);
+}
+
+void CPlayer::ClearUnitColors()
+{
+	UnitColors.Clear();
+}
+
+void CPlayer::SetUnitColors(std::vector<CColor> &colors)
+{
+	UnitColors.Set(colors);
 }
 
 //@}

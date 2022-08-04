@@ -70,6 +70,7 @@
 extern void DoScrollArea(int state, bool fast, bool isKeyboard);
 extern void DrawGuichanWidgets();
 extern void CleanGame();
+extern void CreateGame(const std::string &filename, CMap *map);
 
 /*----------------------------------------------------------------------------
 --  Defines
@@ -145,16 +146,26 @@ static gcn::DropDown *toolDropdown;
 **  Edit tile.
 **
 **  @param pos   map tile coordinate.
-**  @param tile  Tile type to edit.
+**  @param tile  Tile type to edit or -1, to edit the tile under the brush according to the modifiers
 */
 static void EditTile(const Vec2i &pos, int tile)
 {
-	Assert(Map.Info.IsPointOnMap(pos));
+ 	Assert(Map.Info.IsPointOnMap(pos));	
 
 	const CTileset &tileset = *Map.Tileset;
-	const int baseTileIndex = tileset.findTileIndexByTile(tile);
-	const int tileIndex = tileset.getTileNumber(baseTileIndex, TileToolRandom, TileToolDecoration);
+	int baseTileIndex = tileset.findTileIndexByTile(tile);
 	CMapField &mf = *Map.Field(pos);
+	if (baseTileIndex <= 0) {
+		// use the tile under the cursor and randomize *that* if it's
+		// not a mix tile
+		baseTileIndex = tileset.findTileIndexByTile(mf.getGraphicTile());
+		const int mixTerrainIdx = tileset.tiles[baseTileIndex].tileinfo.MixTerrain;
+		if (mixTerrainIdx > 0) {
+			return;
+		}
+		baseTileIndex = baseTileIndex / 16 * 16;
+	}
+	const int tileIndex = tileset.getTileNumber(baseTileIndex, TileToolRandom, TileToolDecoration);
 	mf.setTileIndex(tileset, tileIndex, 0);
 	mf.playerInfo.SeenTile = mf.getGraphicTile();
 
@@ -532,19 +543,19 @@ static void DrawPlayers()
 {
 	forEachPlayerSelectionBoxArea([](int i, int x, int y, int w, int h) {
 		// draw highlight
-		if (i == Editor.CursorPlayer && Map.Info.PlayerType[i] != PlayerNobody) {
+		if (i == Editor.CursorPlayer && Map.Info.PlayerType[i] != PlayerTypes::PlayerNobody) {
 			Video.DrawRectangle(ColorWhite, x, y, getPlayerButtonSize(), getPlayerButtonSize());
 		}
 
 		// draw border 1px inside highlight
 		Video.DrawRectangle(
-			i == Editor.CursorPlayer && Map.Info.PlayerType[i] != PlayerNobody ? ColorWhite : ColorGray,
+			i == Editor.CursorPlayer && Map.Info.PlayerType[i] != PlayerTypes::PlayerNobody ? ColorWhite : ColorGray,
 			x + 1, y + 1, getPlayerButtonSize() - 1, getPlayerButtonSize() - 1);
 
 		// if player exists, draw player color 2px inside highlight
-		if (Map.Info.PlayerType[i] != PlayerNobody) {
+		if (Map.Info.PlayerType[i] != PlayerTypes::PlayerNobody) {
 			Video.FillRectangle(
-				PlayerColors[GameSettings.Presets[i].PlayerColor][0], 
+				PlayerColorsRGB[GameSettings.Presets[i].PlayerColor][0], 
 				x + 2, y + 2, getPlayerButtonSize() - 2, getPlayerButtonSize() - 2);
 		}
 
@@ -668,7 +679,9 @@ static bool forEachTileOptionArea(std::function<bool(bool,std::string,int,int,in
 		{ TileCursorSize == 1, "1x1" },
 		{ TileCursorSize == 2, "2x2" },
 		{ TileCursorSize == 3, "3x3" },
-		{ TileCursorSize == 4, "4x4" }
+		{ TileCursorSize == 4, "4x4" },
+		{ TileCursorSize == 5, "5x5" },
+		{ TileCursorSize == 10, "10x10" }
 	};
 
 	std::vector<std::pair<bool, std::string>> options = {
@@ -921,10 +934,15 @@ static void DrawStartLocations()
 		vp->SetClipping();
 
 		for (int i = 0; i < PlayerMax; i++) {
-			if (Map.Info.PlayerType[i] != PlayerNobody && Map.Info.PlayerType[i] != PlayerNeutral) {
+			if (Map.Info.PlayerType[i] != PlayerTypes::PlayerNobody && Map.Info.PlayerType[i] != PlayerTypes::PlayerNeutral) {
 				const PixelPos startScreenPos = vp->TilePosToScreen_TopLeft(Players[i].StartPos);
 
 				if (type) {
+#ifdef DYNAMIC_LOAD
+					if (!type->Sprite) {
+						LoadUnitTypeSprite(*const_cast<CUnitType *>(type));
+					}
+#endif
 					DrawUnitType(*type, type->Sprite, i, 0, startScreenPos);
 				} else { // Draw a cross
 					DrawCross(startScreenPos, Map.Tileset->getPixelTileSize(), Players[i].Color);
@@ -998,7 +1016,7 @@ static void ShowUnitInfo(const CUnit &unit)
 	char buf[256];
 
 	int n = sprintf(buf, _("#%d '%s' Player:#%d %s"), UnitNumber(unit),
-					unit.Type->Name.c_str(), unit.Player->Index,
+					unit.Type->Name.c_str(), unit.Player->Index + 1,
 					unit.Active ? "active" : "passive");
 	if (unit.Type->GivesResource) {
 		sprintf(buf + n, _(" Amount %d"), unit.ResourcesHeld);
@@ -1093,6 +1111,35 @@ static void EditorCallbackButtonUp(unsigned button)
 	if ((1 << button) == LeftButton) {
 		UnitPlacedThisPress = false;
 	}
+
+	if (CursorState == CursorStateRectangle && !(MouseButtons & LeftButton)) { // leave select mode
+		int num = 0;
+		PixelPos pos0 = CursorStartMapPos;
+		const PixelPos cursorMapPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
+		PixelPos pos1 = cursorMapPos;
+		if (pos0.x > pos1.x) {
+			std::swap(pos0.x, pos1.x);
+		}
+		if (pos0.y > pos1.y) {
+			std::swap(pos0.y, pos1.y);
+		}
+
+		const Vec2i t0 = Map.MapPixelPosToTilePos(pos0);
+		const Vec2i t1 = Map.MapPixelPosToTilePos(pos1);
+		std::vector<CUnit *> table;
+		Select(t0, t1, table);
+
+		if (!(KeyModifiers & ModifierShift)) {
+			UnSelectAll();
+		}
+		for (auto u : table) {
+			SelectUnit(*u);
+		}
+		CursorStartScreenPos.x = 0;
+		CursorStartScreenPos.y = 0;
+		GameCursor = UI.Point.Cursor;
+		CursorState = CursorStatePoint;
+	}
 }
 
 /**
@@ -1132,9 +1179,11 @@ static void EditorCallbackButtonDown(unsigned button)
 				case 301: TileCursorSize = 2; return;
 				case 302: TileCursorSize = 3; return;
 				case 303: TileCursorSize = 4; return;
-				case 304: TileToolRandom ^= 1; return;
-				case 305: TileToolDecoration ^= 1; return;
-			    case 306: {
+				case 304: TileCursorSize = 5; return;
+				case 305: TileCursorSize = 10; return;
+				case 306: TileToolRandom ^= 1; return;
+				case 307: TileToolDecoration ^= 1; return;
+			    case 308: {
 					TileToolNoFixup = !TileToolNoFixup;
 					// switch the selected tiles
 					if (TileToolNoFixup) {
@@ -1156,9 +1205,14 @@ static void EditorCallbackButtonDown(unsigned button)
 			}
 		}
 		
-		if (Editor.CursorTileIndex != -1) {
-			Editor.SelectedTileIndex = Editor.CursorTileIndex;
+		if (MouseButtons & RightButton) {
+			Editor.SelectedTileIndex = -1;
 			return;
+		} else {
+			if (Editor.CursorTileIndex != -1) {
+				Editor.SelectedTileIndex = Editor.CursorTileIndex;
+				return;
+			}
 		}
 	}
 
@@ -1166,7 +1220,7 @@ static void EditorCallbackButtonDown(unsigned button)
 	if (Editor.State == EditorEditUnit || Editor.State == EditorSetStartLocation) {
 		// Cursor on player icons
 		if (Editor.CursorPlayer != -1) {
-			if (Map.Info.PlayerType[Editor.CursorPlayer] != PlayerNobody) {
+			if (Map.Info.PlayerType[Editor.CursorPlayer] != PlayerTypes::PlayerNobody) {
 				Editor.SelectedPlayer = Editor.CursorPlayer;
 				ThisPlayer = Players + Editor.SelectedPlayer;
 			}
@@ -1183,10 +1237,14 @@ static void EditorCallbackButtonDown(unsigned button)
 				CursorBuilding = const_cast<CUnitType *>(Editor.ShownUnitTypes[Editor.CursorUnitIndex]);
 				return;
 			} else if (MouseButtons & RightButton) {
-				char buf[256];
-				snprintf(buf, sizeof(buf), "if (EditUnitTypeProperties ~= nil) then EditUnitTypeProperties(\"%s\") end;", Editor.ShownUnitTypes[Editor.CursorUnitIndex]->Ident.c_str());
-				Editor.CursorUnitIndex = -1;
-				CclCommand(buf);
+				lua_getglobal(Lua, "EditUnitTypeProperties"); // function to be called
+				if (lua_isfunction(Lua, -1) == 1) {
+					lua_pushstring(Lua, Editor.ShownUnitTypes[Editor.CursorUnitIndex]->Ident.c_str());
+					LuaCall(1, 1, false);
+					Editor.CursorUnitIndex = -1;
+				} else {
+					lua_pop(Lua, 1);
+				}
 				return;
 			}
 		}
@@ -1194,8 +1252,24 @@ static void EditorCallbackButtonDown(unsigned button)
 
 	// Right click on a resource
 	if (Editor.State == EditorSelecting) {
-		if ((MouseButtons & RightButton) && UnitUnderCursor != NULL) {
-			CclCommand("if (EditUnitProperties ~= nil) then EditUnitProperties() end;");
+		if ((MouseButtons & RightButton) && (UnitUnderCursor != NULL || !Selected.empty())) {
+			lua_getglobal(Lua, "EditUnitProperties");
+			if (lua_isfunction(Lua, -1) == 1) {
+				lua_newtable(Lua);
+				int n = 0;
+				if (!Selected.empty()) {
+					for (auto u : Selected) {
+						lua_pushnumber(Lua, UnitNumber(*u));
+						lua_rawseti(Lua, -2, ++n);
+					}
+				} else {
+					lua_pushnumber(Lua, UnitNumber(*UnitUnderCursor));
+					lua_rawseti(Lua, -2, ++n);
+				}
+				LuaCall(1, 1, false);
+			} else {
+				lua_pop(Lua, 1);
+			}
 			return;
 		}
 	}
@@ -1223,9 +1297,8 @@ static void EditorCallbackButtonDown(unsigned button)
 		if (MouseButtons & LeftButton) {
 			const Vec2i tilePos = UI.MouseViewport->ScreenToTilePos(CursorScreenPos);
 
-			if (Editor.State == EditorEditTile &&
-				Editor.SelectedTileIndex != -1) {
-				EditTiles(tilePos, Editor.ShownTileTypes[Editor.SelectedTileIndex], TileCursorSize);
+			if (Editor.State == EditorEditTile && (Editor.SelectedTileIndex != -1 || (KeyModifiers & ModifierAlt))) {
+				EditTiles(tilePos, Editor.SelectedTileIndex != -1 ? Editor.ShownTileTypes[Editor.SelectedTileIndex] : -1, TileCursorSize);
 			} else if (Editor.State == EditorEditUnit) {
 				if (!UnitPlacedThisPress && CursorBuilding) {
 					if (CanBuildUnitType(NULL, *CursorBuilding, tilePos, 1)) {
@@ -1242,6 +1315,11 @@ static void EditorCallbackButtonDown(unsigned button)
 				}
 			} else if (Editor.State == EditorSetStartLocation) {
 				Players[Editor.SelectedPlayer].StartPos = tilePos;
+			} else if (Editor.State == EditorSelecting) {
+				CursorStartScreenPos = CursorScreenPos;
+				CursorStartMapPos = UI.MouseViewport->ScreenToMapPixelPos(CursorScreenPos);
+				GameCursor = UI.Cross.Cursor;
+				CursorState = CursorStateRectangle;
 			}
 		} else if (MouseButtons & MiddleButton) {
 			// enter move map mode
@@ -1377,21 +1455,33 @@ static void EditorCallbackKeyDown(unsigned key, unsigned keychar)
 			KeyScrollState |= ScrollRight;
 			break;
 		case '0':
-			if (UnitUnderCursor != NULL) {
-				UnitUnderCursor->ChangeOwner(Players[PlayerNumNeutral]);
-				UI.StatusLine.Set(_("Unit owner modified"));
+			if (!(KeyModifiers & ModifierAlt)) {
+				if (UnitUnderCursor != NULL) {
+					UnitUnderCursor->ChangeOwner(Players[PlayerNumNeutral]);
+					UI.StatusLine.Set(_("Unit owner modified"));
+				}
+				break;
+			} else {
+				// fallthrough
 			}
-			break;
 		case '1': case '2':
 		case '3': case '4': case '5':
 		case '6': case '7': case '8':
-		case '9':
-			if (UnitUnderCursor != NULL && Map.Info.PlayerType[(int) key - '1'] != PlayerNobody) {
-				UnitUnderCursor->ChangeOwner(Players[(int) key - '1']);
+		case '9': {
+			int pnum = (int) key - '1';
+			if (KeyModifiers & ModifierAlt) {
+				pnum += 10;
+				if (pnum >= PlayerMax) {
+					break;
+				}
+			}
+			if (UnitUnderCursor != NULL && Map.Info.PlayerType[pnum] != PlayerTypes::PlayerNobody) {
+				UnitUnderCursor->ChangeOwner(Players[pnum]);
 				UI.StatusLine.Set(_("Unit owner modified"));
 				UpdateMinimap = true;
 			}
 			break;
+		}
 
 		default:
 			HandleCommandKey(key);
@@ -1458,7 +1548,7 @@ static bool EditorCallbackMouse_EditUnitArea(const PixelPos &screenPos)
 
 	bool noHit = forEachPlayerSelectionBoxArea([screenPos](int i, int x, int y, int w, int h) {
 		if (x < screenPos.x && screenPos.x < x + w && y < screenPos.y && screenPos.y < y + h) {
-			if (Map.Info.PlayerType[i] != PlayerNobody) {
+			if (Map.Info.PlayerType[i] != PlayerTypes::PlayerNobody) {
 				char buf[256];
 				snprintf(buf, sizeof(buf), _("Select player #%d"), i + 1);
 				UI.StatusLine.Set(buf);
@@ -1601,8 +1691,8 @@ static void EditorCallbackMouse(const PixelPos &pos)
 		RestrictCursorToViewport();
 		const Vec2i tilePos = UI.SelectedViewport->ScreenToTilePos(CursorScreenPos);
 
-		if (Editor.State == EditorEditTile && Editor.SelectedTileIndex != -1) {
-			EditTiles(tilePos, Editor.ShownTileTypes[Editor.SelectedTileIndex], TileCursorSize);
+		if (Editor.State == EditorEditTile && (Editor.SelectedTileIndex != -1 || (KeyModifiers & ModifierAlt))) {
+			EditTiles(tilePos, Editor.SelectedTileIndex != -1 ? Editor.ShownTileTypes[Editor.SelectedTileIndex] : -1, TileCursorSize);
 		} else if (Editor.State == EditorEditUnit && CursorBuilding) {
 			if (!UnitPlacedThisPress) {
 				if (CanBuildUnitType(NULL, *CursorBuilding, tilePos, 1)) {
@@ -1656,6 +1746,8 @@ static void EditorCallbackMouse(const PixelPos &pos)
 		ButtonUnderCursor = ButtonUnderMenu;
 		CursorOn = CursorOnButton;
 		return;
+	} else {
+		ButtonAreaUnderCursor = -1;
 	}
 
 	// Minimap
@@ -1733,12 +1825,12 @@ void CEditor::Init()
 		InitPlayers();
 		for (int i = 0; i < PlayerMax; ++i) {
 			if (i == PlayerNumNeutral) {
-				CreatePlayer(PlayerNeutral);
-				Map.Info.PlayerType[i] = PlayerNeutral;
+				CreatePlayer(PlayerTypes::PlayerNeutral);
+				Map.Info.PlayerType[i] = PlayerTypes::PlayerNeutral;
 				Map.Info.PlayerSide[i] = Players[i].Race = 0;
 			} else {
-				CreatePlayer(PlayerNobody);
-				Map.Info.PlayerType[i] = PlayerNobody;
+				CreatePlayer(PlayerTypes::PlayerNobody);
+				Map.Info.PlayerType[i] = PlayerTypes::PlayerNobody;
 			}
 		}
 
@@ -1761,7 +1853,7 @@ void CEditor::Init()
 
 	// Place the start points, which the loader discarded.
 	for (int i = 0; i < PlayerMax; ++i) {
-		if (Map.Info.PlayerType[i] != PlayerNobody) {
+		if (Map.Info.PlayerType[i] != PlayerTypes::PlayerNobody) {
 			// Set SelectedPlayer to a valid player
 			if (Editor.SelectedPlayer == PlayerNumNeutral) {
 				Editor.SelectedPlayer = i;
@@ -1912,18 +2004,18 @@ void EditorMainLoop()
 	LambdaActionListener *toolDropdownListener = new LambdaActionListener([&toolListStrings](const std::string&) {
 		int selected = toolDropdown->getSelected();
 		// Click on mode area
+		Editor.CursorUnitIndex = Editor.CursorTileIndex = Editor.SelectedUnitIndex = Editor.SelectedTileIndex = -1;
+		CursorBuilding = nullptr;
+		Editor.UnitIndex = Editor.TileIndex = 0;
 		switch (selected) {
 			case 0:
 				Editor.State = EditorSelecting;
 				editorSlider->setVisible(false);
 				return;
 			case 1:
-				if (EditorEditTile) {
-					Editor.State = EditorEditTile;
-				}
+				Editor.State = EditorEditTile;
 				editorSlider->setVisible(true);
 				editorSlider->setValue(0);
-				Editor.TileIndex = 0;
 				return;
 			case 2:
 				Editor.State = EditorSetStartLocation;
@@ -1934,7 +2026,6 @@ void EditorMainLoop()
 				RecalculateShownUnits();
 				editorSlider->setVisible(true);
 				editorSlider->setValue(0);
-				Editor.UnitIndex = 0;
 				return;
 			default: {
 				std::string selectedString = toolListStrings[selected];
@@ -1957,7 +2048,6 @@ void EditorMainLoop()
 				RecalculateShownUnits(startIndex, endIndex);
 				editorSlider->setVisible(true);
 				editorSlider->setValue(0);
-				Editor.UnitIndex = 0;
 				break;
 			}
 		}
@@ -2015,8 +2105,6 @@ void EditorMainLoop()
 		bool start = true;
 
 		while (Editor.Running) {
-			CheckMusicFinished();
-
 			if (FrameCounter % FRAMES_PER_SECOND == 0) {
 				if (UpdateMinimap) {
 					UI.Minimap.Update();

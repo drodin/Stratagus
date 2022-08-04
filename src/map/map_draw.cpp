@@ -261,19 +261,22 @@ void CViewport::DrawMapBackgroundInViewport() const
 	int ey = this->BottomRightPos.y;
 	int sy = this->MapPos.y;
 	int dy = this->TopLeftPos.y - this->Offset.y;
-	const int map_max = Map.Info.MapWidth * Map.Info.MapHeight;
+	const int mapW = Map.Info.MapWidth;
+	const int mapH = Map.Info.MapHeight;
+	const int map_max = mapW * mapH;
+	bool canShortcut = FogOfWar->GetType() != FogOfWarTypes::cEnhanced && !ReplayRevealMap;
 
 	while (sy  < 0) {
 		sy++;
 		dy += PixelTileSize.y;
 	}
-	sy *=  Map.Info.MapWidth;
+	sy *=  mapW;
 
 	while (dy <= ey && sy  < map_max) {
 		int sx = this->MapPos.x + sy;
 		int dx = this->TopLeftPos.x - this->Offset.x;
-		while (dx <= ex && (sx - sy < Map.Info.MapWidth)) {
-			if (sx - sy < 0) {
+		while (dx <= ex && (sx - sy < mapW)) {
+			if (sx - sy < 0 || (canShortcut && !FogOfWar->GetVisibilityForTile(Vec2i(sx % mapW, sx / mapH)))) {
 				++sx;
 				dx += PixelTileSize.x;
 				continue;
@@ -286,10 +289,42 @@ void CViewport::DrawMapBackgroundInViewport() const
 				tile = mf.playerInfo.SeenTile;
 			}
 			Map.TileGraphic->DrawFrameClip(tile, dx, dy);
+#if 0
+			int64_t cost = mf.lastAStarCost;
+			int32_t alpha;
+			// we use the msb as marker, but only consider the lower 32-bits as numeric value
+			if (cost != 0) {
+				if (cost == -1) {
+					// non traversible tiles always start full red
+					alpha = -60;
+				} else if (cost > 0) {
+					// msb not set means this has not been scaled
+					// scale cost to be between 1 and 60
+					cost <<= 3;
+					if (cost > 60) {
+						cost = 60;
+					}
+					alpha = static_cast<int32_t>(cost);
+				} else {
+					// consider only low 32-bits of already scaled value
+					alpha = static_cast<int32_t>(cost);
+				}
+			}
+			if (alpha > 0) {
+				Video.FillTransRectangleClip(ColorGreen, dx, dy,
+								 dx + Map.TileGraphic->getWidth(), dy + dx + Map.TileGraphic->getWidth(), alpha * 200 / 60);
+				alpha--;
+			} else if (alpha < 0) {
+				Video.FillTransRectangleClip(ColorRed, dx, dy,
+								 dx + Map.TileGraphic->getWidth(), dy + dx + Map.TileGraphic->getWidth(), -alpha * 200 / 60);
+				alpha++;
+			}
+			const_cast<CMapField &>(mf).lastAStarCost = alpha | ((uint64_t)1 << 63);
+#endif
 			++sx;
 			dx += PixelTileSize.x;
 		}
-		sy += Map.Info.MapWidth;
+		sy += mapW;
 		dy += PixelTileSize.y;
 	}
 	if (CViewport::isGridEnabled()) {
@@ -386,7 +421,7 @@ void CViewport::Draw()
 					++k;
 				}
 			} else if (j == nmissiles) {
-				if (unittable[i]->Type->DrawLevel < particletable[k]->getDrawLevel()) {
+				if (unittable[i]->GetDrawLevel() < particletable[k]->getDrawLevel()) {
 					unittable[i]->Draw(*this);
 					++i;
 				} else {
@@ -394,7 +429,7 @@ void CViewport::Draw()
 					++k;
 				}
 			} else if (k == nparticles) {
-				if (unittable[i]->Type->DrawLevel < missiletable[j]->Type->DrawLevel) {
+				if (unittable[i]->GetDrawLevel() < missiletable[j]->Type->DrawLevel) {
 					unittable[i]->Draw(*this);
 					++i;
 				} else {
@@ -405,8 +440,8 @@ void CViewport::Draw()
 					++j;
 				}
 			} else {
-				if (unittable[i]->Type->DrawLevel <= missiletable[j]->Type->DrawLevel) {
-					if (unittable[i]->Type->DrawLevel < particletable[k]->getDrawLevel()) {
+				if (unittable[i]->GetDrawLevel() <= missiletable[j]->Type->DrawLevel) {
+					if (unittable[i]->GetDrawLevel() < particletable[k]->getDrawLevel()) {
 						unittable[i]->Draw(*this);
 						++i;
 					} else {
@@ -448,6 +483,7 @@ void CViewport::Draw()
 	// If there was a click missile, draw it again here above the fog
 	if (clickMissile != NULL) {
 		Vec2i pos = Map.MapPixelPosToTilePos(clickMissile->position);
+		Map.Clamp(pos);
 		if (Map.Field(pos.x, pos.y)->playerInfo.TeamVisibilityState(*ThisPlayer) != 2) {
 			// if this tile is not visible, we want to draw the click on top of
 			// the fog again

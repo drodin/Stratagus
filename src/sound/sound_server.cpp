@@ -35,6 +35,8 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
+#include <numeric>
+
 #include "stratagus.h"
 
 #include "sound_server.h"
@@ -50,9 +52,12 @@
 #include "SDL.h"
 #include "SDL_mixer.h"
 
+
 /*----------------------------------------------------------------------------
 --  Variables
 ----------------------------------------------------------------------------*/
+
+uint32_t SDL_SOUND_FINISHED;
 
 static bool SoundInitialized;    /// is sound initialized
 static bool MusicEnabled = true;
@@ -60,12 +65,173 @@ static bool EffectsEnabled = true;
 static double VolumeScale = 1.0;
 static int MusicVolume = 0;
 
-extern volatile bool MusicFinished;
+static void (*MusicFinishedCallback)();
+
+#ifdef USE_WIN32
+static bool externalPlayerIsPlaying = false;
+
+static HANDLE g_hStatusThread;
+static HANDLE g_hDebugThread;
+static HANDLE g_hChildStd_IN_Wr;
+static PROCESS_INFORMATION pi;
+
+static DWORD WINAPI StatusThreadFunction(LPVOID lpParam) {
+	CHAR chStatus;
+	DWORD dwRead = 1;
+	while (1) {
+		if (!ReadFile((HANDLE)lpParam, &chStatus, 1, &dwRead, NULL) || dwRead == 0) {
+			CloseHandle((HANDLE)lpParam);
+			break;
+		}
+		// any write means we finished
+		if (externalPlayerIsPlaying) {
+			externalPlayerIsPlaying = false;
+			MusicFinishedCallback();
+		}
+	}
+	return 0;
+}
+
+static DWORD WINAPI DebugThreadFunction(LPVOID lpParam) {
+	DWORD dwRead = 1;
+	while (1) {
+		char *chStatus[1024] = {'\0'};
+		if (!ReadFile((HANDLE)lpParam, &chStatus, 1024, &dwRead, NULL) || dwRead == 0) {
+			CloseHandle((HANDLE)lpParam);
+			break;
+		}
+		DebugPrint("%s" _C_ chStatus);
+	}
+	return 0;
+}
+
+static void KillPlayingProcess() {
+	externalPlayerIsPlaying = false;
+	if (g_hChildStd_IN_Wr) {
+		TerminateProcess(pi.hProcess, 0);
+		CloseHandle(g_hChildStd_IN_Wr);
+		g_hChildStd_IN_Wr = NULL;
+		WaitForSingleObject(StatusThreadFunction, 0);
+		WaitForSingleObject(DebugThreadFunction, 0);
+	}
+}
+
+static bool External_Play(const std::string &file) {
+	static std::string midi = ".mid";
+	auto it = midi.begin();
+	if (file.size() > midi.size() &&
+			std::all_of(std::next(file.begin(), file.size() - midi.size()), file.end(), [&it](const char & c) { return c == ::tolower(*(it++)); })) {
+		// midi file, use external player, since windows vista+ does not allow midi volume control independent of process volume
+		
+		std::string full_filename = LibraryFileName(file.c_str());
+
+		// try to communicate with the running midiplayer if we can
+		if (g_hChildStd_IN_Wr != NULL) {
+			// already playing, just send the new song
+			// XXX: timfel: disabled, since the midiplayer behaves weirdly when it receives the next file, just kill and restart
+			KillPlayingProcess();
+			/*
+			// negative value signals a new filename
+			int fileSize = full_filename.size() & 0xffff;
+			char loSize = fileSize & 0xff;
+			char hiSize = (fileSize >> 8) & 0xff;
+			char buf[2] = {loSize, hiSize};
+			externalPlayerIsPlaying = true;
+			if (!WriteFile(g_hChildStd_IN_Wr, buf, 2, NULL, NULL)) {
+				KillPlayingProcess();
+			} else {
+				// then write the filename
+				if (!WriteFile(g_hChildStd_IN_Wr, full_filename.c_str(), fileSize, NULL, NULL)) {
+					KillPlayingProcess();
+				} else {
+					return true;
+				}
+			}
+			*/
+		}
+		// need to start an external player first
+
+		// setup pipes to player
+		HANDLE hChildStd_IN_Rd = NULL;
+		HANDLE hChildStd_OUT_Rd = NULL;
+		HANDLE hChildStd_OUT_Wr = NULL;
+		HANDLE hChildStd_ERR_Rd = NULL;
+		HANDLE hChildStd_ERR_Wr = NULL;
+		SECURITY_ATTRIBUTES saAttr;
+		saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
+		saAttr.bInheritHandle = TRUE;
+		saAttr.lpSecurityDescriptor = NULL;
+		CreatePipe(&hChildStd_OUT_Rd, &hChildStd_OUT_Wr, &saAttr, 0);
+		CreatePipe(&hChildStd_ERR_Rd, &hChildStd_ERR_Wr, &saAttr, 0);
+		CreatePipe(&hChildStd_IN_Rd, &g_hChildStd_IN_Wr, &saAttr, 0);
+		SetHandleInformation(g_hChildStd_IN_Wr, HANDLE_FLAG_INHERIT, 0);
+
+		// start the process
+		std::vector<std::string> args = QuoteArguments({ "stratagus-midiplayer.exe", std::to_string(std::min(MusicVolume, 127)), full_filename });
+		std::string cmd = std::accumulate(std::next(args.begin()), args.end(), args[0], [](std::string a, std::string b) { return a + " " + b; });
+		DebugPrint("Using external command to play midi on windows: %s\n" _C_ cmd.c_str());
+		STARTUPINFO si;
+		ZeroMemory(&si, sizeof(si));
+		si.cb = sizeof(si);
+		si.hStdError = hChildStd_ERR_Wr;
+   		si.hStdOutput = hChildStd_OUT_Wr;
+   		si.hStdInput = hChildStd_IN_Rd;
+   		si.dwFlags |= STARTF_USESTDHANDLES;
+		ZeroMemory(&pi, sizeof(pi));
+		bool result = true;
+		char* cmdline = strdup(cmd.c_str());
+		if (CreateProcess(NULL, cmdline, NULL, NULL, TRUE, /* Handles are inherited */ CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+			CloseHandle(hChildStd_OUT_Wr);
+			CloseHandle(hChildStd_ERR_Wr);
+      		CloseHandle(hChildStd_IN_Rd);
+			externalPlayerIsPlaying = true;
+			g_hStatusThread = CreateThread(NULL, 0, StatusThreadFunction, hChildStd_OUT_Rd, 0, NULL);
+			g_hDebugThread = CreateThread(NULL, 0, DebugThreadFunction, hChildStd_ERR_Rd, 0, NULL);
+		} else {
+			result = false;
+			DebugPrint("CreateProcess failed (%d).\n" _C_ GetLastError());
+		}
+		free(cmdline);
+		return result;
+	}
+	KillPlayingProcess();
+	return false;
+}
+
+static bool External_IsPlaying() {
+	return externalPlayerIsPlaying;
+}
+
+static bool External_Stop() {
+	if (External_IsPlaying()) {
+		KillPlayingProcess();
+		return true;
+	}
+	return false;
+}
+
+static bool External_Volume(int volume, int oldVolume) {
+	if (External_IsPlaying()) {
+		char buf[2] = {0, volume & 0xFF};
+		if (!WriteFile(g_hChildStd_IN_Wr, buf, 2, NULL, NULL)) {
+			External_Stop();
+			return false;
+		}
+		return true;
+	}
+	return false;
+}
+#else
+#define External_Play(file) false
+#define External_IsPlaying() false
+#define External_Stop() false
+#define External_Volume(volume, oldVolume) false
+#endif
 
 /// Channels for sound effects and unit speech
 struct SoundChannel {
-	Origin *Unit;          /// pointer to unit, who plays the sound, if any
-	void (*FinishedCallback)(int channel); /// Callback for when a sample finishes playing
+	Origin *Unit = NULL;          /// pointer to unit, who plays the sound, if any
+	void (*FinishedCallback)(int channel) = NULL; /// Callback for when a sample finishes playing
 };
 
 #define MaxChannels 64     /// How many channels are supported
@@ -103,11 +269,32 @@ bool UnitSoundIsPlaying(Origin *origin)
 */
 static void ChannelFinished(int channel)
 {
-	if (Channels[channel].FinishedCallback) {
-		Channels[channel].FinishedCallback(channel);
+	static long ChannelCallbackDebounce[MaxChannels] = {0};
+	if (channel < 0 || channel >= MaxChannels) {
+		fprintf(stderr, "ERROR: Out of bounds channel (how?)\n");
+		return;
+	}
+	long ticks = SDL_GetTicks();
+	if (ChannelCallbackDebounce[channel] + 200 < ticks) {
+		// only accept sound finished callbacks for sounds playing longer than 0.2s
+		return;
+	}
+	ChannelCallbackDebounce[channel] = ticks;
+	if (Channels[channel].FinishedCallback != NULL) {
+		SDL_Event event;
+		SDL_zero(event);
+		event.type = SDL_SOUND_FINISHED;
+		event.user.code = channel;
+		event.user.data1 = (void*) Channels[channel].FinishedCallback;
+		SDL_PeepEvents(&event, 1, SDL_ADDEVENT, SDL_FIRSTEVENT, SDL_LASTEVENT);
 	}
 	delete Channels[channel].Unit;
 	Channels[channel].Unit = NULL;
+}
+
+void HandleSoundEvent(SDL_Event &event)
+{
+	((void (*)(int channel))(event.user.data1))((int) event.user.code);
 }
 
 /**
@@ -146,20 +333,6 @@ void SetChannelStereo(int channel, int stereo)
 		}
 		Mix_SetPanning(channel, left, right);
 	}
-}
-
-/**
-**  Set the channel's callback for when a sound finishes playing
-**
-**  @param channel   Channel to set
-**  @param callback  Callback to call when the sound finishes
-*/
-void SetChannelFinishedCallback(int channel, void (*callback)(int channel))
-{
-	if (channel < 0 || channel >= MaxChannels) {
-		return;
-	}
-	Channels[channel].FinishedCallback = callback;
 }
 
 /**
@@ -210,11 +383,23 @@ static Mix_Music *LoadMusic(const char *name)
 		delete f;
 		return NULL;
 	}
-	currentMusic = Mix_LoadMUS_RW(f->as_SDL_RWops(), 0);
+	currentMusic = Mix_LoadMUS_RW(f->as_SDL_RWops(), 1);
 	return currentMusic;
 }
 
 static Mix_Chunk *LoadSample(const char *name)
+{
+#ifdef DYNAMIC_LOAD
+	Mix_Chunk *r = (Mix_Chunk *)calloc(sizeof(Mix_Chunk), 1);
+	r->allocated = 0xcafebeef;
+	r->abuf = (Uint8 *)(strdup(name));
+	return r;
+#else
+	return ForceLoadSample(name);
+#endif
+}
+
+static Mix_Chunk *ForceLoadSample(const char *name)
 {
 	Mix_Chunk *r = Mix_LoadWAV(name);
 	if (r) {
@@ -226,7 +411,7 @@ static Mix_Chunk *LoadSample(const char *name)
 		delete f;
 		return NULL;
 	}
-	return Mix_LoadWAV_RW(f->as_SDL_RWops(), 0);
+	return Mix_LoadWAV_RW(f->as_SDL_RWops(), 1);
 }
 
 /**
@@ -268,27 +453,66 @@ Mix_Chunk *LoadSample(const std::string &name)
 }
 
 /**
+ * Free a sample loaded with LoadSample.
+ * 
+ * @param sample 
+ */
+void FreeSample(Mix_Chunk *sample)
+{
+#ifdef DYNAMIC_LOAD
+	if (sample->allocated == 0xcafebeef) {
+		return;
+	}
+#endif
+	Mix_FreeChunk(sample);
+}
+
+/**
 **  Play a sound sample
 **
 **  @param sample  Sample to play
 **
 **  @return        Channel number, -1 for error
 */
-int PlaySample(Mix_Chunk *sample, Origin *origin)
+static int PlaySample(Mix_Chunk *sample, Origin *origin, void (*callback)(int channel))
 {
+#ifdef DYNAMIC_LOAD
+	if (sample->allocated == 0xcafebeef) {
+		char *name = (char*)(sample->abuf);
+		Mix_Chunk *loadedSample = ForceLoadSample(name);
+		if (loadedSample) {
+			memcpy(sample, loadedSample, sizeof(Mix_Chunk));
+			free(name);
+		} else {
+			return -1;
+		}
+	}
+#endif
 	int channel = -1;
 	DebugPrint("play sample %d\n" _C_ sample->volume);
 	if (SoundEnabled() && EffectsEnabled && sample) {
 		channel = Mix_PlayChannel(-1, sample, 0);
-		Channels[channel].FinishedCallback = NULL;
-		if (origin && origin->Base) {
-			Origin *source = new Origin;
-			source->Base = origin->Base;
-			source->Id = origin->Id;
-			Channels[channel].Unit = source;
+		if (channel >= 0 && channel < MaxChannels) {
+			Channels[channel].FinishedCallback = callback;
+			if (origin && origin->Base) {
+				Origin *source = new Origin;
+				source->Base = origin->Base;
+				source->Id = origin->Id;
+				Channels[channel].Unit = source;
+			}
 		}
 	}
 	return channel;
+}
+
+int PlaySample(Mix_Chunk *sample, Origin *origin)
+{
+	return PlaySample(sample, origin, NULL);
+}
+
+int PlaySample(Mix_Chunk *sample, void (*callback)(int channel))
+{
+	return PlaySample(sample, NULL, callback);
 }
 
 /**
@@ -334,28 +558,8 @@ bool IsEffectsEnabled()
 */
 void SetMusicFinishedCallback(void (*callback)())
 {
+	MusicFinishedCallback = callback;
 	Mix_HookMusicFinished(callback);
-}
-
-/**
-**  Play a music file.
-**
-**  @param sample  Music sample.
-**
-**  @return        0 if music is playing, -1 if not.
-*/
-int PlayMusic(Mix_Music *sample)
-{
-	if (sample) {
-		Mix_VolumeMusic(MusicVolume);
-		MusicFinished = false;
-		Mix_PlayMusic(sample, 0);
-		Mix_VolumeMusic(MusicVolume / 4.0);
-		return 0;
-	} else {
-		DebugPrint("Could not play sample\n");
-		return -1;
-	}
 }
 
 /**
@@ -371,11 +575,14 @@ int PlayMusic(const std::string &file)
 		return -1;
 	}
 	DebugPrint("play music %s\n" _C_ file.c_str());
-	Mix_Music *music = LoadMusic(file);
 
+	if (External_Play(file)) {
+		return 0;
+	}
+
+	Mix_Music *music = LoadMusic(file);
 	if (music) {
-		MusicFinished = false;
-		Mix_FadeInMusic(music, 0, 200);
+		Mix_PlayMusic(music, 0);
 		return 0;
 	} else {
 		DebugPrint("Could not play %s\n" _C_ file.c_str());
@@ -388,6 +595,9 @@ int PlayMusic(const std::string &file)
 */
 void StopMusic()
 {
+	if (External_Stop()) {
+		return;
+	}
 	Mix_FadeOutMusic(200);
 }
 
@@ -400,8 +610,10 @@ void SetMusicVolume(int volume)
 {
 	// due to left-right separation, sound effect volume is effectively halfed,
 	// so we adjust the music
+	int oldVolume = MusicVolume;
 	MusicVolume = volume;
-	Mix_VolumeMusic(volume / 4.0);
+	Mix_VolumeMusic(MusicVolume);
+	External_Volume(MusicVolume, oldVolume);
 }
 
 /**
@@ -496,6 +708,7 @@ int InitSound()
 		SoundInitialized = false;
 		return 1;
 	}
+	SDL_SOUND_FINISHED = SDL_RegisterEvents(1);
 	SoundInitialized = true;
 	Mix_AllocateChannels(MaxChannels);
 	Mix_ChannelFinished(ChannelFinished);

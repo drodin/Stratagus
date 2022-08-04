@@ -208,23 +208,13 @@ class BestDepotFinder
 					return;
 				}
 
-				if (this->best_dist == INT_MAX) {
-					this->best_depot = dest;
-				}
-
 				if (distance >= this->best_dist) {
 					//if the depot's simple distance is greater or equal to the real travel distance of the currently-chosen depot, then it can never be closer than it, and we have no reason to actually calculate its real travel distance 
 					return;
 				}
 
-				// calck real travel distance
-				if (worker->Container != nullptr) {
-					UnmarkUnitFieldFlags(*first_container);
-				}
-				const int travel_distance = UnitReachable(*worker, *dest, 1);
-				if (worker->Container != nullptr) {
-					MarkUnitFieldFlags(*first_container);
-				}
+				// calc real travel distance
+				const int travel_distance = UnitReachable(*worker, *dest, 1, worker->Container != nullptr);
 				//
 				// Take this depot?
 				//
@@ -496,7 +486,7 @@ CUnit *FindIdleWorker(const CPlayer &player, const CUnit *last)
 
 	for (int i = 0; i < nunits; ++i) {
 		CUnit &unit = player.GetUnit(i);
-		if (unit.Type->BoolFlag[HARVESTER_INDEX].value && unit.Type->ResInfo && !unit.Removed) {
+		if (unit.Type->BoolFlag[HARVESTER_INDEX].value && !unit.Removed) {
 			if (unit.CurrentAction() == UnitActionStill) {
 				if (SelectNextUnit && !IsOnlySelected(unit)) {
 					return &unit;
@@ -525,7 +515,7 @@ CUnit *FindIdleWorker(const CPlayer &player, const CUnit *last)
 */
 void FindUnitsByType(const CUnitType &type, std::vector<CUnit *> &units, bool everybody)
 {
-	for (CUnitManager::Iterator it = UnitManager.begin(); it != UnitManager.end(); ++it) {
+	for (CUnitManager::Iterator it = UnitManager->begin(); it != UnitManager->end(); ++it) {
 		CUnit &unit = **it;
 
 		if (unit.Type == &type && !unit.IsUnusable(everybody)) {
@@ -702,12 +692,12 @@ private:
 	CUnit *Find(Iterator begin, Iterator end) const
 	{
 		CUnit *enemy = NULL;
-		int best_cost = Preference.SimplifiedAutoTargeting ? INT_MIN : INT_MAX;
+		int best_cost = GameSettings.SimplifiedAutoTargeting ? INT_MIN : INT_MAX;
 
 		for (Iterator it = begin; it != end; ++it) {
-			int cost = Preference.SimplifiedAutoTargeting ? TargetPriorityCalculate(attacker, *it) : ComputeCost(*it);
+			int cost = GameSettings.SimplifiedAutoTargeting ? TargetPriorityCalculate(attacker, *it) : ComputeCost(*it);
 
-			if (Preference.SimplifiedAutoTargeting ? (cost > best_cost) : (cost < best_cost)) {
+			if (GameSettings.SimplifiedAutoTargeting ? (cost > best_cost) : (cost < best_cost)) {
 				enemy = *it;
 				best_cost = cost;
 			}
@@ -734,7 +724,7 @@ private:
 		// Unit in range ?
 		const int d = attacker->MapDistanceTo(*dest);
 
-		if (d > attackrange && !UnitReachable(*attacker, *dest, attackrange)) {
+		if (d > attackrange && !UnitReachable(*attacker, *dest, attackrange, false)) {
 			return INT_MAX;
 		}
 
@@ -938,7 +928,7 @@ public:
 
 				int attackrange = attacker->Stats->Variables[ATTACKRANGE_INDEX].Max;
 				if (d <= attackrange ||
-					(d <= range && UnitReachable(*attacker, *dest, attackrange))) {
+					(d <= range && UnitReachable(*attacker, *dest, attackrange, false))) {
 					++enemy_count;
 				} else {
 					dest->CacheLock = 1;
@@ -957,7 +947,7 @@ public:
 			for (int yy = 0; yy < dtype.TileHeight; ++yy) {
 				for (int xx = 0; xx < dtype.TileWidth; ++xx) {
 					int pos = (y + yy) * (size / 2) + (x + xx);
-					if (pos >= good->size()) {
+					if (pos < 0 || static_cast<unsigned int>(pos) >= good->size()) {
 						DebugPrint("BUG: RangeTargetFinder::FillBadGood.Compute out of range. "\
 								   "size: %d, pos: %d, "				\
 								   "x: %d, xx: %d, y: %d, yy: %d\n" _C_
@@ -985,7 +975,7 @@ public:
 
 	CUnit *Find(std::vector<CUnit *> &table)
 	{
-		if (!Preference.SimplifiedAutoTargeting) {
+		if (!GameSettings.SimplifiedAutoTargeting) {
 			FillBadGood(*attacker, range, good, bad, size).Fill(table.begin(), table.end());
 		}
 		return Find(table.begin(), table.end());
@@ -1015,7 +1005,7 @@ private:
 			return;
 		}
 
-		if (Preference.SimplifiedAutoTargeting) {
+		if (GameSettings.SimplifiedAutoTargeting) {
 			const int cost = TargetPriorityCalculate(attacker, dest);
 			if (cost > best_cost) {
 				best_unit = dest;
@@ -1049,7 +1039,7 @@ private:
 			for (int xx = -1; xx <= 1; ++xx) {
 				int pos = (y + yy) * (size / 2) + (x + xx);
 				int localFactor = (!xx && !yy) ? 1 : splashFactor;
-				if (pos >= good->size()) {
+				if (pos < 0 || static_cast<unsigned int>(pos) >= good->size()) {
 					DebugPrint("BUG: RangeTargetFinder.Compute out of range. " \
 							   "size: %d, pos: %d, "	\
 							   "x: %d, xx: %d, y: %d, yy: %d \n" _C_
@@ -1227,7 +1217,7 @@ CUnit *AttackUnitsInRange(const CUnit &unit)
 CUnit *AttackUnitsInReactRange(const CUnit &unit, CUnitFilter pred)
 {
 	Assert(unit.Type->CanAttack);
-	const int range = unit.Player->Type == PlayerPerson ? unit.Type->ReactRangePerson : unit.Type->ReactRangeComputer;
+	const int range = unit.Player->Type == PlayerTypes::PlayerPerson ? unit.Type->ReactRangePerson : unit.Type->ReactRangeComputer;
 	return AttackUnitsInDistance(unit, range, pred);
 }
 

@@ -360,11 +360,12 @@ int PlayMovie(const std::string &name)
 		return 0;
 	}
 
+	// since video's may be longer and should be streamed, we play them as music, but
+	// use the effects volume for them
 	StopMusic();
-	Mix_Music *sample = LoadMusic(filename);
-	if (sample) {
-		PlayMusic(sample);
-	}
+	int prevMusicVolume = GetMusicVolume();
+	SetMusicVolume(GetEffectsVolume());
+	PlayMusic(filename);
 
 	EventCallback callbacks;
 
@@ -414,6 +415,7 @@ int PlayMovie(const std::string &name)
 	}
 
 	StopMusic();
+	SetMusicVolume(prevMusicVolume);
 	SDL_DestroyTexture(yuv_overlay);
 
 	OggFree(&data);

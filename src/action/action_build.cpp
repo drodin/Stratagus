@@ -157,7 +157,7 @@ enum {
 
 /* virtual */ void COrder_Build::UpdatePathFinderData(PathFinderInput &input)
 {
-	input.SetMinRange(this->Type->BoolFlag[BUILDEROUTSIDE_INDEX].value ? 1 : 0);
+	input.SetMinRange(this->Type->BoolFlag[BUILDEROUTSIDE_INDEX].value && input.GetUnit()->CanMove() ? 1 : 0);
 	input.SetMaxRange(this->Range);
 
 	const Vec2i tileSize(this->Type->TileWidth, this->Type->TileHeight);
@@ -352,7 +352,7 @@ bool COrder_Build::StartBuilding(CUnit &unit, CUnit &ontop)
 		unit.Player->LostMainFacilityTimer = 0;
 		unit.Player->SetRevealed(false);
 		for (int j = 0; j < NumPlayers; ++j) {
-			if (unit.Player->Index != j && Players[j].Type != PlayerNobody) {
+			if (unit.Player->Index != j && Players[j].Type != PlayerTypes::PlayerNobody) {
 				Players[j].Notify(_("%s has rebuilt a base, and will no longer be revealed!"), unit.Player->Name.c_str());
 			} else {
 				Players[j].Notify("%s", _("You have rebuilt a base, and will no longer be revealed!"));
@@ -423,7 +423,6 @@ bool COrder_Build::BuildFromOutside(CUnit &unit) const
 		COrder_Built &targetOrder = *static_cast<COrder_Built *>(this->BuildingUnit->CurrentOrder());
 		CUnit &goal = *const_cast<COrder_Build *>(this)->BuildingUnit;
 
-
 		targetOrder.ProgressHp(goal, 100);
 	}
 	if (unit.Anim.Unbreakable) {
@@ -432,6 +431,18 @@ bool COrder_Build::BuildFromOutside(CUnit &unit) const
 	return this->BuildingUnit->CurrentAction() != UnitActionBuilt;
 }
 
+CUnit *COrder_Build::GetBuildingUnit() const
+{
+	return this->BuildingUnit;
+}
+
+/* virtual */ void COrder_Build::UpdateUnitVariables(CUnit &unit) const
+{
+	if (this->State == State_BuildFromOutside && this->BuildingUnit != NULL) {
+		unit.Variable[TRAINING_INDEX].Value = this->BuildingUnit->Variable[BUILD_INDEX].Value;
+		unit.Variable[TRAINING_INDEX].Max = this->BuildingUnit->Variable[BUILD_INDEX].Max;
+	}
+}
 
 /* virtual */ void COrder_Build::Execute(CUnit &unit)
 {
@@ -480,6 +491,14 @@ bool COrder_Build::BuildFromOutside(CUnit &unit) const
 		if (this->BuildFromOutside(unit)) {
 			this->Finished = true;
 		}
+	}
+}
+
+/* virtual */ void COrder_Build::Cancel(CUnit &unit)
+{
+	if (this->State == State_BuildFromOutside && this->BuildingUnit != NULL && this->BuildingUnit->CurrentAction() == UnitActionBuilt) {
+		COrder_Built &targetOrder = *static_cast<COrder_Built *>(this->BuildingUnit->CurrentOrder());
+		targetOrder.Cancel(*this->BuildingUnit);
 	}
 }
 

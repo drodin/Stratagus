@@ -250,6 +250,8 @@
 //  Declaration
 //----------------------------------------------------------------------------
 
+extern int SaveGame(const std::string &filename); /// Save game
+
 /**
 **  Network command input/output queue.
 */
@@ -298,8 +300,8 @@ CUDPSocket NetworkFildes;                  /// Network file descriptor
 static unsigned long NetworkLastFrame[PlayerMax]; /// Last frame received packet
 static unsigned long NetworkLastCycle[PlayerMax]; /// Last cycle received packet
 
-static int NetworkSyncSeeds[256];          /// Network sync seeds.
-static int NetworkSyncHashs[256];          /// Network sync hashs.
+static unsigned int NetworkSyncSeeds[256];          /// Network sync seeds.
+static unsigned int NetworkSyncHashs[256];          /// Network sync hashs.
 static CNetworkCommandQueue NetworkIn[256][PlayerMax][MaxNetworkCommands]; /// Per-player network packet input queue
 static std::deque<CNetworkCommandQueue> CommandsIn;    /// Network command input queue
 static std::deque<CNetworkCommandQueue> MsgCommandsIn; /// Network message input queue
@@ -356,15 +358,17 @@ static void NetworkBroadcast(const CNetworkPacket &packet, int numcommands, int 
 
 	// Send to all clients.
 	if (NetConnectType == 1) { // server
-		for (int i = 0; i < HostsCount; ++i) {
-			const CHost host(Hosts[i].Host, Hosts[i].Port);
-			if (Hosts[i].PlyNr == player) {
-				continue;
+		for (int i = 0; i < NetPlayers; ++i) {
+			if (Hosts[i].IsValid()) {
+				const CHost host(Hosts[i].Host, Hosts[i].Port);
+				if (Hosts[i].PlyNr == player) {
+					continue;
+				}
+				NetworkFildes.Send(host, buf, size);
 			}
-			NetworkFildes.Send(host, buf, size);
 		}
 	} else { // client		
-		const CHost host(Hosts[HostsCount - 1].Host, Hosts[HostsCount - 1].Port);
+		const CHost host(Hosts[0].Host, Hosts[0].Port);
 		NetworkFildes.Send(host, buf, size);
 	}
 	delete[] buf;
@@ -459,21 +463,26 @@ void ExitNetwork1()
 
 	NetworkInSync = true;
 	NetPlayers = 0;
-	HostsCount = 0;
 }
 
 /**
-**  Game will start now.
+**  Game will start now. (This function runs on all clients.)
 */
 void NetworkOnStartGame()
 {
+	if (!IsNetworkGame()) {
+		// really a single player game, but we use the command queue for determinism in replays
+		CNetworkParameter::Instance.NetworkLag = 1;
+	} else {
+		CNetworkParameter::Instance.NetworkLag = 10;
+	}
 	ThisPlayer->SetName(Parameters::Instance.LocalPlayerName);
-	for (int i = 0; i < HostsCount; ++i) {
+	for (int i = 0; i < NetPlayers; ++i) {
 		Players[Hosts[i].PlyNr].SetName(Hosts[i].PlyName);
 	}
 	DebugPrint("Updates %d, Lag %d, Hosts %d\n" _C_
 			   CNetworkParameter::Instance.gameCyclesPerUpdate _C_
-			   CNetworkParameter::Instance.NetworkLag _C_ HostsCount);
+			   CNetworkParameter::Instance.NetworkLag _C_ NetPlayers);
 
 	NetworkInSync = true;
 	CommandsIn.clear();
@@ -490,8 +499,10 @@ void NetworkOnStartGame()
 	//nc.syncHash = SyncHash;
 	//nc.syncSeed = SyncRandSeed;
 
+	// push initial sync messages into command queues
+	// timfel: why is this done on all clients and not just on the server?
 	for (unsigned int i = 0; i <= CNetworkParameter::Instance.NetworkLag; i += CNetworkParameter::Instance.gameCyclesPerUpdate) {
-		for (int n = 0; n < HostsCount; ++n) {
+		for (int n = 0; n < NetPlayers; ++n) {
 			CNetworkCommandQueue(&ncqs)[MaxNetworkCommands] = NetworkIn[i][Hosts[n].PlyNr];
 
 			ncqs[0].Time = i;
@@ -602,8 +613,11 @@ void NetworkSendSelection(CUnit **units, int count)
 {
 	// Check if we have any teammates to send to
 	bool hasteammates = false;
-	for (int i = 0; i < HostsCount; ++i) {
-		if (Players[Hosts[i].PlyNr].Team == ThisPlayer->Team) {
+	for (int i = 0; i < NetPlayers; ++i) {
+		if (ThisPlayer->Index == Hosts[i].PlyNr) {
+			continue; // skip self
+		}
+		if (Hosts[i].IsValid() && Players[Hosts[i].PlyNr].Team == ThisPlayer->Team) {
 			hasteammates = true;
 			break;
 		}
@@ -653,10 +667,9 @@ void NetworkSendChatMessage(const std::string &msg)
 static void NetworkRemovePlayer(int player)
 {
 	// Remove player from Hosts and clear NetworkIn
-	for (int i = 0; i < HostsCount; ++i) {
-		if (Hosts[i].PlyNr == player) {
-			Hosts[i] = Hosts[HostsCount - 1];
-			--HostsCount;
+	for (int i = 0; i < NetPlayers; ++i) {
+		if (Hosts[i].IsValid() && Hosts[i].PlyNr == player) {
+			Hosts[i].Clear();
 			break;
 		}
 	}
@@ -669,6 +682,9 @@ static void NetworkRemovePlayer(int player)
 
 static bool IsNetworkCommandReady(int hostIndex, unsigned long gameNetCycle)
 {
+	if (!Hosts[hostIndex].IsValid()) {
+		return true;
+	}
 	const int ply = Hosts[hostIndex].PlyNr;
 	const CNetworkCommandQueue &ncq = NetworkIn[gameNetCycle & 0xFF][ply][0];
 
@@ -681,7 +697,7 @@ static bool IsNetworkCommandReady(int hostIndex, unsigned long gameNetCycle)
 static bool IsNetworkCommandReady(unsigned long gameNetCycle)
 {
 	// Check if all next messages are available.
-	for (int i = 0; i < HostsCount; ++i) {
+	for (int i = 0; i < NetPlayers; ++i) {
 		if (IsNetworkCommandReady(i, gameNetCycle) == false) {
 			return false;
 		}
@@ -706,7 +722,10 @@ static void ParseResendCommand(const CNetworkPacket &packet)
 	}
 	NetworkSendPacket(NetworkIn[gameNetCycle & 0xFF][ThisPlayer->Index]);
 	// Check if a player quit this cycle
-	for (int j = 0; j < HostsCount; ++j) {
+	for (int j = 0; j < NetPlayers; ++j) {
+		if (!Hosts[j].IsValid()) {
+			continue;
+		}
 		for (int c = 0; c < MaxNetworkCommands; ++c) {
 			const CNetworkCommandQueue *ncq;
 			ncq = &NetworkIn[gameNetCycle & 0xFF][Hosts[j].PlyNr][c];
@@ -730,10 +749,10 @@ static bool IsAValidCommand_Command(const CNetworkPacket &packet, int index, con
 	CNetworkCommand nc;
 	nc.Deserialize(&packet.Command[index][0]);
 	const unsigned int slot = nc.Unit;
-	const CUnit *unit = slot < UnitManager.GetUsedSlotCount() ? &UnitManager.GetSlotUnit(slot) : NULL;
+	const CUnit *unit = slot < UnitManager->GetUsedSlotCount() ? &UnitManager->GetSlotUnit(slot) : NULL;
 
 	if (unit && (unit->Player->Index == player
-				 || Players[player].IsTeamed(*unit) || unit->Player->Type == PlayerNeutral)) {
+				 || Players[player].IsTeamed(*unit) || unit->Player->Type == PlayerTypes::PlayerNeutral)) {
 		return true;
 	} else {
 		return false;
@@ -745,7 +764,7 @@ static bool IsAValidCommand_Dismiss(const CNetworkPacket &packet, int index, con
 	CNetworkCommand nc;
 	nc.Deserialize(&packet.Command[index][0]);
 	const unsigned int slot = nc.Unit;
-	const CUnit *unit = slot < UnitManager.GetUsedSlotCount() ? &UnitManager.GetSlotUnit(slot) : NULL;
+	const CUnit *unit = slot < UnitManager->GetUsedSlotCount() ? &UnitManager->GetSlotUnit(slot) : NULL;
 
 	if (unit && unit->Type->ClicksToExplode) {
 		return true;
@@ -917,8 +936,8 @@ static void NetworkExecCommand_Sync(const CNetworkCommandQueue &ncq)
 	CNetworkCommandSync nc;
 	nc.Deserialize(&ncq.Data[0]);
 	const unsigned long gameNetCycle = GameCycle;
-	const int syncSeed = nc.syncSeed;
-	const int syncHash = nc.syncHash;
+	const unsigned int syncSeed = nc.syncSeed;
+	const unsigned int syncHash = nc.syncHash;
 
 	if (syncSeed != NetworkSyncSeeds[gameNetCycle & 0xFF]
 		|| syncHash != NetworkSyncHashs[gameNetCycle & 0xFF]) {
@@ -929,10 +948,20 @@ static void NetworkExecCommand_Sync(const CNetworkCommandQueue &ncq)
 			// only print this message circa every 5 seconds...
 			SetMessage("%s", _("Network out of sync"));
 			gameInSync = false;
+			SetGamePaused(true);
+
+			time_t now;
+			time(&now);
+			std::string savefile = "desync_savegame_";
+			savefile += std::to_string(ThisPlayer->Index);
+			savefile += "_";
+			savefile += std::to_string((intmax_t)now);
+			savefile += ".sav";
+			SaveGame(savefile);
 		}
-		DebugPrint("\nNetwork out of sync %x!=%x! %d!=%d! Cycle %lu\n\n" _C_
+		DebugPrint("\nNetwork out of sync seed: %X!=%X , hash: %X!=%X Cycle %lu\n\n" _C_
 				   syncSeed _C_ NetworkSyncSeeds[gameNetCycle & 0xFF] _C_
-				   syncHash _C_ NetworkSyncHashs[gameNetCycle & 0xFF] _C_ GameCycle);
+				   syncHash _C_ NetworkSyncHashs[gameNetCycle & 0xFF] _C_ GameCycle);	
 	} else {
 		gameInSync = true;
 	}
@@ -951,7 +980,7 @@ static void NetworkExecCommand_Selection(const CNetworkCommandQueue &ncq)
 	std::vector<CUnit *> units;
 
 	for (size_t i = 0; i != ns.Units.size(); ++i) {
-		units.push_back(&UnitManager.GetSlotUnit(ns.Units[i]));
+		units.push_back(&UnitManager->GetSlotUnit(ns.Units[i]));
 	}
 	ChangeTeamSelectedUnits(Players[ns.player], units);
 }
@@ -1044,7 +1073,7 @@ static void NetworkSendCommands(unsigned long gameNetCycle)
 				CNetworkCommand nc;
 				nc.Deserialize(&incommand.Data[0]);
 
-				const CUnit &unit = UnitManager.GetSlotUnit(nc.Unit);
+				const CUnit &unit = UnitManager->GetSlotUnit(nc.Unit);
 				// FIXME: we can send destoyed units over network :(
 				if (unit.Destroyed) {
 					DebugPrint("Sending destroyed unit %d over network!!!!!!\n" _C_ nc.Unit);
@@ -1069,7 +1098,9 @@ static void NetworkSendCommands(unsigned long gameNetCycle)
 	}
 	NetworkSyncSeeds[gameNetCycle & 0xFF] = SyncRandSeed;
 	NetworkSyncHashs[gameNetCycle & 0xFF] = SyncHash;
-	NetworkSendPacket(ncq);
+	if (IsNetworkGame()) {
+		NetworkSendPacket(ncq);
+	}
 }
 
 /**
@@ -1097,9 +1128,6 @@ static void NetworkExecCommands(unsigned long gameNetCycle)
 */
 void NetworkCommands()
 {
-	if (!IsNetworkGame()) {
-		return;
-	}
 	if ((GameCycle % CNetworkParameter::Instance.gameCyclesPerUpdate) != 0) {
 		return;
 	}
@@ -1112,6 +1140,9 @@ void NetworkCommands()
 
 static void CheckPlayerThatTimeOut(int hostIndex)
 {
+	if (!Hosts[hostIndex].IsValid()) {
+		return;
+	}
 	const int playerIndex = Hosts[hostIndex].PlyNr;
 	const unsigned long lastFrame = NetworkLastFrame[playerIndex];
 	if (!lastFrame) {
@@ -1175,14 +1206,17 @@ static void NetworkResendCommands()
 */
 void NetworkRecover()
 {
-	if (HostsCount == 0) {
+	if (NetPlayers == 0) {
 		NetworkInSync = true;
 		return;
 	}
 	if (FrameCounter % CNetworkParameter::Instance.gameCyclesPerUpdate != 0) {
 		return;
 	}
-	for (int i = 0; i != HostsCount; ++i) {
+	for (int i = 0; i < NetPlayers; ++i) {
+		if (ThisPlayer->Index == Hosts[i].PlyNr) {
+			continue; // skip self
+		}
 		CheckPlayerThatTimeOut(i);
 	}
 	NetworkResendCommands();

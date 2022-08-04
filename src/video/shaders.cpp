@@ -226,7 +226,6 @@ static int loadShaders() {
 	cShaderPath = (char*)shaderPath.c_str();
 #endif
 	int n = ReadDataDirectory(cShaderPath, flp);
-	int shaderFileToIdx[1024];
 	for (int i = 0; i < n; ++i) {
 		int pos = flp[i].name.find(".glsl");
 		if (pos > 0) {
@@ -272,11 +271,17 @@ static GLfloat modelview[4 * 4];
 static GLfloat projection[4 * 4];
 static GLfloat matrix[4 * 4] = {0.0f};
 
+static bool RenderWithShaderInternal(SDL_Renderer *renderer, SDL_Window* win, SDL_Texture* backBuffer);
+
+// keep this function small, so the compiler can inline it
 bool RenderWithShader(SDL_Renderer *renderer, SDL_Window* win, SDL_Texture* backBuffer) {
 	if (!canUseShaders || currentShaderIdx == 0) {
 		return false;
 	}
+	return RenderWithShaderInternal(renderer, win, backBuffer);
+}
 
+static bool RenderWithShaderInternal(SDL_Renderer *renderer, SDL_Window* win, SDL_Texture* backBuffer) {
 	GLint oldProgramId;
 	// Detach the texture
 	SDL_SetRenderTarget(renderer, NULL);
@@ -394,7 +399,7 @@ bool RenderWithShader(SDL_Renderer *renderer, SDL_Window* win, SDL_Texture* back
 		lazyGlTexCoord2f(maxu, maxv);
 		lazyGlVertex2f(maxx, maxy);
 	} lazyGlEnd();
-	SDL_GL_SwapWindow(win);
+	// SDL_GL_SwapWindow(win);
 
 	if (ShaderProgram != 0) {
 		glUseProgram(oldProgramId);
@@ -403,6 +408,16 @@ bool RenderWithShader(SDL_Renderer *renderer, SDL_Window* win, SDL_Texture* back
 	return true;
 }
 
+/**
+** <b>Description</b>
+**
+**  Get the active shader.
+**
+** Example:
+**
+** <div class="example"><code>shader_name = <strong>GetShader</strong>()
+**	print(shader_name)</code></div>
+*/
 static int CclGetShader(lua_State *l) {
 	LuaCheckArgs(l, 0);
 	const char* shaderName = shaderNames[currentShaderIdx];
@@ -414,6 +429,16 @@ static int CclGetShader(lua_State *l) {
 	return 1;
 }
 
+/**
+** <b>Description</b>
+**
+**  Apply a shader.
+**
+** Example:
+**
+** <div class="example"><code>-- Apply a VHS shader
+**	<strong>SetShader</strong>("VHS")</code></div>
+*/
 static int CclSetShader(lua_State *l) {
 	LuaCheckArgs(l, 1);
 	const char* shaderName = LuaToString(l, 1);
@@ -435,6 +460,18 @@ static int CclSetShader(lua_State *l) {
 	return 1;
 }
 
+/**
+** <b>Description</b>
+**
+**  Get the list of shaders.
+**
+** Example:
+**
+** <div class="example"><code>shaders = <strong>GetShaderNames</strong>()
+**	for i,name in ipairs(shaders) do
+**		print(name)
+**	end</code></div>
+*/
 static int CclGetShaderNames(lua_State *l) {
 	LuaCheckArgs(l, 0);
 	lua_newtable(l);

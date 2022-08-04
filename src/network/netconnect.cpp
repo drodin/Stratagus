@@ -33,6 +33,25 @@
 // Includes
 //----------------------------------------------------------------------------
 
+#include <iostream>
+#include <fstream>
+#include <set>
+#include <vector>
+#include <functional>
+#include <algorithm>
+#include <array>
+#include <utility>
+#include <random>
+#if __has_include(<filesystem>)
+#include <filesystem>
+namespace fs = std::filesystem;
+#elif __has_include(<experimental/filesystem>)
+#include <experimental/filesystem>
+namespace fs = std::experimental::filesystem;
+#else
+error "Missing the <filesystem> header."
+#endif
+
 #include "game.h"
 #include "online_service.h"
 #include "stratagus.h"
@@ -66,11 +85,13 @@ struct NetworkState {
 	{
 		State = ccs_unused;
 		MsgCnt = 0;
+		StateArg = 0;
 		LastFrame = 0;
 	}
 
 	unsigned char State;     /// Menu: ConnectState
 	unsigned short MsgCnt;   /// Menu: Counter for state msg of same type (detect unreachable)
+	unsigned int StateArg;   /// Arbitrary argument for state to keep track of things
 	unsigned long LastFrame; /// Last message received
 	// Fill in here...
 };
@@ -79,8 +100,7 @@ struct NetworkState {
 // Variables
 //----------------------------------------------------------------------------
 
-int HostsCount;                        /// Number of hosts.
-CNetworkHost Hosts[PlayerMax];         /// Host and ports of all players.
+CNetworkHost Hosts[PlayerMax];         /// Host, ports, and assigned player numbers of all players.
 
 int NetConnectRunning = 0;             /// Network menu: Setup mode active
 int NetConnectType = 0;             /// Network menu: Setup mode active
@@ -89,12 +109,13 @@ int NetLocalPlayerNumber;              /// Player number of local client
 
 int NetPlayers;                         /// How many network players
 std::string NetworkMapName;             /// Name of the map received with ICMMap
-int NoRandomPlacementMultiplayer = 0; /// Disable the random placement of players in muliplayer mode
+std::string NetworkMapFragmentName;     /// Name of the map currently loading via ICMMapNeeded
+bool NoRandomPlacementMultiplayer = false; /// Disable the random placement of players in muliplayer mode
 
 CServerSetup ServerSetupState; // Server selection state for Multiplayer clients
 CServerSetup LocalSetupState;  // Local selection state for Multiplayer clients
 
-MDNS MdnsService;
+MDNS MdnsService; // Service discovery for open LAN games
 
 class CServer
 {
@@ -111,6 +132,7 @@ private:
 	void Parse_Resync(const int h);
 	void Parse_Waiting(const int h);
 	void Parse_Map(const int h);
+	void Parse_MapFragment(const int h, uint32_t fragmentIdx);
 	void Parse_State(const int h, const CInitMessage_State &msg);
 	void Parse_GoodBye(const int h);
 	void Parse_SeeYou(const int h);
@@ -120,6 +142,7 @@ private:
 	void Send_Welcome(const CNetworkHost &host, int hostIndex);
 	void Send_Resync(const CNetworkHost &host, int hostIndex);
 	void Send_Map(const CNetworkHost &host);
+	void Send_MapFragment(const CNetworkHost &host, uint32_t fragmentIdx);
 	void Send_State(const CNetworkHost &host);
 	void Send_GoodBye(const CNetworkHost &host);
 private:
@@ -152,12 +175,14 @@ private:
 	bool Update_async(unsigned long tick);
 	bool Update_mapinfo(unsigned long tick);
 	bool Update_badmap(unsigned long tick);
+	bool Update_needmap(unsigned long tick);
 	bool Update_goahead(unsigned long tick);
 	bool Update_started(unsigned long tick);
 
 	void Send_Go(unsigned long tick);
 	void Send_Config(unsigned long tick);
 	void Send_MapUidMismatch(unsigned long tick);
+	void Send_MapNeeded(unsigned long tick, unsigned int fragmentIdx, bool limit = true);
 	void Send_Map(unsigned long tick);
 	void Send_Resync(unsigned long tick);
 	void Send_State(unsigned long tick);
@@ -178,6 +203,7 @@ private:
 	void Parse_State(const unsigned char *buf);
 	void Parse_Welcome(const unsigned char *buf);
 	void Parse_Map(const unsigned char *buf);
+	void Parse_MapFragment(const unsigned char *buf);
 	void Parse_AreYouThere();
 
 private:
@@ -239,6 +265,7 @@ static const char *ncconstatenames[] = {
 	"ccs_started",             // server has started game
 	"ccs_incompatibleengine",  // incompatible engine version
 	"ccs_incompatibleluafiles", // incompatible network version
+	"ccs_needmap",             // client needs to be sent the map
 };
 
 static const char *icmsgsubtypenames[] = {
@@ -265,6 +292,8 @@ static const char *icmsgsubtypenames[] = {
 	"Go",                      // Client is ready to run
 	"AreYouThere",             // Server asks are you there
 	"IAmHere",                 // Client answers I am here
+
+	"MapNeeded",               // Map data exchange
 };
 
 template <typename T>
@@ -414,7 +443,7 @@ bool CClient::Update_connected(unsigned long tick)
 
 static bool IsLocalSetupInSync(const CServerSetup &state1, const CServerSetup &state2, int index)
 {
-	return (state1.Race[index] == state2.Race[index]
+	return (state1.ServerGameSettings.Presets[index].Race == state2.ServerGameSettings.Presets[index].Race
 			&& state1.Ready[index] == state2.Ready[index]);
 }
 
@@ -488,6 +517,20 @@ bool CClient::Update_badmap(unsigned long tick)
 	}
 }
 
+bool CClient::Update_needmap(unsigned long tick)
+{
+	Assert(networkState.State == ccs_needmap);
+
+	if (networkState.MsgCnt < 50) {
+		Send_MapNeeded(tick, networkState.StateArg);
+		return true;
+	} else {
+		networkState.State = ccs_unreachable;
+		DebugPrint("ccs_needmap: Above message limit %d\n" _C_ networkState.MsgCnt);
+		return false;
+	}
+}
+
 bool CClient::Update_goahead(unsigned long tick)
 {
 	Assert(networkState.State == ccs_goahead);
@@ -533,6 +576,13 @@ void CClient::Send_MapUidMismatch(unsigned long tick)
 	const CInitMessage_Header message(MessageInit_FromClient, ICMMapUidMismatch); // MAP Uid doesn't match
 
 	SendRateLimited(message, tick, 650);
+}
+
+void CClient::Send_MapNeeded(unsigned long tick, unsigned int fragment, bool limit)
+{
+	const CInitMessage_MapFileFragment message((uint32_t)fragment); // Request map files from server
+
+	SendRateLimited(message, tick, limit ? 1000 : 0);
 }
 
 void CClient::Send_Map(unsigned long tick)
@@ -592,6 +642,7 @@ bool CClient::Update(unsigned long tick)
 		case ccs_async: return Update_async(tick);
 		case ccs_mapinfo: return Update_mapinfo(tick);
 		case ccs_badmap: return Update_badmap(tick);
+		case ccs_needmap: return Update_needmap(tick);
 		case ccs_goahead: return Update_goahead(tick);
 		case ccs_started: return Update_started(tick);
 		default: break;
@@ -601,40 +652,29 @@ bool CClient::Update(unsigned long tick)
 
 void CClient::SetConfig(const CInitMessage_Config &msg)
 {
-	HostsCount = 0;
-	for (int i = 0; i < msg.hostsCount - 1; ++i) {
-		if (i != msg.clientIndex) {
-			Hosts[HostsCount] = msg.hosts[i];
-			HostsCount++;
-#ifdef DEBUG
-			const std::string hostStr = CHost(msg.hosts[i].Host, msg.hosts[i].Port).toString();
-			DebugPrint("Client %d = %s [%.*s]\n" _C_
-					   msg.hosts[i].PlyNr _C_ hostStr.c_str() _C_
-					   static_cast<int>(sizeof(msg.hosts[i].PlyName)) _C_
-					   msg.hosts[i].PlyName);
-#endif
-		} else { // Own client
-			NetLocalPlayerNumber = msg.hosts[i].PlyNr;
-			DebugPrint("SELF %d [%.*s]\n" _C_ msg.hosts[i].PlyNr _C_
-					   static_cast<int>(sizeof(msg.hosts[i].PlyName)) _C_
-					   msg.hosts[i].PlyName);
+	NetPlayers = 0;
+	// the local host slot may have changed due to Hosts array compaction on the server
+	NetLocalHostsSlot = msg.clientIndex;
+	for (int i = 0; i < PlayerMax; ++i) {
+		Hosts[i] = msg.hosts[i];
+		if (Hosts[i].IsValid()) {
+			NetPlayers++;
 		}
+		const std::string hostStr = CHost(msg.hosts[i].Host, msg.hosts[i].Port).toString();
+		DebugPrint("%s %d = %s [%.*s]\n" _C_
+					(i == 0 ? "Server" : (i == NetLocalHostsSlot ? "SELF" : "Client")) _C_
+					msg.hosts[i].PlyNr _C_ hostStr.c_str() _C_
+					static_cast<int>(sizeof(msg.hosts[i].PlyName)) _C_
+					msg.hosts[i].PlyName);
 	}
-	// server is last:
-	Hosts[HostsCount].Host = serverHost.getIp();
-	Hosts[HostsCount].Port = serverHost.getPort();
-	Hosts[HostsCount].PlyNr = msg.hosts[msg.hostsCount - 1].PlyNr;
-	Hosts[HostsCount].SetName(msg.hosts[msg.hostsCount - 1].PlyName);
-	++HostsCount;
-	NetPlayers = HostsCount + 1;
-#ifdef DEBUG
+	NetLocalPlayerNumber = msg.hosts[NetLocalHostsSlot].PlyNr;
+	// server is first, set our view of ip:port
+	Hosts[0].Host = serverHost.getIp();
+	Hosts[0].Port = serverHost.getPort();
+	// for ourselves we use the loopback ip:port
+	Hosts[NetLocalHostsSlot].Host = INADDR_LOOPBACK; // FIXME: use CNetworkParameter::Instance.localHost, but also in InitNetwork1
+	Hosts[NetLocalHostsSlot].Port = CNetworkParameter::Instance.localPort;
 	const std::string serverHostStr = serverHost.toString();
-	DebugPrint("Server %d = %s [%.*s]\n" _C_
-			   msg.hosts[msg.hostsCount - 1].PlyNr _C_
-			   serverHostStr.c_str() _C_
-			   static_cast<int>(sizeof(msg.hosts[msg.hostsCount - 1].PlyName)) _C_
-			   msg.hosts[msg.hostsCount - 1].PlyName);
-#endif
 }
 
 bool CClient::Parse(const unsigned char *buf, const CHost &host)
@@ -686,6 +726,10 @@ bool CClient::Parse(const unsigned char *buf, const CHost &host)
 		}
 		case ICMMap: { // Server has sent us new map info
 			Parse_Map(buf);
+			break;
+		}
+		case ICMMapNeeded: { // Server has sent us new map data
+			Parse_MapFragment(buf);
 			break;
 		}
 		case ICMState: {
@@ -760,8 +804,11 @@ void CClient::Parse_Map(const unsigned char *buf)
 	}
 	NetworkMapName = std::string(msg.MapPath, sizeof(msg.MapPath));
 	const std::string mappath = StratagusLibPath + "/" + NetworkMapName;
-	LoadStratagusMapInfo(mappath);
-	if (msg.MapUID != Map.Info.MapUID) {
+	if (!LoadStratagusMapInfo(mappath) && !networkState.StateArg) {
+		networkState.State = ccs_needmap;
+		networkState.MsgCnt = 0;
+		return;
+	} else if (msg.MapUID != Map.Info.MapUID) {
 		networkState.State = ccs_badmap;
 		fprintf(stderr, "Stratagus maps do not match (0x%08x) <-> (0x%08x)\n",
 				Map.Info.MapUID, static_cast<unsigned int>(msg.MapUID));
@@ -769,6 +816,75 @@ void CClient::Parse_Map(const unsigned char *buf)
 	}
 	networkState.State = ccs_mapinfo;
 	networkState.MsgCnt = 0;
+}
+
+void CClient::Parse_MapFragment(const unsigned char *buf)
+{
+	if (networkState.State != ccs_needmap) {
+		return;
+	}
+	CInitMessage_MapFileFragment msg;
+
+	msg.Deserialize(buf);
+
+	if (msg.FragmentIndex < networkState.StateArg) {
+		// this is a udp package from a fragment we already have, ignore
+		networkState.State = ccs_needmap;
+		return;
+	}
+
+	if (msg.FragmentIndex > networkState.StateArg) {
+		// we got a fragment that is newer, too new, that is bad
+		networkState.State = ccs_badmap;
+		fprintf(stderr, "Missed map fragment %d, already got %d\n", networkState.StateArg, msg.FragmentIndex);
+		return;
+	}
+
+	if (msg.PathSize == 0) {
+		// this is the last fragment, nothing left, we got the map.
+		// go back to the state just after connecting
+		networkState.State = ccs_connected;
+		networkState.MsgCnt = 0;
+		networkState.StateArg = 1; // set to 1 as a flag that we don't try receiving the map again
+		return;
+	}
+
+	// this is the fragment we requested, open the file and write it
+
+	// FIXME: what if the file exists before even the first fragment creates it?
+
+	fs::path mappath(StratagusLibPath);
+	char *path = new char[msg.PathSize + 1];
+	// msg.PathSize is 8bits, so smaller than msg.Data by construction
+	memcpy(path, msg.Data, msg.PathSize);
+	path[msg.PathSize] = '\0';
+	NetworkMapFragmentName = std::string(path);
+	if (NetworkMapFragmentName.find("..") != std::string::npos) {
+		// bad path
+		networkState.State = ccs_badmap;
+		fprintf(stderr, "Bad network filename %s\n", path);
+		return;
+	}
+	mappath /= path;
+	delete[] path;
+
+	std::ofstream mapfile(mappath.c_str(), std::ios::out | std::ios::app | std::ios::binary); 
+	if (!mapfile.is_open()) {
+		networkState.State = ccs_badmap;
+		fprintf(stderr, "Could not open %s for appending map data\n", mappath.u8string().c_str());
+		return;
+	} else {
+		Assert(msg.DataSize + msg.PathSize <= sizeof(msg.Data));
+		mapfile.write(msg.Data + msg.PathSize, msg.DataSize);
+		mapfile.close();
+	}
+
+	networkState.State = ccs_needmap;
+	networkState.StateArg++;
+	networkState.MsgCnt = 0;
+
+	// immediately ask for the next one
+	Send_MapNeeded(networkState.LastFrame, networkState.StateArg, false);
 }
 
 void CClient::Parse_Welcome(const unsigned char *buf)
@@ -781,23 +897,25 @@ void CClient::Parse_Welcome(const unsigned char *buf)
 	msg.Deserialize(buf);
 	networkState.State = ccs_connected;
 	networkState.MsgCnt = 0;
-	NetLocalHostsSlot = msg.hosts[0].PlyNr;
-	Hosts[0].SetName(msg.hosts[0].PlyName); // Name of server player
+	networkState.StateArg = 0;
+	NetLocalHostsSlot = msg.NetHostSlot;
 	CNetworkParameter::Instance.NetworkLag = msg.Lag;
 	CNetworkParameter::Instance.gameCyclesPerUpdate = msg.gameCyclesPerUpdate;
 
 	OnlineContextHandler->joinGame(msg.hosts[0].PlyName, "");
 
-	Hosts[0].Host = serverHost.getIp();
-	Hosts[0].Port = serverHost.getPort();
-	for (int i = 1; i < PlayerMax; ++i) {
-		if (i != NetLocalHostsSlot) {
-			Hosts[i] = msg.hosts[i];
-		} else {
-			Hosts[i].PlyNr = i;
-			Hosts[i].SetName(name.c_str());
+	for (int i = 0; i < PlayerMax; ++i) {
+		Hosts[i] = msg.hosts[i];
+		if (i == NetLocalHostsSlot) {
+			Assert(name == Hosts[i].PlyName);
 		}
 	}
+	// server is first, set ip:port from our perspective
+	Hosts[0].Host = serverHost.getIp();
+	Hosts[0].Port = serverHost.getPort();
+	// for ourselves we use the loopback ip:port
+	Hosts[NetLocalHostsSlot].Host = INADDR_LOOPBACK; // FIXME: use CNetworkParameter::Instance.localHost, but also in InitNetwork1
+	Hosts[NetLocalHostsSlot].Port = CNetworkParameter::Instance.localPort;
 }
 
 void CClient::Parse_State(const unsigned char *buf)
@@ -844,12 +962,10 @@ void CClient::Parse_Resync(const unsigned char *buf)
 	CInitMessage_Resync msg;
 
 	msg.Deserialize(buf);
-	for (int i = 1; i < PlayerMax - 1; ++i) {
-		if (i != NetLocalHostsSlot) {
-			Hosts[i] = msg.hosts[i];
-		} else {
-			Hosts[i].PlyNr = msg.hosts[i].PlyNr;
-			Hosts[i].SetName(name.c_str());
+	for (int i = 0; i < PlayerMax - 1; ++i) {
+		Hosts[i] = msg.hosts[i];
+		if (i == NetLocalHostsSlot) {
+			Assert(name == Hosts[i].PlyName);
 		}
 	}
 	networkState.State = ccs_synced;
@@ -913,14 +1029,14 @@ void CClient::Parse_AreYouThere()
 
 void CServer::KickClient(int c)
 {
-	DebugPrint("kicking client %d\n" _C_ Hosts[c].PlyNr);
+	DebugPrint("kicking client %d, player number %d\n" _C_ c _C_ Hosts[c].PlyNr);
 	Hosts[c].Clear();
 	serverSetup->Ready[c] = 0;
-	serverSetup->Race[c] = 0;
+	serverSetup->ServerGameSettings.Presets[c].Race = 0;
 	networkStates[c].Clear();
 	// Resync other clients
-	for (int n = 1; n < PlayerMax - 1; ++n) {
-		if (n != c && Hosts[n].PlyNr) {
+	for (int n = 1; n < PlayerMax; ++n) {
+		if (Hosts[n].IsValid()) {
 			networkStates[n].State = ccs_async;
 		}
 	}
@@ -930,7 +1046,9 @@ void CServer::Init(const std::string &name, CUDPSocket *socket, CServerSetup *se
 {
 	for (int i = 0; i < PlayerMax; ++i) {
 		networkStates[i].Clear();
-		//Hosts[i].Clear();
+		if (i) { // don't clear ourselves
+			Hosts[i].Clear();
+		}
 	}
 	this->serverSetup = serverSetup;
 	this->name = name;
@@ -955,13 +1073,10 @@ void CServer::Send_Welcome(const CNetworkHost &host, int index)
 {
 	CInitMessage_Welcome message;
 
-	message.hosts[0].PlyNr = index; // Host array slot number
-	message.hosts[0].SetName(name.c_str()); // Name of server player
-	for (int i = 1; i < PlayerMax - 1; ++i) { // Info about other clients
-		if (i != index && Hosts[i].PlyNr) {
-			message.hosts[i] = Hosts[i];
-		}
+	for (int i = 0; i < PlayerMax; ++i) { // Info about clients
+		message.hosts[i] = Hosts[i];
 	}
+	message.NetHostSlot = index;
 	NetworkSendICMessage_Log(*socket, CHost(host.Host, host.Port), message);
 }
 
@@ -969,10 +1084,8 @@ void CServer::Send_Resync(const CNetworkHost &host, int hostIndex)
 {
 	CInitMessage_Resync message;
 
-	for (int i = 1; i < PlayerMax - 1; ++i) { // Info about other clients
-		if (i != hostIndex && Hosts[i].PlyNr) {
-			message.hosts[i] = Hosts[i];
-		}
+	for (int i = 0; i < PlayerMax; ++i) { // Info about clients
+		message.hosts[i] = Hosts[i];
 	}
 	NetworkSendICMessage_Log(*socket, CHost(host.Host, host.Port), message);
 }
@@ -981,6 +1094,85 @@ void CServer::Send_Map(const CNetworkHost &host)
 {
 	const CInitMessage_Map message(NetworkMapName.c_str(), Map.Info.MapUID);
 
+	NetworkSendICMessage_Log(*socket, CHost(host.Host, host.Port), message);
+}
+
+void CServer::Send_MapFragment(const CNetworkHost &host, uint32_t fragmentIdx)
+{
+	fs::path prefix = fs::path(NetworkMapName);
+	while (prefix.stem() != prefix) { // may have 	.gz, .bz2 ...
+		prefix = prefix.stem();
+	}
+	fs::path mapDirectory(StratagusLibPath);
+	mapDirectory /= NetworkMapName;
+	mapDirectory = mapDirectory.parent_path();
+
+	std::set<fs::path> sortedFilenames;
+	for (const auto &entry : fs::directory_iterator(mapDirectory)) {
+		fs::path entryPath(entry.path());
+		while (entryPath.stem() != entryPath) {
+			entryPath = entryPath.stem();
+		}
+		if (entryPath == prefix) {
+			sortedFilenames.insert(entry.path());
+		}
+	}
+
+	fs::path currentPath;
+	std::string networkName;
+	uint32_t fragmentDataSize;
+	uint32_t fileSize;
+	uint32_t fragmentIdxStartForFile = 0;
+	fs::path libPath(StratagusLibPath);
+
+	for (fs::path p : sortedFilenames) {
+		currentPath = p;
+
+		// work around fs::relative not being available in some experimental fs impls
+		fs::path networkPathEnd(p.filename());
+		fs::path networkPathStart(p.parent_path());
+		while (networkPathStart != libPath) {
+			networkPathEnd = *--networkPathStart.end() / networkPathEnd;
+			networkPathStart = networkPathStart.parent_path();
+		}
+		networkName = networkPathEnd.generic_u8string();
+
+		fragmentDataSize = sizeof(CInitMessage_MapFileFragment::Data) - networkName.size();
+		fileSize = fs::file_size(p);
+		uint32_t fragmentCountForFile = (fileSize + fragmentDataSize - 1) / fragmentDataSize;
+		if ((fragmentIdxStartForFile <= fragmentIdx) && (fragmentIdx < fragmentIdxStartForFile + fragmentCountForFile)) {
+			break;
+		} else {
+			// next file starts at the next fragment
+			fragmentIdxStartForFile += fragmentCountForFile;
+			fragmentDataSize = 0;
+		}
+	}
+
+	if (fragmentDataSize > 0) {
+		std::ifstream file(currentPath.c_str(), std::ios::in | std::ios::binary);
+		if (file.is_open()) {
+			uint32_t offset = (fragmentIdx - fragmentIdxStartForFile) * fragmentDataSize;
+			file.seekg(offset);
+			fragmentDataSize = std::min<uint32_t>(fragmentDataSize, fileSize - offset);
+			char *data = new char[fragmentDataSize];
+			file.read(data, fragmentDataSize);
+			file.close();
+
+			DebugPrint("Sending map fragment %d for %s (size %d, offset %d)\n" _C_ fragmentIdx _C_ networkName.c_str() _C_ fragmentDataSize _C_ offset);
+			const CInitMessage_MapFileFragment message(networkName.c_str(), data, fragmentDataSize, fragmentIdx);
+			NetworkSendICMessage_Log(*socket, CHost(host.Host, host.Port), message);
+			delete[] data;
+			return;
+		} else {
+			// FIXME: ouch! we cannot read this map file. very strange, and very bad
+			// fall through for now and end the transmission
+		}
+	}
+
+	// no file content found for this fragment index, we're done
+	DebugPrint("Sending end fragment %d for %s\n" _C_ fragmentIdx _C_ NetworkMapName.c_str());
+	const CInitMessage_MapFileFragment message("", nullptr, 0, fragmentIdx);
 	NetworkSendICMessage_Log(*socket, CHost(host.Host, host.Port), message);
 }
 
@@ -1000,8 +1192,8 @@ void CServer::Send_GoodBye(const CNetworkHost &host)
 
 void CServer::Update(unsigned long frameCounter)
 {
-	for (int i = 1; i < PlayerMax - 1; ++i) {
-		if (Hosts[i].PlyNr && Hosts[i].Host && Hosts[i].Port) {
+	for (int i = 1; i < PlayerMax; ++i) {
+		if (Hosts[i].IsValid() && Hosts[i].Host && Hosts[i].Port) {
 			const unsigned long fcd = frameCounter - networkStates[i].LastFrame;
 			if (fcd >= CLIENT_LIVE_BEAT) {
 				if (fcd > CLIENT_IS_DEAD) {
@@ -1018,7 +1210,7 @@ void CServer::Update(unsigned long frameCounter)
 void CServer::MarkClientsAsResync()
 {
 	for (int i = 1; i < PlayerMax - 1; ++i) {
-		if (Hosts[i].PlyNr && networkStates[i].State == ccs_synced) {
+		if (Hosts[i].IsValid() && networkStates[i].State == ccs_synced) {
 			networkStates[i].State = ccs_async;
 		}
 	}
@@ -1036,24 +1228,29 @@ void CServer::MarkClientsAsResync()
 int CServer::Parse_Hello(int h, const CInitMessage_Hello &msg, const CHost &host)
 {
 	if (h == -1) { // it is a new client
-		for (int i = 1; i < PlayerMax - 1; ++i) {
-			// occupy first available slot, excepting the first slot (the host)
-			if (serverSetup->CompOpt[i] == 0) {
-				if (Hosts[i].PlyNr == 0) {
-					h = i;
-					break;
-				}
+		std::vector<int> availableSlots;
+		for (int i = 0; i < PlayerMax; ++i) {
+			if (serverSetup->CompOpt[i] == SlotOption::Available) {
+				availableSlots.push_back(i);
+			}
+		}
+		for (int i = 0; i < PlayerMax; ++i) {
+			if (availableSlots.empty()) {
+				break;
+			} else if (!Hosts[i].IsValid()) {
+				h = i;
+				break;
+			} else {
+				availableSlots.erase(std::remove(availableSlots.begin(), availableSlots.end(), Hosts[i].PlyNr));
 			}
 		}
 		if (h != -1) {
 			Hosts[h].Host = host.getIp();
 			Hosts[h].Port = host.getPort();
-			Hosts[h].PlyNr = h;
+			Hosts[h].PlyNr = availableSlots.front();
 			Hosts[h].SetName(msg.PlyName);
-#ifdef DEBUG
 			const std::string hostStr = host.toString();
 			DebugPrint("New client %s [%s]\n" _C_ hostStr.c_str() _C_ Hosts[h].PlyName);
-#endif
 			networkStates[h].State = ccs_connecting;
 			networkStates[h].MsgCnt = 0;
 		} else {
@@ -1119,6 +1316,10 @@ void CServer::Parse_Waiting(const int h)
 		case ccs_connecting:
 			networkStates[h].State = ccs_connected;
 			networkStates[h].MsgCnt = 0;
+		/* Fall through */
+		case ccs_needmap: // client has finished receiving the map and wants the info again
+			networkStates[h].State = ccs_connected;
+			networkStates[h].MsgCnt = 0;		
 		/* Fall through */
 		case ccs_connected: {
 			// this code path happens until client acknowledges the map
@@ -1195,6 +1396,29 @@ void CServer::Parse_Map(const int h)
 	}
 }
 
+void CServer::Parse_MapFragment(const int h, uint32_t fragmentIdx)
+{
+	switch (networkStates[h].State) {
+		// client has recvd map info but needs the map
+		case ccs_connected:
+			networkStates[h].State = ccs_needmap;
+			networkStates[h].MsgCnt = 0;
+			Assert(fragmentIdx == 0); // client keep asking for this fragment initially
+		/* Fall through */
+		case ccs_needmap: {
+			Send_MapFragment(Hosts[h], fragmentIdx);
+			networkStates[h].MsgCnt++;
+			if (networkStates[h].MsgCnt > 50) {
+				// FIXME: Client asks for map, but doesn't receive our fragment ....
+			}
+			break;
+		}
+		default:
+			DebugPrint("Server: ICMMap: Unhandled state %d Host %d\n" _C_ networkStates[h].State _C_ h);
+			break;
+	}
+}
+
 /**
 **  Parse locate state change notifiction or initial state info request of client
 **
@@ -1213,7 +1437,7 @@ void CServer::Parse_State(const int h, const CInitMessage_State &msg)
 			networkStates[h].MsgCnt = 0;
 			// Use information supplied by the client:
 			serverSetup->Ready[h] = msg.State.Ready[h];
-			serverSetup->Race[h] = msg.State.Race[h];
+			serverSetup->ServerGameSettings.Presets[h].Race = msg.State.ServerGameSettings.Presets[h].Race;
 			// Add additional info usage here!
 
 			// Resync other clients (and us..)
@@ -1352,6 +1576,13 @@ void CServer::Parse(unsigned long frameCounter, const unsigned char *buf, const 
 		case ICMWaiting: Parse_Waiting(index); break;
 		case ICMMap: Parse_Map(index); break;
 
+		case ICMMapNeeded: {
+			CInitMessage_MapFileFragment msg;
+			msg.Deserialize(buf);
+			Parse_MapFragment(index, msg.FragmentIndex);
+			break;
+		}
+
 		case ICMState: {
 			CInitMessage_State msg;
 
@@ -1473,198 +1704,181 @@ void NetworkInitClientConnect()
 }
 
 /**
-** Server user has finally hit the start game button
+** Server user has finally hit the start game button.
+** (This is run on the server)
 */
 void NetworkServerStartGame()
 {
-	Assert(ServerSetupState.CompOpt[0] == 0); // the host should be slot 0
+	Assert(ServerSetupState.CompOpt[0] == SlotOption::Available); // the host should be slot 0
 
 	// save it first..
 	LocalSetupState = ServerSetupState;
 
-	// Make a list of the available player slots.
-	int num[PlayerMax];
-	int rev[PlayerMax];
-	int h = 0;
-	for (int i = 0; i < PlayerMax; ++i) {
-		if (Map.Info.PlayerType[i] == PlayerPerson) {
-			rev[i] = h;
-			num[h++] = i;
-			DebugPrint("Slot %d is available for an interactive player (%d)\n" _C_ i _C_ rev[i]);
-		}
-	}
-	// Make a list of the available computer slots.
-	int n = h;
-	for (int i = 0; i < PlayerMax; ++i) {
-		if (Map.Info.PlayerType[i] == PlayerComputer) {
-			rev[i] = n++;
-			DebugPrint("Slot %d is available for an ai computer player (%d)\n" _C_ i _C_ rev[i]);
-		}
-	}
-	// Make a list of the remaining slots.
-	for (int i = 0; i < PlayerMax; ++i) {
-		if (Map.Info.PlayerType[i] != PlayerPerson
-			&& Map.Info.PlayerType[i] != PlayerComputer) {
-			rev[i] = n++;
-			// PlayerNobody - not available to anything..
-		}
-	}
-
-#ifdef DEBUG
 	printf("INITIAL ServerSetupState:\n");
-	for (int i = 0; i < PlayerMax - 1; ++i) {
-		printf("%02d: CO: %d   Race: %d   Host: ", i, ServerSetupState.CompOpt[i], ServerSetupState.Race[i]);
-		if (ServerSetupState.CompOpt[i] == 0) {
-			const std::string hostStr = CHost(Hosts[i].Host, Hosts[i].Port).toString();
-			printf(" %s %s", hostStr.c_str(), Hosts[i].PlyName);
+	NetPlayers = 0;
+	int compPlayers = ServerSetupState.ServerGameSettings.Opponents;
+	
+	// most game settings are already fine, that is, they are on default. however, for human player slots, we need
+	// to adapt the game settings from their defaults to either set the type to person if a human player is assigned,
+	// computer if an AI player is assigned, or nobody if the slot will not be used in this game.
+	for (int i = 0; i < PlayerMax; ++i) {
+		printf("%02d: CO: %d   Race: %d   Host: ", i, (int)ServerSetupState.CompOpt[i], ServerSetupState.ServerGameSettings.Presets[i].Race);
+		if (ServerSetupState.CompOpt[i] == SlotOption::Available) {
+			bool hasHumanPlayer = false;
+			for (auto &h : Hosts) {
+				if (h.IsValid() && h.PlyNr == i) {
+					NetPlayers++;
+					hasHumanPlayer = true;
+					ServerSetupState.ServerGameSettings.Presets[i].Type = PlayerTypes::PlayerPerson;
+					const std::string hostStr = CHost(h.Host, h.Port).toString();
+					printf(" %s %s", hostStr.c_str(), h.PlyName);
+				}
+			}
+			if (!hasHumanPlayer && compPlayers) {
+				compPlayers--;
+				ServerSetupState.CompOpt[i] = LocalSetupState.CompOpt[i] = SlotOption::Computer;
+				ServerSetupState.ServerGameSettings.Presets[i].Type = PlayerTypes::PlayerComputer;
+			} else if (!hasHumanPlayer) {
+				ServerSetupState.CompOpt[i] = LocalSetupState.CompOpt[i] = SlotOption::Closed;
+				ServerSetupState.ServerGameSettings.Presets[i].Type = PlayerTypes::PlayerNobody;
+			}
 		}
 		printf("\n");
 	}
-#endif
 
-	int org[PlayerMax];
-	// Reverse to assign slots to menu setup state positions.
+	// all players are assigned already, and the ServerSetupState should be valid already.
+	// just assert that this is true.
 	for (int i = 0; i < PlayerMax; ++i) {
-		org[i] = -1;
-		for (int j = 0; j < PlayerMax; ++j) {
-			if (rev[j] == i) {
-				org[i] = j;
-				break;
-			}
-		}
-	}
-
-	// Calculate NetPlayers
-	NetPlayers = h;
-	int compPlayers = ServerSetupState.Opponents;
-	for (int i = 1; i < h; ++i) {
-		if (Hosts[i].PlyNr == 0 && ServerSetupState.CompOpt[i] != 0) {
-			NetPlayers--;
-		} else if (Hosts[i].PlyName[0] == 0) {
-			NetPlayers--;
-			if (--compPlayers >= 0) {
-				// Unused slot gets a computer player
-				ServerSetupState.CompOpt[i] = 1;
-				LocalSetupState.CompOpt[i] = 1;
-			} else {
-				ServerSetupState.CompOpt[i] = 2;
-				LocalSetupState.CompOpt[i] = 2;
-			}
-		}
-	}
-
-	// Compact host list.. (account for computer/closed slots in the middle..)
-	for (int i = 1; i < h; ++i) {
-		if (Hosts[i].PlyNr == 0) {
-			int j;
-			for (j = i + 1; j < PlayerMax - 1; ++j) {
-				if (Hosts[j].PlyNr) {
-					DebugPrint("Compact: Hosts %d -> Hosts %d\n" _C_ j _C_ i);
-					Hosts[i] = Hosts[j];
-					Hosts[j].Clear();
-					std::swap(LocalSetupState.CompOpt[i], LocalSetupState.CompOpt[j]);
-					std::swap(LocalSetupState.Race[i], LocalSetupState.Race[j]);
-					break;
-				}
-			}
-			if (j == PlayerMax - 1) {
-				break;
-			}
-		}
-	}
-
-	// Randomize the position.
-	// It can be disabled by writing NoRandomPlacementMultiplayer() in lua files.
-	// Players slots are then mapped to players numbers(and colors).
-
-	if (NoRandomPlacementMultiplayer == 1) {
-		for (int i = 0; i < PlayerMax; ++i) {
-			if (Map.Info.PlayerType[i] != PlayerComputer) {
-				org[i] = Hosts[i].PlyNr;
-			}
-		}
-	} else {
-		int j = h;
-		for (int i = 0; i < NetPlayers; ++i) {
-			Assert(j > 0);
-			int chosen = MyRand() % j;
-
-			n = num[chosen];
-			Hosts[i].PlyNr = n;
-			int k = org[i];
-			if (k != n) {
-				for (int o = 0; o < PlayerMax; ++o) {
-					if (org[o] == n) {
-						org[o] = k;
+		if (Map.Info.PlayerType[i] == PlayerTypes::PlayerPerson) {
+			if (ServerSetupState.CompOpt[i] == SlotOption::Available) {
+				bool hasHumanPlayer = false;
+				for (auto &h : Hosts) {
+					if ((hasHumanPlayer = (h.PlyNr == i))) {
 						break;
 					}
 				}
-				org[i] = n;
+				// if the slot is still marked as available, we should have a host for it
+				Assert(hasHumanPlayer);
 			}
-			DebugPrint("Assigning player %d to slot %d (%d)\n" _C_ i _C_ n _C_ org[i]);
-
-			num[chosen] = num[--j];
 		}
 	}
 
-	// Complete all setup states for the assigned slots.
-	for (int i = 0; i < PlayerMax; ++i) {
-		num[i] = 1;
-		n = org[i];
-		ServerSetupState.CompOpt[n] = LocalSetupState.CompOpt[i];
-		ServerSetupState.Race[n] = LocalSetupState.Race[i];
+	if (!NoRandomPlacementMultiplayer) {
+		// Randomize the player assignment.
+		// It can be disabled by writing NoRandomPlacementMultiplayer() in lua files.
+		DebugPrint("Randomizing player index assignments\n");
+		std::vector<int> humanSlotIndices;
+		for (int i = 0; i < PlayerMax; i++) {
+			if (Map.Info.PlayerType[i] == PlayerTypes::PlayerPerson) {
+				humanSlotIndices.push_back(i);
+			}
+		}
+		std::random_device dev;
+		std::mt19937 rng_engine(dev());
+		for (int i = 0; i < 100; i++) {
+			std::shuffle(humanSlotIndices.begin(), humanSlotIndices.end(), rng_engine);
+			auto &h = Hosts[MyRand() % NetPlayers];
+			int newPlyNr = humanSlotIndices.front();
+			int oldPlyNr = h.PlyNr;
+			if (oldPlyNr == newPlyNr) {
+				continue;
+			}
+			if (ServerSetupState.CompOpt[newPlyNr] == SlotOption::Available) {
+				// a human host is currently assigned to this new player number, swap with it
+				for (auto &otherH : Hosts) {
+					if (otherH.PlyNr == newPlyNr) {
+						std::swap(h.PlyNr, otherH.PlyNr);
+						break;
+					}
+				}
+			} else {
+				// this newPlyNr was currently used by an AI or no one
+				h.PlyNr = newPlyNr;
+			}
+			std::swap(ServerSetupState.CompOpt[oldPlyNr], ServerSetupState.CompOpt[newPlyNr]);
+			std::swap(ServerSetupState.ServerGameSettings.Presets[oldPlyNr], ServerSetupState.ServerGameSettings.Presets[newPlyNr]);
+		}
 	}
 
-	/* NOW we have NetPlayers in Hosts array, with ServerSetupState shuffled up to match it.. */
+	bool waitingForConfigAck[PlayerMax];
+	bool waitingForInitAck[PlayerMax];
+	std::fill_n(waitingForConfigAck, PlayerMax, true);
+	std::fill_n(waitingForInitAck, PlayerMax, false);
 
-	//
 	// Send all clients host:ports to all clients.
-	//  Slot 0 is the server!
-	//
+	// Slot 0 is the server!
 	NetLocalPlayerNumber = Hosts[0].PlyNr;
-	HostsCount = NetPlayers - 1;
 
-	// Move ourselves (server slot 0) to the end of the list
-	std::swap(Hosts[0], Hosts[HostsCount]);
+	// compact hosts array
+	for (int i = 0; i < PlayerMax; i++) {
+		if (!Hosts[i].IsValid()) {
+			bool any_more_hosts = false;
+			for (int j = i + 1; j < PlayerMax; j++) {
+				if (Hosts[j].IsValid()) {
+					Hosts[i] = Hosts[j];
+					Hosts[j].Clear();
+					any_more_hosts = true;
+					break;
+				}
+			}
+			if (!any_more_hosts) {
+				break;
+			}
+		}
+	}
 
 	// Prepare the final config message:
 	CInitMessage_Config message;
-	message.hostsCount = NetPlayers;
-	for (int i = 0; i < NetPlayers; ++i) {
+	for (int i = 0; i < PlayerMax; ++i) {
 		message.hosts[i] = Hosts[i];
-		message.hosts[i].PlyNr = Hosts[i].PlyNr;
+	}
+
+	printf("FINAL ServerSetupState:\n");
+	for (int i = 0; i < PlayerMax; ++i) {
+		printf("%02d: CO: %d   Race: %d   Host: ", i, (int)ServerSetupState.CompOpt[i], ServerSetupState.ServerGameSettings.Presets[i].Race);
+		if (ServerSetupState.CompOpt[i] == SlotOption::Available) {
+			for (auto &h : Hosts) {
+				if (h.IsValid() && h.PlyNr == i) {
+					const std::string hostStr = CHost(h.Host, h.Port).toString();
+					printf(" %s %s", hostStr.c_str(), h.PlyName);
+					break;
+				}
+			}
+		}
+		printf("\n");
 	}
 
 	// Prepare the final state message:
 	const CInitMessage_State statemsg(MessageInit_FromServer, ServerSetupState);
 
-	DebugPrint("Ready, sending InitConfig to %d host(s)\n" _C_ HostsCount);
+	int hostsToAck = NetPlayers - 1;
+	DebugPrint("Ready, sending InitConfig to %d host(s)\n" _C_ hostsToAck);
 	// Send all clients host:ports to all clients.
-	for (int j = HostsCount; j;) {
-
+	while (hostsToAck) {
 breakout:
-		// Send to all clients.
-		for (int i = 0; i < HostsCount; ++i) {
-			const CHost host(message.hosts[i].Host, message.hosts[i].Port);
-
-			if (num[Hosts[i].PlyNr] == 1) { // not acknowledged yet
-				message.clientIndex = i;
-				NetworkSendICMessage_Log(NetworkFildes, host, message);
-			} else if (num[Hosts[i].PlyNr] == 2) {
-				NetworkSendICMessage_Log(NetworkFildes, host, statemsg);
+		// Send to all clients, skip ourselves (the server) host in Hosts[0]
+		for (int i = 1; i <= PlayerMax; ++i) {
+			if (Hosts[i].IsValid()) {
+				const CHost host(message.hosts[i].Host, message.hosts[i].Port);
+				if (waitingForConfigAck[i]) { // not acknowledged yet
+					DebugPrint("Sending InitConfig to %s\n" _C_ host.toString().c_str());
+					message.clientIndex = i;
+					NetworkSendICMessage_Log(NetworkFildes, host, message);
+				} else if (waitingForInitAck[i]) {
+					DebugPrint("Sending InitState to %s\n" _C_ host.toString().c_str());
+					NetworkSendICMessage_Log(NetworkFildes, host, statemsg);
+				}
 			}
 		}
 
 		// Wait for acknowledge
 		unsigned char buf[1024];
-		while (j && NetworkFildes.HasDataToRead(1000)) {
+		while (hostsToAck && NetworkFildes.HasDataToRead(1000)) {
 			CHost host;
 			const int len = NetworkFildes.Recv(buf, sizeof(buf), &host);
 			if (len < 0) {
-#ifdef DEBUG
 				const std::string hostStr = host.toString();
 				DebugPrint("*Receive ack failed: (%d) from %s\n" _C_ len _C_ hostStr.c_str());
-#endif
 				continue;
 			}
 			CInitMessage_Header header;
@@ -1675,30 +1889,27 @@ breakout:
 			if (type == MessageInit_FromClient) {
 				switch (subtype) {
 					case ICMConfig: {
-#ifdef DEBUG
 						const std::string hostStr = host.toString();
 						DebugPrint("Got ack for InitConfig from %s\n" _C_ hostStr.c_str());
-#endif
 						const int index = FindHostIndexBy(host);
 						if (index != -1) {
-							if (num[Hosts[index].PlyNr] == 1) {
-								num[Hosts[index].PlyNr]++;
+							if (waitingForConfigAck[index]) {
+								waitingForConfigAck[index] = false;
+								waitingForInitAck[index] = true;
 							}
 							goto breakout;
 						}
 						break;
 					}
 					case ICMGo: {
-#ifdef DEBUG
 						const std::string hostStr = host.toString();
 						DebugPrint("Got ack for InitState from %s\n" _C_ hostStr.c_str());
-#endif
 						const int index = FindHostIndexBy(host);
 						if (index != -1) {
-							if (num[Hosts[index].PlyNr] == 2) {
-								num[Hosts[index].PlyNr] = 0;
-								--j;
-								DebugPrint("Removing host %d from waiting list\n" _C_ j);
+							if (waitingForInitAck[index]) {
+								waitingForInitAck[index] = false;
+								hostsToAck--;
+								DebugPrint("Removing host %d from waiting list\n" _C_ index);
 							}
 						}
 						break;
@@ -1720,7 +1931,7 @@ breakout:
 
 	// Give clients a quick-start kick..
 	const CInitMessage_Header message_go(MessageInit_FromServer, ICMGo);
-	for (int i = 0; i < HostsCount; ++i) {
+	for (int i = 0; i < NetPlayers; ++i) {
 		const CHost host(Hosts[i].Host, Hosts[i].Port);
 		NetworkSendICMessage_Log(NetworkFildes, host, message_go);
 	}
@@ -1776,8 +1987,19 @@ void NetworkInitServerConnect(int openslots)
 	// preset the server (initially always slot 0)
 	Hosts[0].SetName(Parameters::Instance.LocalPlayerName.c_str());
 
-	for (int i = openslots; i < PlayerMax - 1; ++i) {
-		ServerSetupState.CompOpt[i] = 1;
+	bool assignedHostPlayer = false;
+	for (int i = 0; i < PlayerMax; i++) {
+		if (Map.Info.PlayerType[i] == PlayerTypes::PlayerPerson) {
+			if (!assignedHostPlayer) {
+				assignedHostPlayer = true;
+				Hosts[0].PlyNr = i;
+			}
+			ServerSetupState.CompOpt[i] = SlotOption::Available;
+		} else if (Map.Info.PlayerType[i] == PlayerTypes::PlayerNobody) {
+			ServerSetupState.CompOpt[i] = SlotOption::Closed;
+		} else {
+			ServerSetupState.CompOpt[i] = SlotOption::Computer;
+		}
 	}
 }
 
@@ -1792,85 +2014,62 @@ void NetworkServerResyncClients()
 }
 
 /**
-** Multiplayer network game final race and player type setup.
+** Multiplayer network game final copy of server settings to game settings.
 */
 void NetworkGamePrepareGameSettings()
 {
 	DebugPrint("NetPlayers = %d\n" _C_ NetPlayers);
+	GameSettings = ServerSetupState.ServerGameSettings;
+	GameSettings.NetGameType = NetGameTypes::SettingsMultiPlayerGame;
 
-	GameSettings.NetGameType = SettingsMultiPlayerGame;
-
-#ifdef DEBUG
-	for (int i = 0; i < PlayerMax - 1; i++) {
-		printf("%02d: CO: %d   Race: %d   Name: ", i, ServerSetupState.CompOpt[i], ServerSetupState.Race[i]);
-		if (ServerSetupState.CompOpt[i] == 0) {
-			for (int h = 0; h != HostsCount; ++h) {
-				if (Hosts[h].PlyNr == i) {
-					printf("%s", Hosts[h].PlyName);
+	printf("FINAL NETWORK GAME SETUP\n");
+	for (int i = 0; i < PlayerMax; i++) {
+		printf("%02d: CO: %d   Race: %d   Name: ", i, (int)ServerSetupState.CompOpt[i], ServerSetupState.ServerGameSettings.Presets[i].Race);
+		if (ServerSetupState.CompOpt[i] == SlotOption::Available) {
+			for (auto &h : Hosts) {
+				if (h.IsValid() && h.PlyNr == i) {
+					printf("%s", h.PlyName);
 				}
 			}
 			if (i == NetLocalPlayerNumber) {
-				printf("%s (localhost)", Parameters::Instance.LocalPlayerName.c_str());
+				printf(" (%s localhost)", Parameters::Instance.LocalPlayerName.c_str());
 			}
 		}
 		printf("\n");
 	}
-#endif
 
-	// Make a list of the available player slots.
-	int num[PlayerMax];
-	int comp[PlayerMax];
-	int c = 0;
-	int h = 0;
-	for (int i = 0; i < PlayerMax; i++) {
-		if (Map.Info.PlayerType[i] == PlayerPerson) {
-			num[h++] = i;
-		}
-		if (Map.Info.PlayerType[i] == PlayerComputer) {
-			comp[c++] = i; // available computer player slots
-		}
-	}
-	for (int i = 0; i < h; i++) {
-		GameSettings.Presets[num[i]].Race = ServerSetupState.Race[num[i]];
-		switch (ServerSetupState.CompOpt[num[i]]) {
-			case 0: {
-				GameSettings.Presets[num[i]].Type = PlayerPerson;
-				break;
-			}
-			case 1:
-				GameSettings.Presets[num[i]].Type = PlayerComputer;
-				break;
-			case 2:
-				GameSettings.Presets[num[i]].Type = PlayerNobody;
-			default:
-				break;
-		}
-	}
-	for (int i = 0; i < c; i++) {
-		if (ServerSetupState.CompOpt[comp[i]] == 2) { // closed..
-			GameSettings.Presets[comp[i]].Type = PlayerNobody;
-			DebugPrint("Settings[%d].Type == Closed\n" _C_ comp[i]);
-		}
-	}
-
-#ifdef DEBUG
-	for (int i = 0; i != HostsCount; ++i) {
-		Assert(GameSettings.Presets[Hosts[i].PlyNr].Type == PlayerPerson);
-	}
-	Assert(GameSettings.Presets[NetLocalPlayerNumber].Type == PlayerPerson);
-#endif
+	printf("FINAL NETWORK GAME SETTINGS\n");
+	GameSettings.Save(+[](std::string f) { printf("%s\n", f.c_str()); });
 }
 
 /**
-**  Removes Randomization of Player position in Multiplayer mode
+**  Controls Randomization of Player position in Multiplayer mode.
+**  Without arguments, disables randomization. Otherwise, sets the
+**  NoRandomization flag to the boolean argument value.
 **
 **  @param l  Lua state.
 */
 static int CclNoRandomPlacementMultiplayer(lua_State *l)
 {
-	LuaCheckArgs(l, 0);
-	NoRandomPlacementMultiplayer = 1;
+	int nargs = lua_gettop(l);
+	if (nargs > 1) {
+		LuaError(l, "incorrect argument");
+	}
+	bool flag = nargs ? LuaToBoolean(l, 1) : false;
+	NoRandomPlacementMultiplayer = flag;
 	return 0;
+}
+
+/**
+**  Return if player positions in multiplayer mode are randomized.
+**
+**  @param l  Lua state.
+*/
+static int CclUsesRandomPlacementMultiplayer(lua_State *l)
+{
+	LuaCheckArgs(l, 0);
+	lua_pushboolean(l, !NoRandomPlacementMultiplayer);
+	return 1;
 }
 
 static int CclNetworkDiscoverServers(lua_State *l)
@@ -1897,6 +2096,7 @@ static int CclNetworkDiscoverServers(lua_State *l)
 void NetworkCclRegister()
 {
 	lua_register(Lua, "NoRandomPlacementMultiplayer", CclNoRandomPlacementMultiplayer);
+	lua_register(Lua, "UsesRandomPlacementMultiplayer", CclUsesRandomPlacementMultiplayer);
 	lua_register(Lua, "NetworkDiscoverServers", CclNetworkDiscoverServers);
 }
 

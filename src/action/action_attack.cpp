@@ -336,7 +336,7 @@ CUnit *const COrder_Attack::BestTarget(const CUnit &unit, CUnit *const target1, 
 	Assert(target1 != NULL);
 	Assert(target2 != NULL);
 
-	return (Preference.SimplifiedAutoTargeting 
+	return (GameSettings.SimplifiedAutoTargeting 
 				? ((TargetPriorityCalculate(&unit, target1) > TargetPriorityCalculate(&unit, target2)) ? target1 : target2)
 				: ((ThreatCalculate(unit, *target1) < ThreatCalculate(unit, *target2)) ?  target1 : target2));
 }
@@ -447,7 +447,7 @@ void COrder_Attack::SetAutoTarget(CUnit &unit, CUnit *target)
 		this->SkirmishRange = this->Range;
 	}
 	// Set threshold value only for aggressive units (Prevent to change target)
-	if (!Preference.SimplifiedAutoTargeting && target->IsAgressive())
+	if (!GameSettings.SimplifiedAutoTargeting && target->IsAgressive())
 	{
 		unit.Threshold = 30;
 	}
@@ -460,6 +460,13 @@ void COrder_Attack::SetAutoTarget(CUnit &unit, CUnit *target)
 **/
 bool COrder_Attack::AutoSelectTarget(CUnit &unit)
 {
+	// don't check if we want to switch targets each cycle, once every second is enough
+	if (Sleep > 0) {
+		Sleep -= 1;
+		return true;
+	}
+	Sleep = CYCLES_PER_SECOND / 2;
+
 	// if unit can't attack, or if unit is not bunkered and removed - exit, no targets
 	if (unit.Type->CanAttack == false
 		|| (unit.Removed
@@ -503,7 +510,7 @@ bool COrder_Attack::AutoSelectTarget(CUnit &unit)
 			if (unit.UnderAttack && !newTarget->IsAgressive()) {
 				return true;
 			}
-			if (Preference.SimplifiedAutoTargeting) {
+			if (GameSettings.SimplifiedAutoTargeting) {
 				const int goal_priority			= TargetPriorityCalculate(&unit, goal);
 				const int newTarget_priority 	= TargetPriorityCalculate(&unit, newTarget);
 

@@ -100,7 +100,7 @@
 **    ::MapFieldUnpassable field is movement blocked.
 **    ::MapFieldWall field contains wall.
 **    ::MapFieldRocks field contains rocks.
-**    ::MapFieldForest field contains forest.
+**    ::MapFieldForest field contains forest or other harvestable resource
 **    ::MapFieldLandUnit land unit on field.
 **    ::MapFieldAirUnit air unit on field.
 **    ::MapFieldSeaUnit water unit on field.
@@ -210,6 +210,15 @@ public:
 	/// Returns true, if water on the map tile field
 	bool ForestOnMap() const;
 
+	/// Returns true, if any terrain resource giving Cost4 on the map tile field
+	bool Cost4OnMap() const;
+
+	/// Returns true, if any terrain resource giving Cost5 on the map tile field
+	bool Cost5OnMap() const;
+
+	/// Returns true, if any terrain resource giving Cost6 on the map tile field
+	bool Cost6OnMap() const;
+
 	/// Returns true, if coast on the map tile field
 	bool RockOnMap() const;
 
@@ -227,6 +236,9 @@ public:
 	unsigned char getCost() const { return cost; }
 	unsigned int getFlag() const { return Flags; }
 	void setGraphicTile(unsigned int tile) { this->tile = tile; }
+#ifdef DEBUG
+	int64_t lastAStarCost;    /// debugging pathfinder
+#endif
 private:
 #ifdef DEBUG
 	unsigned int tilesetTile;  /// tileset tile number
@@ -237,8 +249,7 @@ public:
 private:
 	unsigned char cost;        /// unit cost to move in this tile
 public:
-	// FIXME: Value should be removed, walls and regeneration can be handled differently.
-	unsigned char Value;       /// HP for walls/ Wood Regeneration
+	unsigned int Value;        /// HP for walls/Wood Regeneration, value of stored resource for forest or harvestable terrain
 	CUnitCache UnitCache;      /// A unit on the map field.
 
 	CMapFieldPlayerInfo playerInfo; /// stuff related to player

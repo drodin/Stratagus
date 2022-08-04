@@ -52,13 +52,18 @@ public:
 	virtual bool ParseSpecificData(lua_State *l, int &j, const char *value, const CUnit &unit);
 
 	virtual void Execute(CUnit &unit);
+	virtual void Cancel(CUnit &unit);
 	virtual PixelPos Show(const CViewport &vp, const PixelPos &lastScreenPos) const;
 	virtual void UpdatePathFinderData(PathFinderInput &input);
+
+	virtual void UpdateUnitVariables(CUnit &unit) const;
 
 	virtual void AiUnitKilled(CUnit &unit);
 
 	const CUnitType &GetUnitType() const { return *Type; }
 	virtual const Vec2i GetGoalPos() const;
+
+	CUnit *GetBuildingUnit() const;
 
 private:
 	bool MoveToLocation(CUnit &unit);

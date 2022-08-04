@@ -204,9 +204,9 @@ static void AiCheckUnits()
 
 		// Add equivalent units
 		int e = unit_types_count[t];
-		if (t < AiHelpers.Equiv.size()) {
-			for (unsigned int j = 0; j < AiHelpers.Equiv[t].size(); ++j) {
-				e += unit_types_count[AiHelpers.Equiv[t][j]->Slot];
+		if (t < AiHelpers.Equiv().size()) {
+			for (unsigned int j = 0; j < AiHelpers.Equiv()[t].size(); ++j) {
+				e += unit_types_count[AiHelpers.Equiv()[t][j]->Slot];
 			}
 		}
 		const int requested = x - e - counter[t];
@@ -227,9 +227,9 @@ static void AiCheckUnits()
 
 		//  Add equivalent units
 		int e = unit_types_count[t];
-		if (t < AiHelpers.Equiv.size()) {
-			for (unsigned int j = 0; j < AiHelpers.Equiv[t].size(); ++j) {
-				e += unit_types_count[AiHelpers.Equiv[t][j]->Slot];
+		if (t < AiHelpers.Equiv().size()) {
+			for (unsigned int j = 0; j < AiHelpers.Equiv()[t].size(); ++j) {
+				e += unit_types_count[AiHelpers.Equiv()[t][j]->Slot];
 			}
 		}
 
@@ -517,15 +517,15 @@ void FreeAi()
 	AiTypes.clear();
 
 	//  Free AiHelpers.
-	AiHelpers.Train.clear();
-	AiHelpers.Build.clear();
-	AiHelpers.Upgrade.clear();
-	AiHelpers.Research.clear();
-	AiHelpers.Repair.clear();
-	AiHelpers.UnitLimit.clear();
-	AiHelpers.Equiv.clear();
-	AiHelpers.Refinery.clear();
-	AiHelpers.Depots.clear();
+	AiHelpers.Train().clear();
+	AiHelpers.Build().clear();
+	AiHelpers.Upgrade().clear();
+	AiHelpers.Research().clear();
+	AiHelpers.Repair().clear();
+	AiHelpers.UnitLimit().clear();
+	AiHelpers.Equiv().clear();
+	AiHelpers.Refinery().clear();
+	AiHelpers.Depots().clear();
 
 	AiResetUnitTypeEquiv();
 }
@@ -744,7 +744,7 @@ void AiUnitKilled(CUnit &unit)
 	DebugPrint("%d: %d(%s) killed\n" _C_
 			   unit.Player->Index _C_ UnitNumber(unit) _C_ unit.Type->Ident.c_str());
 
-	Assert(unit.Player->Type != PlayerPerson);
+	Assert(unit.Player->Type != PlayerTypes::PlayerPerson);
 
 	if (unit.GroupId) {
 		AiForce &force = unit.Player->Ai->Force[unit.GroupId - 1];
@@ -780,7 +780,7 @@ void AiWorkComplete(CUnit *unit, CUnit &what)
 				   what.Player->Index _C_ what.Type->Ident.c_str() _C_ what.tilePos.x _C_ what.tilePos.y);
 	}
 
-	Assert(what.Player->Type != PlayerPerson);
+	Assert(what.Player->Type != PlayerTypes::PlayerPerson);
 	AiRemoveFromBuilt(what.Player->Ai, *what.Type);
 }
 
@@ -796,7 +796,7 @@ void AiCanNotBuild(const CUnit &unit, const CUnitType &what)
 			   unit.Player->Index _C_ UnitNumber(unit) _C_ unit.Type->Ident.c_str() _C_
 			   what.Ident.c_str() _C_ unit.tilePos.x _C_ unit.tilePos.y);
 
-	Assert(unit.Player->Type != PlayerPerson);
+	Assert(unit.Player->Type != PlayerTypes::PlayerPerson);
 	AiReduceMadeInBuilt(*unit.Player->Ai, what);
 }
 
@@ -808,7 +808,7 @@ void AiCanNotBuild(const CUnit &unit, const CUnitType &what)
 */
 void AiCanNotReach(CUnit &unit, const CUnitType &what)
 {
-	Assert(unit.Player->Type != PlayerPerson);
+	Assert(unit.Player->Type != PlayerTypes::PlayerPerson);
 	AiReduceMadeInBuilt(*unit.Player->Ai, what);
 }
 
@@ -836,7 +836,7 @@ static void AiMoveUnitInTheWay(CUnit &unit)
 	movablenb = 0;
 
 	// Try to make some unit moves around it
-	for (CUnitManager::Iterator it = UnitManager.begin(); it != UnitManager.end(); ++it) {
+	for (CUnitManager::Iterator it = UnitManager->begin(); it != UnitManager->end(); ++it) {
 		CUnit &blocker = **it;
 
 		if (blocker.IsUnusable()) {
@@ -926,7 +926,7 @@ void AiCanNotMove(CUnit &unit)
 	const int gh = unit.pathFinderData->input.GetGoalSize().y;
 
 	AiPlayer = unit.Player->Ai;
-	if (PlaceReachable(unit, goalPos, gw, gh, 0, 255)) {
+	if (PlaceReachable(unit, goalPos, gw, gh, 0, 255, false)) {
 		// Path probably closed by unit here
 		AiMoveUnitInTheWay(unit);
 	}
@@ -939,7 +939,7 @@ void AiCanNotMove(CUnit &unit)
 */
 void AiNeedMoreSupply(const CPlayer &player)
 {
-	Assert(player.Type != PlayerPerson);
+	Assert(player.Type != PlayerTypes::PlayerPerson);
 	player.Ai->NeedSupply = true;
 }
 
@@ -955,7 +955,7 @@ void AiTrainingComplete(CUnit &unit, CUnit &what)
 			   unit.Player->Index _C_ UnitNumber(unit) _C_ unit.Type->Ident.c_str() _C_
 			   what.Type->Ident.c_str() _C_ unit.tilePos.x _C_ unit.tilePos.y);
 
-	Assert(unit.Player->Type != PlayerPerson);
+	Assert(unit.Player->Type != PlayerTypes::PlayerPerson);
 
 	AiRemoveFromBuilt(unit.Player->Ai, *what.Type);
 
@@ -976,7 +976,7 @@ void AiUpgradeToComplete(CUnit &unit, const CUnitType &what)
 			   unit.Player->Index _C_ UnitNumber(unit) _C_ unit.Type->Ident.c_str() _C_
 			   what.Ident.c_str() _C_ unit.tilePos.x _C_ unit.tilePos.y);
 
-	Assert(unit.Player->Type != PlayerPerson);
+	Assert(unit.Player->Type != PlayerTypes::PlayerPerson);
 }
 
 /**
@@ -991,7 +991,7 @@ void AiResearchComplete(CUnit &unit, const CUpgrade *what)
 			   unit.Player->Index _C_ UnitNumber(unit) _C_ unit.Type->Ident.c_str() _C_
 			   what->Ident.c_str() _C_ unit.tilePos.x _C_ unit.tilePos.y);
 
-	Assert(unit.Player->Type != PlayerPerson);
+	Assert(unit.Player->Type != PlayerTypes::PlayerPerson);
 
 	// FIXME: upgrading knights -> paladins, must rebuild lists!
 }
@@ -1039,6 +1039,66 @@ void AiEachSecond(CPlayer &player)
 	if (GameCycle > AiPlayer->LastExplorationGameCycle + 5 * CYCLES_PER_SECOND) {
 		AiSendExplorers();
 	}
+}
+
+std::vector<std::vector<CUnitType *> > &AiHelper::Train()
+{
+	static std::vector<std::vector<CUnitType *> > vec;
+	return vec;
+}
+
+std::vector<std::vector<CUnitType *> > &AiHelper::Build()
+{
+	static std::vector<std::vector<CUnitType *> > vec;
+	return vec;
+}
+
+std::vector<std::vector<CUnitType *> > &AiHelper::Upgrade()
+{
+	static std::vector<std::vector<CUnitType *> > vec;
+	return vec;
+}
+
+std::vector<std::vector<CUnitType *> > &AiHelper::Research()
+{
+	static std::vector<std::vector<CUnitType *> > vec;
+	return vec;
+}
+
+std::vector<std::vector<CUnitType *> > &AiHelper::SingleResearch()
+{
+	static std::vector<std::vector<CUnitType *> > vec;
+	return vec;
+}
+
+std::vector<std::vector<CUnitType *> > &AiHelper::Repair()
+{
+	static std::vector<std::vector<CUnitType *> > vec;
+	return vec;
+}
+
+std::vector<std::vector<CUnitType *> > &AiHelper::UnitLimit()
+{
+	static std::vector<std::vector<CUnitType *> > vec;
+	return vec;
+}
+
+std::vector<std::vector<CUnitType *> > &AiHelper::Equiv()
+{
+	static std::vector<std::vector<CUnitType *> > vec;
+	return vec;
+}
+
+std::vector<std::vector<CUnitType *> > &AiHelper::Refinery()
+{
+	static std::vector<std::vector<CUnitType *> > vec;
+	return vec;
+}
+
+std::vector<std::vector<CUnitType *> > &AiHelper::Depots()
+{
+	static std::vector<std::vector<CUnitType *> > vec;
+	return vec;
 }
 
 //@}

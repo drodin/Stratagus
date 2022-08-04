@@ -46,6 +46,7 @@
 
 #include "SDL.h"
 
+#include <map>
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -194,7 +195,12 @@ int CFile::printf(const char *format, ...)
 }
 
 static Sint64 sdl_size(SDL_RWops * context) {
-	return -1;
+	CFile *self = reinterpret_cast<CFile*>(context->hidden.unknown.data1);
+	long currentPosition = self->tell();
+	self->seek(0, SEEK_END);
+	long size = self->tell();
+	self->seek(currentPosition, SEEK_SET);
+	return size;
 }
 
 static Sint64 sdl_seek(SDL_RWops * context, Sint64 offset, int whence) {
@@ -670,9 +676,17 @@ static void LibraryFileName(const char *file, char(&buffer)[PATH_MAX])
 
 extern std::string LibraryFileName(const char *file)
 {
-	char buffer[PATH_MAX];
-	LibraryFileName(file, buffer);
-	return buffer;
+	static std::unordered_map<std::string, std::string> FileNameMap;
+	auto result = FileNameMap.find(file);
+	if (result == std::end(FileNameMap)) {
+		char buffer[PATH_MAX];
+		LibraryFileName(file, buffer);
+		std::string r(buffer);
+		FileNameMap[file] = r;
+		return r;
+	} else {
+		return result->second;
+	}
 }
 
 bool CanAccessFile(const char *filename)
@@ -830,6 +844,48 @@ FileWriter *CreateFileWriter(const std::string &filename)
 	} else {
 		return new RawFileWriter(filename);
 	}
+}
+
+/**
+ * Quote arguments for usage in calls to system(), popen() and similar.
+ * Really only needed on Windows, where all these calls just concatenate
+ * all arguments with a space and pass the full string to the next process.
+ */
+std::vector<std::string> QuoteArguments(std::vector<std::string> args)
+{
+	std::vector<std::string> outArgs;
+	for (auto arg : args) {
+#ifdef WIN32
+		if (!arg.empty() && arg.find_first_of(" \t\n\v\"") == std::string::npos) {
+			outArgs.push_back(arg);
+		} else {
+			// Windows always needs argument quoting around arguments with spaces
+			std::string ss = "\"";
+			for (auto ch = arg.begin(); ; ch++) {
+				int backslashes = 0;
+				while (ch != arg.end() && *ch == '\\') {
+					ch++;
+					backslashes++;
+				}
+				if (ch == arg.end()) {
+					ss.append(backslashes * 2, '\\');
+					break;
+				} else if (*ch == '"') {
+					ss.append(backslashes * 2 + 1, '\\');
+					ss.push_back(*ch);
+				} else {
+					ss.append(backslashes, '\\');
+					ss.push_back(*ch);
+				}
+			}
+			ss.push_back('"');
+			outArgs.push_back(ss);
+		}
+#else
+		outArgs.push_back(arg);
+#endif
+	}
+	return outArgs;
 }
 
 //@}

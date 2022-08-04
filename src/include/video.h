@@ -90,7 +90,7 @@ public:
 
 class CGraphic : public gcn::Image
 {
-
+public:
 	struct frame_pos_t {
 		short int x;
 		short int y;
@@ -169,9 +169,12 @@ public:
 	void SetOriginalSize();
 	bool TransparentPixel(int x, int y);
 	void SetPaletteColor(int idx, int r, int g, int b);
-	void MakeShadow();
+	void MakeShadow(int xOffset, int yOffset);
 
-	inline bool IsLoaded() const { return Surface != NULL; }
+	// minor programmatic editing features
+	void OverlayGraphic(CGraphic *other, bool mask = false);
+
+	inline bool IsLoaded(bool flipped = false) const { return Surface != NULL && (!flipped || SurfaceFlip != NULL); }
 
 	//guichan
 	virtual void *_getData() const { return Surface; }
@@ -204,9 +207,9 @@ protected:
 	}
 
 public:
-	void DrawPlayerColorFrameClipX(int player, unsigned frame, int x, int y,
+	void DrawPlayerColorFrameClipX(int colorIndex, unsigned frame, int x, int y,
 								   SDL_Surface *surface = TheScreen);
-	void DrawPlayerColorFrameClip(int player, unsigned frame, int x, int y,
+	void DrawPlayerColorFrameClip(int colorIndex, unsigned frame, int x, int y,
 								  SDL_Surface *surface = TheScreen);
 
 	static CPlayerColorGraphic *New(const std::string &file, int w = 0, int h = 0);
@@ -231,18 +234,25 @@ public:
 
 class Mng : public gcn::Image
 {
-public:
 	Mng();
 	~Mng();
-	bool Load(const std::string &name);
+
+	uint32_t refcnt = 0;
+
+public:
+	static Mng *New(const std::string &name);
+	static void Free(Mng *mng);
+	bool Load();
 	void Reset();
 	void Draw(int x, int y);
 
 	//guichan
 	virtual void *_getData() const;
-	virtual int getWidth() const { return surface->h; }
-	virtual int getHeight() const { return surface->w; }
-	virtual bool isDirty() const { return is_dirty; }
+	virtual int getWidth() const { return surface->w; }
+	virtual int getHeight() const { return surface->h; }
+	virtual bool isDirty() const { return true; }
+
+	static uint32_t MaxFPS;
 
 	mutable bool is_dirty;
 	std::string name;
@@ -257,10 +267,12 @@ public:
 /// empty class for lua scripts
 class Mng : public gcn::Image
 {
-public:
 	Mng() {};
 	~Mng() {};
-	bool Load(const std::string &name) { return false; };
+public:
+	static Mng *New(const std::string &name) { return NULL; }
+	static void Free(Mng *mng) {};
+	bool Load() { return false; };
 	void Reset() {};
 	void Draw(int x, int y) {};
 
@@ -269,6 +281,8 @@ public:
 	virtual int getWidth() const { return 0; };
 	virtual int getHeight() const { return 0; };
 	virtual bool isDirty() const { return false; };
+
+	static inline uint32_t MaxFPS = 15;
 };
 #endif
 
@@ -345,6 +359,8 @@ public:
 	void DrawTransCircle(Uint32 color, int x, int y, int r, unsigned char alpha);
 	void DrawCircleClip(Uint32 color, int x, int y, int r);
 	void DrawTransCircleClip(Uint32 color, int x, int y, int r, unsigned char alpha);
+
+	void DrawEllipseClip(Uint32 color, int x, int y, int rx, int ry);
 
 	void FillCircle(Uint32 color, int x, int y, int radius);
 	void FillTransCircle(Uint32 color, int x, int y, int radius, unsigned char alpha);
@@ -536,6 +552,7 @@ extern void VideoPaletteListAdd(SDL_Surface *surface);
 extern void VideoPaletteListRemove(SDL_Surface *surface);
 extern void ClearAllColorCyclingRange();
 extern void AddColorCyclingRange(unsigned int begin, unsigned int end);
+extern unsigned int SetColorCycleSpeed(unsigned int speed);
 extern void SetColorCycleAll(bool value);
 extern void RestoreColorCyclingSurface();
 

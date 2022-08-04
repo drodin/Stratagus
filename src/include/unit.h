@@ -36,6 +36,7 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
+#include "settings.h"
 #include <vector>
 
 #ifndef __UNITTYPE_H__
@@ -134,7 +135,9 @@ enum _directions_ {
 class CUnit
 {
 public:
-	CUnit() : tilePos(-1, -1), pathFinderData(NULL), SavedOrder(NULL), NewOrder(NULL), CriticalOrder(NULL) { Init(); }
+	CUnit() : tilePos(-1, -1), pathFinderData(NULL), SavedOrder(NULL), NewOrder(NULL), CriticalOrder(NULL), Colors(-1),
+				AutoCastSpell(NULL), SpellCoolDownTimers(NULL), Variable(NULL) { Init(); }
+	~CUnit();
 
 	void Init();
 
@@ -232,7 +235,7 @@ public:
 		if (this->Type->BoolFlag[REVEALER_INDEX].value) {
 			return false;
 		}
-		if ((player.Type == PlayerComputer && !this->Type->BoolFlag[PERMANENTCLOAK_INDEX].value)
+		if ((player.Type == PlayerTypes::PlayerComputer && !this->Type->BoolFlag[PERMANENTCLOAK_INDEX].value)
 			|| IsVisible(player) || IsVisibleOnRadar(player)) {
 			return IsAliveOnMap();
 		} else {
@@ -349,7 +352,7 @@ public:
 
 	// DISPLAY:
 	int         Frame;      /// Image frame: <0 is mirrored
-	CUnitColors *Colors;    /// Player colors
+	int  Colors;            /// custom colors
 	bool IndividualUpgrades[UpgradeMax];      /// individual upgrades which the unit has
 
 	signed char IX;         /// X image displacement to map position
@@ -443,11 +446,11 @@ class CPreference
 public:
 	CPreference() : ShowSightRange(false), ShowReactionRange(false),
 		ShowAttackRange(false), ShowMessages(true), ShowNoSelectionStats(true), BigScreen(false),
-		PauseOnLeave(true), AiExplores(true), GrayscaleIcons(false),
+		PauseOnLeave(true), GrayscaleIcons(false),
 		IconsShift(false), StereoSound(true), MineNotifications(false),
-		DeselectInMine(false), NoStatusLineTooltips(false), SimplifiedAutoTargeting(false),
-		AiChecksDependencies(false),
-		IconFrameG(NULL), PressedIconFrameG(NULL),
+		DeselectInMine(false), NoStatusLineTooltips(false),
+		SelectionRectangleIndicatesDamage(false),
+		IconFrameG(NULL), PressedIconFrameG(NULL), HardwareCursor(false),
 		ShowOrders(0), ShowNameDelay(0), ShowNameTime(0), AutosaveMinutes(5) {};
 
 	bool ShowSightRange;       /// Show sight range.
@@ -457,23 +460,48 @@ public:
 	bool ShowNoSelectionStats; /// Show stats when no selection is active
 	bool BigScreen;			   /// If true, shows the big screen(without panels)
 	bool PauseOnLeave;         /// If true, game pauses when cursor is gone
-	bool AiExplores;           /// If true, AI sends explorers to search for resources (almost useless thing)
 	bool GrayscaleIcons;       /// Use grayscaled icons for unavailable units, upgrades, etc
 	bool IconsShift;           /// Shift icons slightly when you press on them
 	bool StereoSound;          /// Enables/disables stereo sound effects
 	bool MineNotifications;    /// Show mine is running low/depleted messages
 	bool DeselectInMine;       /// Deselect peasants in mines
 	bool NoStatusLineTooltips; /// Don't show messages on status line
-	bool SimplifiedAutoTargeting; /// Use alternate target choosing algorithm for auto attack mode (idle, attack-move, patrol, etc.)
-	bool AiChecksDependencies; /// If false, the AI can do upgrades even if the dependencies are not met. This can be desirable to simplify AI scripting.
+	bool HardwareCursor;    /// If true, uses the hardware to draw the cursor. Shaders do no longer apply to the cursor, but this way it's decoupled from the game refresh rate
+	bool SelectionRectangleIndicatesDamage; /// If true, the selection rectangle interpolates color to indicate damage
+
+	int FrameSkip;          /// Mask used to skip rendering frames (useful for slow renderers that keep up with the game logic, but not the rendering to screen like e.g. original Raspberry Pi)
 
 	int ShowOrders;			/// How many second show orders of unit on map.
 	int ShowNameDelay;		/// How many cycles need to wait until unit's name popup will appear.
 	int ShowNameTime;		/// How many cycles need to show unit's name popup.
 	int AutosaveMinutes;	/// Autosave the game every X minutes; autosave is disabled if the value is 0
-
 	CGraphic *IconFrameG;
 	CGraphic *PressedIconFrameG;
+
+	// these are "preferences" in the sense that the user wants to set these
+	// persistently across launches for single player games. However, they are
+	// relevant for network sync and replays, so the actually relevant storage
+	// is in GameSettings, and we just have properties for the lua code here and
+	// to initialize GameSettings to the user preferred defaults
+	void InitializeSettingsFromPreferences(Settings &s) {
+		s.AiExplores = AiExplores;
+		s.SimplifiedAutoTargeting = SimplifiedAutoTargeting;
+		s.AiChecksDependencies = AiChecksDependencies;
+	}
+private:
+	bool AiExplores = true;
+	bool SimplifiedAutoTargeting = false;
+	bool AiChecksDependencies = false;
+
+#if USING_TOLUAPP
+public:
+	bool get_AiExplores() { return AiExplores; }
+	void set_AiExplores(bool v) { AiExplores = GameSettings.AiExplores = v; }
+	bool get_SimplifiedAutoTargeting() { return SimplifiedAutoTargeting; }
+	void set_SimplifiedAutoTargeting(bool v) { SimplifiedAutoTargeting = GameSettings.SimplifiedAutoTargeting = v; }
+	bool get_AiChecksDependencies() { return AiChecksDependencies; }
+	void set_AiChecksDependencies(bool v) { AiChecksDependencies = GameSettings.AiChecksDependencies = v; }
+#endif
 };
 
 extern CPreference Preference;
@@ -634,6 +662,8 @@ extern void DrawSelectionRectangle(IntColor, int, int, int, int);
 extern void DrawSelectionRectangleWithTrans(IntColor, int, int, int, int);
 /// Draw corners around unit
 extern void DrawSelectionCorners(IntColor, int, int, int, int);
+/// Draw ellipse around unit
+extern void (*DrawSelectionEllipse(float factor))(IntColor, int, int, int, int);
 
 /// Register CCL decorations features
 extern void DecorationCclRegister();

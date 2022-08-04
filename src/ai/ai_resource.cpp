@@ -34,6 +34,7 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
+#include "settings.h"
 #include "stratagus.h"
 
 #include "ai_local.h"
@@ -168,18 +169,20 @@ static int AiCheckUnitTypeCosts(const CUnitType &type)
 	return AiCheckCosts(type.Stats[AiPlayer->Player->Index].Costs);
 }
 
+template <bool ignoreVisibility = false>
 class IsAEnemyUnitOf
 {
 public:
 	explicit IsAEnemyUnitOf(const CPlayer &_player) : player(&_player) {}
 	bool operator()(const CUnit *unit) const
 	{
-		return unit->IsVisibleAsGoal(*player) && unit->IsEnemy(*player);
+		return (ignoreVisibility || unit->IsVisibleAsGoal(*player)) && unit->IsEnemy(*player);
 	}
 private:
 	const CPlayer *player;
 };
 
+template <bool ignoreVisibility = false>
 class IsAEnemyUnitWhichCanCounterAttackOf
 {
 public:
@@ -188,7 +191,7 @@ public:
 	{}
 	bool operator()(const CUnit *unit) const
 	{
-		return unit->IsVisibleAsGoal(*player)
+		return (ignoreVisibility || unit->IsVisibleAsGoal(*player))
 			   && unit->IsEnemy(*player)
 			   && CanTarget(*unit->Type, *type);
 	}
@@ -198,42 +201,42 @@ private:
 };
 
 /**
-**  Enemy units in distance.
+**  Check if there are enemy units in a given range.
 **
 **  @param player  Find enemies of this player
 **  @param type    Optional unit type to check if enemy can target this
 **  @param pos     location
 **  @param range   Distance range to look.
 **
-**  @return       Number of enemy units.
+**  @return        If there are any enemy units in the range
 */
-int AiEnemyUnitsInDistance(const CPlayer &player,
-						   const CUnitType *type, const Vec2i &pos, unsigned range)
+bool AiEnemyUnitsInDistance(const CPlayer &player,
+						    const CUnitType *type, const Vec2i &pos, unsigned range)
 {
 	const Vec2i offset(range, range);
 	std::vector<CUnit *> units;
 
 	if (type == NULL) {
-		Select(pos - offset, pos + offset, units, IsAEnemyUnitOf(player));
+		Select<1>(pos - offset, pos + offset, units, IsAEnemyUnitOf<true>(player));
 		return static_cast<int>(units.size());
 	} else {
 		const Vec2i typeSize(type->TileWidth - 1, type->TileHeight - 1);
-		const IsAEnemyUnitWhichCanCounterAttackOf pred(player, *type);
+		const IsAEnemyUnitWhichCanCounterAttackOf<true> pred(player, *type);
 
-		Select(pos - offset, pos + typeSize + offset, units, pred);
+		Select<1>(pos - offset, pos + typeSize + offset, units, pred);
 		return static_cast<int>(units.size());
 	}
 }
 
 /**
-**  Enemy units in distance.
+**  Check if there are enemy units in a given range.
 **
 **  @param unit   Find in distance for this unit.
 **  @param range  Distance range to look.
 **
-**  @return       Number of enemy units.
+**  @return       If there are any enemy units in the range
 */
-int AiEnemyUnitsInDistance(const CUnit &unit, unsigned range)
+bool AiEnemyUnitsInDistance(const CUnit &unit, unsigned range)
 {
 	return AiEnemyUnitsInDistance(*unit.Player, unit.Type, unit.tilePos, range);
 }
@@ -314,9 +317,9 @@ static int AiBuildBuilding(const CUnitType &type, CUnitType &building, const Vec
 
 static bool AiRequestedTypeAllowed(const CPlayer &player, const CUnitType &type)
 {
-	const size_t size = AiHelpers.Build[type.Slot].size();
+	const size_t size = AiHelpers.Build()[type.Slot].size();
 	for (size_t i = 0; i != size; ++i) {
-		CUnitType &builder = *AiHelpers.Build[type.Slot][i];
+		CUnitType &builder = *AiHelpers.Build()[type.Slot][i];
 
 		if (player.UnitTypesAiActiveCount[builder.Slot] > 0
 			&& CheckDependByType(player, type)) {
@@ -382,10 +385,10 @@ void AiNewDepotRequest(CUnit &worker)
 
 	AiGetBuildRequestsCount(*worker.Player->Ai, counter);
 
-	const int n = AiHelpers.Depots[resource - 1].size();
+	const int n = AiHelpers.Depots()[resource - 1].size();
 
 	for (int i = 0; i < n; ++i) {
-		CUnitType &type = *AiHelpers.Depots[resource - 1][i];
+		CUnitType &type = *AiHelpers.Depots()[resource - 1][i];
 
 		if (counter[type.Slot]) { // Already ordered.
 			return;
@@ -436,7 +439,7 @@ public:
 	explicit IsAWorker() {}
 	bool operator()(const CUnit *const unit) const
 	{
-		return (unit->Type->BoolFlag[HARVESTER_INDEX].value && unit->Type->ResInfo && !unit->Removed);
+		return (unit->Type->BoolFlag[HARVESTER_INDEX].value && !unit->Removed);
 	}
 };
 
@@ -531,10 +534,10 @@ static bool AiRequestSupply()
 	// Check if we can build this?
 	//
 	int j = 0;
-	const int n = AiHelpers.UnitLimit[0].size();
+	const int n = AiHelpers.UnitLimit()[0].size();
 
 	for (int i = 0; i < n; ++i) {
-		CUnitType &type = *AiHelpers.UnitLimit[0][i];
+		CUnitType &type = *AiHelpers.UnitLimit()[0][i];
 		if (counter[type.Slot]) { // Already ordered.
 #if defined(DEBUG) && defined(DebugRequestSupply)
 			DebugPrint("%d: AiRequestSupply: Supply already build in %s\n"
@@ -665,11 +668,11 @@ static int AiMakeUnit(CUnitType &typeToMake, const Vec2i &nearPos)
 		// Check if we have a place for building or a unit to build.
 		//
 		if (type.Building) {
-			n = AiHelpers.Build.size();
-			tablep = &AiHelpers.Build;
+			n = AiHelpers.Build().size();
+			tablep = &AiHelpers.Build();
 		} else {
-			n = AiHelpers.Train.size();
-			tablep = &AiHelpers.Train;
+			n = AiHelpers.Train().size();
+			tablep = &AiHelpers.Train();
 		}
 		if (type.Slot > n) { // Oops not known.
 			DebugPrint("%d: AiMakeUnit I: Nothing known about '%s'\n"
@@ -748,8 +751,8 @@ void AiAddResearchRequest(CUpgrade *upgrade)
 	// Check if we have a place for the upgrade to research
 	//
 	{ // multi-research case
-		const int n = AiHelpers.Research.size();
-		std::vector<std::vector<CUnitType *> > &tablep = AiHelpers.Research;
+		const int n = AiHelpers.Research().size();
+		std::vector<std::vector<CUnitType *> > &tablep = AiHelpers.Research();
 
 		if (upgrade->ID < n) { // not known as multi-researchable upgrade
 			std::vector<CUnitType *> &table = tablep[upgrade->ID];
@@ -767,8 +770,8 @@ void AiAddResearchRequest(CUpgrade *upgrade)
 		}
 	}
 	{ // single-research case
-		const int n = AiHelpers.SingleResearch.size();
-		std::vector<std::vector<CUnitType *> > &tablep = AiHelpers.SingleResearch;
+		const int n = AiHelpers.SingleResearch().size();
+		std::vector<std::vector<CUnitType *> > &tablep = AiHelpers.SingleResearch();
 
 		if (upgrade->ID < n) { // not known
 			std::vector<CUnitType *> &table = tablep[upgrade->ID];
@@ -806,7 +809,7 @@ static bool AiUpgradeTo(const CUnitType &type, CUnitType &what)
 {
 	std::vector<CUnit *> table;
 
-	if (Preference.AiChecksDependencies || IsNetworkGame()) {
+	if (GameSettings.AiChecksDependencies) {
 		if (!CheckDependByType(*AiPlayer->Player, what)) {
 			return false;
 		}
@@ -844,8 +847,8 @@ void AiAddUpgradeToRequest(CUnitType &type)
 	//
 	// Check if we have a place for the upgrade to.
 	//
-	const int n = AiHelpers.Upgrade.size();
-	std::vector<std::vector<CUnitType *> > &tablep = AiHelpers.Upgrade;
+	const int n = AiHelpers.Upgrade().size();
+	std::vector<std::vector<CUnitType *> > &tablep = AiHelpers.Upgrade();
 
 	if (type.Slot > n) { // Oops not known.
 		DebugPrint("%d: AiAddUpgradeToRequest I: Nothing known about '%s'\n"
@@ -1323,8 +1326,8 @@ static bool AiRepairBuilding(const CPlayer &player, const CUnitType &type, CUnit
 */
 static int AiRepairUnit(CUnit &unit)
 {
-	int n = AiHelpers.Repair.size();
-	std::vector<std::vector<CUnitType *> > &tablep = AiHelpers.Repair;
+	int n = AiHelpers.Repair().size();
+	std::vector<std::vector<CUnitType *> > &tablep = AiHelpers.Repair();
 	const CUnitType &type = *unit.Type;
 	if (type.Slot > n) { // Oops not known.
 		DebugPrint("%d: AiRepairUnit I: Nothing known about '%s'\n"
@@ -1467,7 +1470,7 @@ void AiAddUnitTypeRequest(CUnitType &type, int count)
 */
 void AiExplore(const Vec2i &pos, int mask)
 {
-	if (!Preference.AiExplores) {
+	if (!GameSettings.AiExplores) {
 		return;
 	}
 	AiExplorationRequest req(pos, mask);

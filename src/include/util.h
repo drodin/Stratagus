@@ -133,6 +133,7 @@ int getopt(int argc, char *const argv[], const char *optstring);
 #include <string>
 
 int GetClipboard(std::string &str);
+void SetClipboard(std::string &str);
 
 /*----------------------------------------------------------------------------
 --  UTF8
@@ -140,6 +141,14 @@ int GetClipboard(std::string &str);
 
 int UTF8GetNext(const std::string &text, int curpos);
 int UTF8GetPrev(const std::string &text, int curpos);
+
+/*----------------------------------------------------------------------------
+--  SIMD support
+----------------------------------------------------------------------------*/
+bool supportsSSE2();
+bool supportsAVX();
+void *aligned_malloc(size_t alignment, size_t size);
+void aligned_free(void *block);
 
 //@}
 

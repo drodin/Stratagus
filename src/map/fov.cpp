@@ -55,11 +55,11 @@
 */
 bool CFieldOfView::SetType(const FieldOfViewTypes fov_type)
 {
-	if (fov_type != Settings.Type && fov_type < FieldOfViewTypes::NumOfTypes) {
+	if (fov_type != GameSettings.FoV && fov_type < FieldOfViewTypes::NumOfTypes) {
 		/// Unmark sight for all units
 		MapRefreshUnitsSight(true);
 
-		this->Settings.Type = fov_type;
+		GameSettings.FoV = fov_type;
 		
 		/// Mark sight with new fov type for all units 
 		MapRefreshUnitsSight();
@@ -76,7 +76,7 @@ bool CFieldOfView::SetType(const FieldOfViewTypes fov_type)
 */
 FieldOfViewTypes CFieldOfView::GetType() const
 {
-	return this->Settings.Type;
+	return GameSettings.FoV;
 }
 
 /** 
@@ -131,13 +131,13 @@ void CFieldOfView::Refresh(const CPlayer &player, const CUnit &unit, const Vec2i
 							const uint16_t height, const uint16_t range, MapMarkerFunc *marker)
 {
 	/// FIXME: sometimes when quit from game this assert is triggered
-	if (!unit.Type) return;
+	if (unit.ReleaseCycle) return;
 	Assert(unit.Type != NULL);
 	// Units under construction have no sight range.
 	if (!range) {
 		return;
 	}
-	if (this->Settings.Type == FieldOfViewTypes::cShadowCasting && !unit.Type->AirUnit) { 
+	if (GameSettings.FoV == FieldOfViewTypes::cShadowCasting && !unit.Type->AirUnit) {
 		/// FIXME: add high-/lowground
 		OpaqueFields = unit.Type->BoolFlag[ELEVATED_INDEX].value ? 0 : this->Settings.OpaqueFields;
 		if (GameSettings.Inside) {

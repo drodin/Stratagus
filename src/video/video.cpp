@@ -83,12 +83,6 @@
 #include "stratagus.h"
 
 #include <vector>
-#ifdef USE_OPENMP
-#include <omp.h>
-#else
-#define omp_get_thread_num() 1
-#define omp_get_num_threads() 1
-#endif
 
 #include "video.h"
 #include "intern_video.h"
@@ -207,7 +201,7 @@ void SetClipping(int left, int top, int right, int bottom)
 {
 	Assert(left <= right && top <= bottom && left >= 0 && left < Video.Width
 		   && top >= 0 && top < Video.Height && right >= 0
-		   && right < Video.Width && bottom >= 0 && bottom < Video.Height);
+		   && right <= Video.Width && bottom >= 0 && bottom <= Video.Height);
 
 	ClipX1 = left;
 	ClipY1 = top;
@@ -484,6 +478,19 @@ void AddColorCyclingRange(unsigned int begin, unsigned int end)
 	CColorCycling::GetInstance().ColorIndexRanges.push_back(ColorIndexRange(begin, end));
 }
 
+static unsigned int ColorCycleSpeed = CYCLES_PER_SECOND;
+
+/**
+ * Set the Color Cycle speed.
+ * @return the previous speed
+ */
+unsigned int SetColorCycleSpeed(unsigned int speed)
+{
+	int prev = ColorCycleSpeed;
+	ColorCycleSpeed = speed;
+	return prev;
+}
+
 void SetColorCycleAll(bool value)
 {
 	CColorCycling::GetInstance().ColorCycleAll = value;
@@ -537,8 +544,7 @@ static void ColorCycleSurface_Reverse(SDL_Surface &surface, unsigned int count)
 void ColorCycle()
 {
 	/// MACRO defines speed of colorcycling FIXME: should be made configurable
-#define COLOR_CYCLE_SPEED  (CYCLES_PER_SECOND * 2)
-	if ((FrameCounter % COLOR_CYCLE_SPEED) != 0) {
+	if ((FrameCounter % ColorCycleSpeed) != 0) {
 		return;
 	}
 	CColorCycling &colorCycling = CColorCycling::GetInstance();

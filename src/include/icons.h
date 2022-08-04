@@ -33,6 +33,7 @@
 //@{
 
 #include "vec2i.h"
+#include "color.h"
 #include <string>
 
 /*----------------------------------------------------------------------------
@@ -98,6 +99,7 @@
 --  Declarations
 ----------------------------------------------------------------------------*/
 
+class CUnit;
 class CGraphic;
 class CPlayerColorGraphic;
 class CPlayer;
@@ -123,9 +125,23 @@ public:
 	void DrawCooldownSpellIcon(const PixelPos &pos, const int percent) const;
 	/// Draw icon of a unit
 	void DrawUnitIcon(const ButtonStyle &style,
-					  unsigned flags, const PixelPos &pos, const std::string &text, const int player = -1) const;
+					  unsigned flags, const PixelPos &pos, const std::string &text, const int playerIndex = -1) const;
+	void DrawSingleSelectionIcon(const ButtonStyle &style,
+					  unsigned flags, const PixelPos &pos, const std::string &text, const CUnit &unit) const;
+	void DrawGroupSelectionIcon(const ButtonStyle &style,
+					  unsigned flags, const PixelPos &pos, const std::string &text, const CUnit &unit) const;
+	void DrawContainedIcon(const ButtonStyle &style,
+					  unsigned flags, const PixelPos &pos, const std::string &text, const CUnit &unit) const;
 
 	const std::string &GetIdent() const { return this->Ident; }
+
+	/// Modify the extra icon graphics
+	void ClearExtraGraphics();
+	void AddSingleSelectionGraphic(CPlayerColorGraphic *g);
+	void AddGroupSelectionGraphic(CPlayerColorGraphic *g);
+	void AddContainedGraphic(CPlayerColorGraphic *g);
+
+	void SetPaletteSwaps(std::vector<PaletteSwap> &newSwaps);
 
 public:
 	CPlayerColorGraphic *G;              /// Graphic data
@@ -133,6 +149,23 @@ public:
 	int Frame;                /// Frame number in graphic
 private:
 	std::string Ident;        /// Icon identifier
+
+	/*
+	 * These following lists of icons are used to allow different icons for single and multi-selection as
+	 * well as when the unit is contained in some container like a transport or a bunker.
+	 * Additionally, these are lists, and the health percentage of the unit is mapped into this list. this
+	 * way, units can have different (damaged) icons. all of these are optional, the default is to just use
+	 * the graphic stored in the *G field above.
+	 */
+	std::vector<CPlayerColorGraphic *> SingleSelectionG; /// graphics by health status for single-selection
+	std::vector<CPlayerColorGraphic *> GroupSelectionG;  /// graphics by health status for multi-selection
+	std::vector<CPlayerColorGraphic *> ContainedG;       /// graphics by health status when in a container
+
+	/*
+	 * These following lists are used to map percentages of arbitrary unit variables (e.g. health, shield,
+	 * mana, ...) to palette swaps in the selection icons.
+	 */
+	std::vector<PaletteSwap> PaletteSwaps;
 };
 
 /// Icon reference (used in config tables)

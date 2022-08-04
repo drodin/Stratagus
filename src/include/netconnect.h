@@ -81,7 +81,8 @@ enum _net_client_con_state_ {
 	ccs_goahead,              /// Server wants to start game
 	ccs_started,              /// Server has started game
 	ccs_incompatibleengine,   /// Incompatible engine version
-	ccs_incompatibleluafiles  /// Incompatible lua files
+	ccs_incompatibleluafiles, /// Incompatible lua files
+	ccs_needmap,              /// Client needs to be sent the map
 };
 
 /*----------------------------------------------------------------------------
@@ -90,7 +91,6 @@ enum _net_client_con_state_ {
 
 extern int NetPlayers;                /// Network players
 
-extern int HostsCount;                /// Number of hosts.
 extern CNetworkHost Hosts[PlayerMax]; /// Host, port, and number of all players.
 
 extern int NetConnectRunning;              /// Network menu: Setup mode active
@@ -99,11 +99,12 @@ extern int NetLocalHostsSlot;              /// Network menu: Slot # in Hosts arr
 extern int NetLocalPlayerNumber;           /// Player number of local client
 
 extern std::string NetworkMapName;         /// Name of the map received with ICMMap
+extern std::string NetworkMapFragmentName; /// Name of the map currently loading via ICMMapNeeded
 
 extern CServerSetup ServerSetupState;      /// Network menu: Multiplayer Server Menu selections state
 extern CServerSetup LocalSetupState;       /// Network menu: Multiplayer Client Menu selections local state
 
-extern int NoRandomPlacementMultiplayer; /// Disable the random placement of players in muliplayer mode
+extern bool NoRandomPlacementMultiplayer; /// Disable the random placement of players in muliplayer mode
 
 /*----------------------------------------------------------------------------
 --  Functions

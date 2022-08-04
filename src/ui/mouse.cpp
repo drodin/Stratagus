@@ -208,15 +208,13 @@ static bool DoRightButton_Harvest_Unit(CUnit &unit, CUnit &dest, int flush, int 
 		&& (dest.Player == unit.Player
 			|| (dest.Player->IsAllied(*unit.Player) && unit.Player->IsAllied(*dest.Player)))) {
 		const ResourceInfo &resinfo = *unit.Type->ResInfo[unit.CurrentResource];
-		if (!resinfo.TerrainHarvester || unit.ResourcesHeld >= resinfo.ResourceCapacity) {
-			dest.Blink = 4;
-			if (!acknowledged) {
-				PlayUnitSound(unit, VoiceAcknowledging);
-				acknowledged = 1;
-			}
-			SendCommandReturnGoods(unit, &dest, flush);
-			return true;
+		dest.Blink = 4;
+		if (!acknowledged) {
+			PlayUnitSound(unit, VoiceAcknowledging);
+			acknowledged = 1;
 		}
+		SendCommandReturnGoods(unit, &dest, flush);
+		return true;
 	}
 	// Go and harvest from a unit
 	const int res = dest.Type->GivesResource;
@@ -385,11 +383,12 @@ static void DoRightButton_Attack(CUnit &unit, CUnit *dest, const Vec2i &pos, int
 		}
 	}
 	if (Map.WallOnMap(pos)) {
-		if (unit.Player->Race == PlayerRaceHuman && Map.OrcWallOnMap(pos)) {
+		// XXX: hardcoded for humans and orcs
+		if (PlayerRaces.Name[unit.Player->Race] == "human" && Map.OrcWallOnMap(pos)) {
 			SendCommandAttack(unit, pos, NoUnitP, flush);
 			return;
 		}
-		if (unit.Player->Race == PlayerRaceOrc && Map.HumanWallOnMap(pos)) {
+		if (PlayerRaces.Name[unit.Player->Race] == "orc" && Map.HumanWallOnMap(pos)) {
 			SendCommandAttack(unit, pos, NoUnitP, flush);
 			return;
 		}
@@ -710,6 +709,21 @@ static void HandleMouseOn(const PixelPos screenPos)
 				ButtonUnderCursor = ButtonUnderNetworkDiplomacy;
 				CursorOn = CursorOnButton;
 				return;
+			}
+		}
+	}
+	if (UI.Resources[FreeWorkersCount].TextX != -1) {
+		int x, y;
+		CGraphic* g = UI.Resources[FreeWorkersCount].G;
+		if (g && (x = UI.Resources[FreeWorkersCount].IconX) && (y = UI.Resources[FreeWorkersCount].IconY)) {
+			int textX = UI.Resources[FreeWorkersCount].TextX;
+			if (textX > 0 || ThisPlayer->GetFreeWorkersCount() > 0) {
+				if (screenPos > PixelPos(x, y) && screenPos < PixelPos(x + g->getWidth(), y + g->getHeight())) {
+					ButtonAreaUnderCursor = ButtonAreaMenu;
+					ButtonUnderCursor = ButtonUnderFreeWorkers;
+					CursorOn = CursorOnButton;
+					return;
+				}
 			}
 		}
 	}
@@ -1740,6 +1754,8 @@ static void UIHandleButtonDown_OnButton(unsigned button)
 			} else if (ButtonUnderCursor == ButtonUnderNetworkDiplomacy && !GameDiplomacyButtonClicked) {
 				PlayGameSound(GameSounds.Click.Sound, MaxSampleVolume);
 				GameDiplomacyButtonClicked = true;
+			} else if (ButtonUnderCursor == ButtonUnderFreeWorkers) {
+				UiFindIdleWorker();
 			}
 			//  clicked on user buttons
 		} else if (ButtonAreaUnderCursor == ButtonAreaUser) {
@@ -1800,21 +1816,25 @@ static void UIHandleButtonDown_OnButton(unsigned button)
 						if (!uins->Boarded || j >= UI.TransportingButtons.size() || (Selected[0]->Player != ThisPlayer && uins->Player != ThisPlayer)) {
 							continue;
 						}
-					if (ButtonAreaUnderCursor == ButtonAreaTransporting
-						&& static_cast<size_t>(ButtonUnderCursor) == j) {
-							Assert(uins->Boarded);
-							const int flush = !(KeyModifiers & ModifierShift);
-							if (ThisPlayer->IsTeamed(*Selected[0]) || uins->Player == ThisPlayer) {
-								PlayGameSound(GameSounds.Click.Sound, MaxSampleVolume);
-								SendCommandUnload(*Selected[0], Selected[0]->tilePos, uins, flush);
+						int lastOccupiedButton = j + uins->Type->BoardSize - 1;
+						if (ButtonAreaUnderCursor == ButtonAreaTransporting) {
+							for (int sub_j = j; sub_j <= lastOccupiedButton; sub_j++) {
+								if (static_cast<size_t>(ButtonUnderCursor) == sub_j) {
+									Assert(uins->Boarded);
+									const int flush = !(KeyModifiers & ModifierShift);
+									if (ThisPlayer->IsTeamed(*Selected[0]) || uins->Player == ThisPlayer) {
+										PlayGameSound(GameSounds.Click.Sound, MaxSampleVolume);
+										SendCommandUnload(*Selected[0], Selected[0]->tilePos, uins, flush);
+									}
+								}
 							}
 						}
-						++j;
+						j = lastOccupiedButton + 1;
 					}
 				}
 			}
 		} else if (ButtonAreaUnderCursor == ButtonAreaButton) {
-			if (!GameObserve && !GamePaused && !GameEstablishing && ThisPlayer->IsTeamed(*Selected[0])) {
+			if (!GameObserve && !GamePaused && !GameEstablishing && (ThisPlayer->IsTeamed(*Selected[0]) || Selected[0]->Player->Index == PlayerMax - 1)) {
 				PlayGameSound(GameSounds.Click.Sound, MaxSampleVolume);
 				OldButtonUnderCursor = ButtonUnderCursor;
 			}
@@ -2120,7 +2140,7 @@ void UIHandleButtonUp(unsigned button)
 					// FIXME: use GameSounds.Burning
 					PlayGameSound(SoundForName("burning"), MaxSampleVolume);
 				} else if (Selected[0]->Player == ThisPlayer || ThisPlayer->IsTeamed(*Selected[0])
-						   || Selected[0]->Player->Type == PlayerNeutral) {
+						   || Selected[0]->Player->Type == PlayerTypes::PlayerNeutral) {
 					PlayUnitSound(*Selected[0], VoiceSelected);
 				} else {
 					PlayGameSound(GameSounds.Click.Sound, MaxSampleVolume);

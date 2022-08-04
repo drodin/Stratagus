@@ -55,7 +55,7 @@
 !define EXE "stratagus.exe"
 ; copy, in case VS put the exe under Release or Debug
 !system "powershell -Command $\"& {cp **\${EXE} ${EXE}}$\""
-
+!system "powershell -Command $\"& {cp **\stratagus-midiplayer.exe stratagus-midiplayer.exe}$\""
 
 !define UNINSTALL "uninstall.exe"
 !define INSTALLER "${NAME}-${VERSION}.exe"
@@ -215,6 +215,7 @@ Section "${NAME}"
 
 	SetOutPath $INSTDIR
 	File "${EXE}"
+	File stratagus-midiplayer.exe
 	File *.dll
 	WriteRegStr HKLM "${REGKEY}" "DisplayName" "${NAME}"
 	WriteRegStr HKLM "${REGKEY}" "UninstallString" "$\"$INSTDIR\${UNINSTALL}$\""

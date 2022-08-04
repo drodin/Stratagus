@@ -42,6 +42,11 @@
 #include "iocompat.h"
 
 /*----------------------------------------------------------------------------
+--  Variables
+----------------------------------------------------------------------------*/
+uint32_t Mng::MaxFPS = 15;
+
+/*----------------------------------------------------------------------------
 --  Functions
 ----------------------------------------------------------------------------*/
 
@@ -116,6 +121,7 @@ static mng_bool MNG_DECL my_processheader(mng_handle handle, mng_uint32 width,
 
 	mng->surface = SDL_CreateRGBSurface(SDL_SWSURFACE, width, height,
 										8 * 3, Rmask, Gmask, Bmask, 0);
+	SDL_SetColorKey(mng->surface, 1, 0);
 	if (mng->surface == NULL) {
 		fprintf(stderr, "Out of memory");
 		exit(1);
@@ -154,7 +160,9 @@ static mng_uint32 MNG_DECL my_gettickcount(mng_handle)
 static mng_bool MNG_DECL my_settimer(mng_handle handle, mng_uint32 msecs)
 {
 	Mng *mng = (Mng *)mng_get_userdata(handle);
-	mng->ticks = GetTicks() + msecs;
+	unsigned long ticks = GetTicks();
+	uint32_t offset = std::max(static_cast<uint32_t>(msecs), static_cast<uint32_t>(1000 / mng->MaxFPS));
+	mng->ticks = std::max(ticks + offset, mng->ticks + offset);
 
 	return MNG_TRUE;
 }
@@ -181,7 +189,7 @@ static mng_bool MNG_DECL my_errorproc(mng_handle handle, mng_int32,
 
 
 Mng::Mng() :
-	name(NULL), fd(NULL), handle(NULL), surface(NULL), buffer(NULL),
+	name(""), fd(NULL), handle(NULL), surface(NULL), buffer(NULL),
 	ticks(0), iteration(0), is_dirty(false)
 {
 }
@@ -189,7 +197,6 @@ Mng::Mng() :
 
 Mng::~Mng()
 {
-	//	delete[] name;
 	if (handle) {
 		mng_cleanup(&handle);
 	}
@@ -198,7 +205,6 @@ Mng::~Mng()
 	}
 	delete[] buffer;
 }
-
 
 /**
 **  Display a MNG
@@ -216,14 +222,44 @@ void Mng::Draw(int x, int y)
 	SDL_BlitSurface(surface, NULL, TheScreen, &rect);
 }
 
+static std::map<std::string, Mng *> MngCache;
+
+Mng *Mng::New(const std::string &name)
+{
+	const std::string file = LibraryFileName(name.c_str());
+	Mng *mng = MngCache[file];
+	if (mng == NULL) {
+		mng = new Mng();
+		mng->name = LibraryFileName(name.c_str());
+		Assert(mng);
+	}
+	mng->refcnt++;
+	return mng;
+}
+
+void Mng::Free(Mng *mng)
+{
+	// XXX: Weird free bug that I don't understand, just skip it if already NULL
+	if ((intptr_t)mng < 40) {
+		return;
+	}
+	mng->refcnt--;
+	if (mng->refcnt == 0) {
+		MngCache.erase(mng->name);
+		delete mng;
+	}
+}
+
 /**
 **  Load a MNG
 **
 **  @param name  Name of the MNG file
 */
-bool Mng::Load(const std::string &name)
+bool Mng::Load()
 {
-	this->name = LibraryFileName(name.c_str());
+	if (handle) {
+		return handle != MNG_NULL && surface && iteration != 0x7fffffff;
+	}
 	handle = mng_initialize(this, my_alloc, my_free, MNG_NULL);
 	if (handle == MNG_NULL) {
 		return false;
@@ -255,6 +291,9 @@ bool Mng::Load(const std::string &name)
 */
 void Mng::Reset()
 {
+	if (!handle) {
+		return;
+	}
 	mng_display_reset(handle);
 	iteration = 0;
 	mng_display(handle);

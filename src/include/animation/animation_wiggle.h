@@ -8,9 +8,9 @@
 //                        T H E   W A R   B E G I N S
 //         Stratagus - A free fantasy real time strategy game engine
 //
-/**@name db.h - Database routines. */
+/**@name animation_wiggle.h - The animation wiggle headerfile. */
 //
-//      (c) Copyright 2005 by Jimmy Salmon
+//      (c) Copyright 2012 by Joris Dauphin
 //
 //      This program is free software; you can redistribute it and/or modify
 //      it under the terms of the GNU General Public License as published by
@@ -27,23 +27,30 @@
 //      02111-1307, USA.
 //
 
-#ifndef __DB_H__
-#define __DB_H__
+#ifndef ANIMATION_WIGGLE_H
+#define ANIMATION_WIGGLE_H
 
 //@{
 
-/*----------------------------------------------------------------------------
---  Declarations
-----------------------------------------------------------------------------*/
+#include <string>
+#include "animation.h"
 
-extern int DBInit(void);
-extern void DBQuit(void);
-extern int DBFindUser(char *username, char *password);
-extern int DBAddUser(char *username, char *password);
-extern int DBUpdateLoginDate(char *username);
-extern int DBAddGame(int id, char *description, char *mapname, int numplayers);
-extern int DBStats(char *results, int resultlen);
+class CAnimation_Wiggle : public CAnimation
+{
+public:
+	CAnimation_Wiggle() : CAnimation(AnimationWiggle), isHeading(false), speed(""), ifNotReached(NULL) {}
+
+	virtual void Action(CUnit &unit, int &move, int scale) const;
+	virtual void Init(const char *s, lua_State *l);
+
+private:
+	std::string x;
+	std::string y;
+	bool isHeading;
+	std::string speed;
+	CAnimation *ifNotReached;
+};
 
 //@}
 
-#endif // __DB_H__
+#endif // ANIMATION_WIGGLE_H

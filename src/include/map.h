@@ -92,6 +92,8 @@
 #include "color.h"
 #include "vec2i.h"
 
+#include "settings.h"
+
 /*----------------------------------------------------------------------------
 --  Declarations
 ----------------------------------------------------------------------------*/
@@ -139,7 +141,7 @@ public:
 	std::string Postamble;      /// Map postamble script
 	int MapWidth;               /// Map width
 	int MapHeight;              /// Map height
-	int PlayerType[PlayerMax];  /// Same player->Type
+	PlayerTypes PlayerType[PlayerMax];  /// Same player->Type
 	int PlayerSide[PlayerMax];  /// Same player->Side
 	unsigned int MapUID;        /// Unique Map ID (hash)
 };
@@ -154,6 +156,8 @@ class CMap
 public:
 	CMap();
 	~CMap();
+
+	void AllocateTileset();
 
 	unsigned int getIndex(int x, int y) const
 	{
@@ -205,7 +209,7 @@ public:
 	/// Regenerate the forest.
 	void RegenerateForest();
 	/// Set map reveal mode: hidden/known/fully explored.
-	void Reveal(const int mode = MapRevealModes::cKnown);
+	void Reveal(MapRevealModes mode = MapRevealModes::cKnown);
 	/// Save the map.
 	void Save(CFile &file) const;
 
@@ -281,11 +285,11 @@ extern CMap Map;  /// The current map
 extern char CurrentMapPath[1024]; /// Path to the current map
 
 /// Forest regeneration
-extern int ForestRegeneration;
+extern unsigned int ForestRegeneration;
 /// Forest regeneration
 extern int ForestRegenerationFrequency;
 /// Flag must reveal the map
-extern int FlagRevealMap;
+extern MapRevealModes FlagRevealMap;
 /// Flag must reveal map when in replay
 extern int ReplayRevealMap;
 
@@ -366,7 +370,7 @@ extern int SaveStratagusMap(const std::string &filename, CMap &map, int writeTer
 
 
 /// Load map presentation
-extern void LoadStratagusMapInfo(const std::string &mapname);
+extern bool LoadStratagusMapInfo(const std::string &mapname);
 
 /// Returns true, if the unit-type(mask can enter field with bounds check
 extern bool CheckedCanMoveToMask(const Vec2i &pos, int mask);

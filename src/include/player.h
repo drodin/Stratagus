@@ -45,6 +45,8 @@
 
 #include "vec2i.h"
 
+#include "settings.h"
+
 class CGraphic;
 
 /*----------------------------------------------------------------------------
@@ -77,13 +79,6 @@ enum _diplomacy_ {
 	DiplomacyCrazy     /// Ally and attack opponent
 }; /// Diplomacy states for CommandDiplomacy
 
-enum class RevealTypes 
-{ 
-	cNoRevelation, 
-	cAllUnits, 
-	cBuildingsOnly 
-}; /// Revelation types
-
 ///  Player structure
 class CPlayer
 {
@@ -113,7 +108,7 @@ public:
 	int Index;          /// player as number
 	std::string Name;   /// name of non computer
 
-	int   Type;         /// type of player (human,computer,...)
+	PlayerTypes Type;   /// type of player (human,computer,...)
 	int   Race;         /// race of player (orc,human,...)
 	std::string AiName; /// AI for computer
 
@@ -165,10 +160,6 @@ public:
 	
 	IntColor Color;           /// color of units on minimap
 
-	CUnitColors UnitColors; /// Unit colors for new units
-
-	std::vector<CUnit *> FreeWorkers;	/// Container for free workers
-
 	// Upgrades/Allows:
 	CAllow Allow;                 /// Allowed for player
 	CUpgradeTimers UpgradeTimers; /// Timer for the upgrades
@@ -192,7 +183,18 @@ public:
 
 	void AddUnit(CUnit &unit);
 	void RemoveUnit(CUnit &unit);
+
+	std::vector<CUnit *>::const_iterator FreeWorkersBegin() const;
+	std::vector<CUnit *>::const_iterator FreeWorkersEnd() const;
+	std::vector<CUnit *>::iterator FreeWorkersBegin();
+	std::vector<CUnit *>::iterator FreeWorkersEnd();
+
+	CUnit *GetFreeWorker(int index) const;
+	int GetFreeWorkersCount() const;
 	void UpdateFreeWorkers();
+
+	void ClearUnitColors();
+	void SetUnitColors(std::vector<CColor> &colors);
 
 	/// Get a resource of the player
 	int GetResource(const int resource, const int type);
@@ -283,7 +285,7 @@ public:
 	void UnshareVisionWith(CPlayer &player);
 	void DisableSharedVisionFrom(const CPlayer &player);
 
-	void Init(/* PlayerTypes */ int type);
+	void Init(PlayerTypes type);
 	void Save(CFile &file) const;
 	void Load(lua_State *l);
 	
@@ -294,7 +296,9 @@ public:
 	void SetRevealed(const bool revealed);
 
 private:
+	CUnitColors UnitColors;            /// Unit colors for new units
 	std::vector<CUnit *> Units;        /// units of this player
+	std::vector<CUnit *> FreeWorkers;  /// Container for free workers
 	unsigned int Enemy;                /// enemy bit field for this player
 	unsigned int Allied;               /// allied bit field for this player
 	std::set<uint8_t> HasVisionFrom;   /// set of player indexes that have shared their vision with this player
@@ -327,61 +331,6 @@ public:
 	unsigned int Count;             /// number of races
 };
 
-
-enum PlayerRacesOld {
-	PlayerRaceHuman = 0,  /// belongs to human
-	PlayerRaceOrc  = 1    /// belongs to orc
-};
-
-/**
-**  Types for the player
-**
-**  #PlayerNeutral
-**
-**    This player is controlled by the computer doing nothing.
-**
-**  #PlayerNobody
-**
-**    This player is unused. Nobody controls this player.
-**
-**  #PlayerComputer
-**
-**    This player is controlled by the computer. CPlayer::AiNum
-**    selects the AI strategy.
-**
-**  #PlayerPerson
-**
-**    This player is contolled by a person. This can be the player
-**    sitting on the local computer or player playing over the
-**    network.
-**
-**  #PlayerRescuePassive
-**
-**    This player does nothing, the game pieces just sit in the game
-**    (being passive)... when a person player moves next to a
-**    PassiveRescue unit/building, then it is "rescued" and becomes
-**    part of that persons team. If the city center is rescued, than
-**    all units of this player are rescued.
-**
-**  #PlayerRescueActive
-**
-**    This player is controlled by the computer. CPlayer::AiNum
-**    selects the AI strategy. Until it is rescued it plays like
-**    an ally. The first person which reaches units of this player,
-**    can rescue them. If the city center is rescued, than all units
-**    of this player are rescued.
-*/
-enum PlayerTypes {
-	PlayerNeutral = 2,        /// neutral
-	PlayerNobody  = 3,        /// unused slot
-	PlayerComputer = 4,       /// computer player
-	PlayerPerson = 5,         /// human player
-	PlayerRescuePassive = 6,  /// rescued passive
-	PlayerRescueActive = 7    /// rescued  active
-};
-
-#define PlayerNumNeutral (PlayerMax - 1)  /// this is the neutral player slot
-
 /**
 **  Notify types. Noties are send to the player.
 */
@@ -399,9 +348,8 @@ extern int NumPlayers;             /// How many player slots used
 extern CPlayer Players[PlayerMax];  /// All players
 extern CPlayer *ThisPlayer;         /// Player on local computer
 extern bool NoRescueCheck;          /// Disable rescue check
-extern std::vector<CColor> PlayerColorsRGB[PlayerMax]; /// Player colors
-extern std::vector<IntColor> PlayerColors[PlayerMax]; /// Player colors
-extern std::string PlayerColorNames[PlayerMax];  /// Player color names
+extern std::vector<std::vector<CColor>> PlayerColorsRGB; /// Player colors
+extern std::vector<std::string> PlayerColorNames;  /// Player color names
 
 extern PlayerRace PlayerRaces;  /// Player races
 
@@ -423,7 +371,7 @@ extern void CleanPlayers();
 extern void SavePlayers(CFile &file);
 
 /// Create a new player
-extern void CreatePlayer(int type);
+extern void CreatePlayer(PlayerTypes type);
 
 
 /// Initialize the computer opponent AI
@@ -433,8 +381,8 @@ extern void PlayersEachCycle();
 /// Called each second for a given player handler (AI)
 extern void PlayersEachSecond(int player);
 
-/// Change current color set to new player of the sprite
-extern void GraphicPlayerPixels(CPlayer &player, const CGraphic &sprite);
+/// Change current color set to the player color of the sprite
+extern void GraphicPlayerPixels(int colorIndex, const CGraphic &sprite);
 
 /// Output debug information for players
 extern void DebugPlayers();

@@ -94,8 +94,8 @@ void CPlayer::Load(lua_State *l)
 {
 	const int args = lua_gettop(l);
 
-	this->Units.resize(0);
-	this->FreeWorkers.resize(0);
+	this->Units.clear();
+	this->FreeWorkers.clear();
 
 	// j = 0 represent player Index.
 	for (int j = 1; j < args; ++j) {
@@ -107,17 +107,17 @@ void CPlayer::Load(lua_State *l)
 		} else if (!strcmp(value, "type")) {
 			value = LuaToString(l, j + 1);
 			if (!strcmp(value, "neutral")) {
-				this->Type = PlayerNeutral;
+				this->Type = PlayerTypes::PlayerNeutral;
 			} else if (!strcmp(value, "nobody")) {
-				this->Type = PlayerNobody;
+				this->Type = PlayerTypes::PlayerNobody;
 			} else if (!strcmp(value, "computer")) {
-				this->Type = PlayerComputer;
+				this->Type = PlayerTypes::PlayerComputer;
 			} else if (!strcmp(value, "person")) {
-				this->Type = PlayerPerson;
+				this->Type = PlayerTypes::PlayerPerson;
 			} else if (!strcmp(value, "rescue-passive")) {
-				this->Type = PlayerRescuePassive;
+				this->Type = PlayerTypes::PlayerRescuePassive;
 			} else if (!strcmp(value, "rescue-active")) {
-				this->Type = PlayerRescueActive;
+				this->Type = PlayerTypes::PlayerRescueActive;
 			} else {
 				LuaError(l, "Unsupported tag: %s" _C_ value);
 			}
@@ -338,33 +338,162 @@ void CPlayer::Load(lua_State *l)
 /**
 ** <b>Description</b>
 **
-**  Change unit owner
+**  Change all units owned by one player or change only specific units owned by one player
 **
 **  @param l  Lua state.
 **
 ** Example:
 **
-** <div class="example"><code>-- Changes the unit owner from player 0 to player 1
-**		ChangeUnitsOwner({16, 17},{30, 32},0,1)</code></div>
+** <div class="example"><code>-- Changes all units owned by player 0 and give to player 1
+**		<strong>ChangeUnitsOwner</strong>({16, 17}, {30, 32}, 0, 1)
+**		-- Changes all farms owned by player 0 and give to player 1
+**		<strong>ChangeUnitsOwner</strong>({16, 17}, {30, 32}, 0, 1, "unit-farm")</code></div>
 **
 */
 static int CclChangeUnitsOwner(lua_State *l)
 {
-	LuaCheckArgs(l, 4);
+    int args = lua_gettop(l);
+    if (args != 4 && args != 5) {
+        LuaError(l, "incorrect argument count, need 4 or 5 args");
+    }
 
-	Vec2i pos1;
-	Vec2i pos2;
-	CclGetPos(l, &pos1.x, &pos1.y, 1);
-	CclGetPos(l, &pos2.x, &pos2.y, 2);
-	const int oldp = LuaToNumber(l, 3);
-	const int newp = LuaToNumber(l, 4);
-	std::vector<CUnit *> table;
-
-	Select(pos1, pos2, table, HasSamePlayerAs(Players[oldp]));
-	for (size_t i = 0; i != table.size(); ++i) {
-		table[i]->ChangeOwner(Players[newp]);
+    Vec2i pos1;
+    Vec2i pos2;
+    CclGetPos(l, &pos1.x, &pos1.y, 1);
+    CclGetPos(l, &pos2.x, &pos2.y, 2);
+	if (pos1.x > pos2.x) {
+		std::swap(pos1.x, pos2.x);
 	}
-	return 0;
+	if (pos1.y > pos2.y) {
+		std::swap(pos1.y, pos2.y);
+	}
+
+    const int oldp = LuaToNumber(l, 3);
+    const int newp = LuaToNumber(l, 4);
+    std::vector<CUnit *> table;
+	// Change all units
+    if (args == 4) {
+        Select(pos1, pos2, table, HasSamePlayerAs(Players[oldp]));
+    } else { //Change only specific units by the type.
+        CUnitType *type = UnitTypeByIdent(LuaToString(l, 5));
+        Select(pos1, pos2, table, HasSamePlayerAndTypeAs(Players[oldp], *type));
+    }
+    for (auto unit : table) {
+        unit->ChangeOwner(Players[newp]);
+    }
+    return 0;
+}
+
+/**
+** <b>Description</b>
+**
+**  <strong>GiveUnitsToPlayer(amount, type, fromPlayer, toPlayer)</strong>
+**  <strong>GiveUnitsToPlayer(amount, type, topLeft, bottomRight, fromPlayer, toPlayer)</strong>
+**  Give some units of a specific type from a player to another player. Optionally only inside a rectangle.
+**  Returns number of units actually assigned. This can be smaller than the requested amount if the
+**  <code>fromPlayer</code> did not have enough units.<br/>
+**
+**  Instead of a number you can pass "all" as the first argument, to hand over all units.<br/>
+**  
+**  Instead of a unit type name, you can pass "any", "unit", "building" as the second argument,
+**  to hand over anything, and unit, or any building.
+**
+**  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code>
+**   -- Give 2 peasants from player 4 to player 2
+**   GiveUnitsToPlayer(2, "unit-peasant", 4, 2)
+**   -- Give 4 knights from player 5 to player 1 inside the rectangle 2,2 - 14,14
+**   GiveUnitsToPlayer(2, "unit-peasant", {2,2}, {14,14}, 4, 2)
+**   -- Give any 4 units from player 5 to player 1 inside the rectangle 2,2 - 14,14
+**   GiveUnitsToPlayer(2, "any", 4, 2)
+** </code></div>
+**
+*/
+static int CclGiveUnitsToPlayer(lua_State *l)
+{
+	int args = lua_gettop(l);
+	if (args != 4 && args != 6) {
+		LuaError(l, "incorrect argument count for GiveUnitsToPlayer, need 4 or 6 args");
+	}
+
+	int cnt;
+	if (lua_isnumber(l, 1)) {
+		cnt = LuaToNumber(l, 1);
+	} else {
+		std::string cntStr = std::string(LuaToString(l, 1));
+		if (cntStr != "all") {
+			LuaError(l, "incorrect 1st argument to GiveUnitsToPlayer. Must be number or 'all'");
+		}
+		cnt = std::numeric_limits<int>::max();
+	}
+
+	const int oldp = LuaToNumber(l, args == 4 ? 3 : 5);
+	const int newp = LuaToNumber(l, args == 4 ? 4 : 6);
+
+	std::string typestr = std::string(LuaToString(l, 2));
+	int assignedCnt = 0;
+
+	CUnitType *type = nullptr;
+	bool any = false;
+	bool onlyUnits = false;
+	bool onlyBuildings = false;
+	if ((any = (typestr == "any"))) {
+	} else if ((onlyUnits = (typestr == "unit"))) {
+	} else if ((onlyBuildings = (typestr == "building"))) {
+	} else {
+		type = UnitTypeByIdent(LuaToString(l, 2));
+		if (!type) {
+			LuaError(l, "incorrect 2nd argument to GiveUnitsToPlayer. Must be a unit type or 'any', 'unit', or 'building'");
+		}
+	}
+
+	if (cnt > 0) {
+		std::vector<CUnit *> table;
+		if (args == 6) {
+			Vec2i pos1;
+			Vec2i pos2;
+			CclGetPos(l, &pos1.x, &pos1.y, 3);
+			CclGetPos(l, &pos2.x, &pos2.y, 4);
+			if (pos1.x > pos2.x) {
+				std::swap(pos1.x, pos2.x);
+			}
+			if (pos1.y > pos2.y) {
+				std::swap(pos1.y, pos2.y);
+			}
+			if (any) {
+				Select(pos1, pos2, table, HasSamePlayerAs(Players[oldp]));
+			} else if (onlyUnits) {
+				Select(pos1, pos2, table, AndPredicate(HasSamePlayerAs(Players[oldp]), NotPredicate(IsBuildingType())));
+			} else if (onlyBuildings) {
+				Select(pos1, pos2, table, AndPredicate(HasSamePlayerAs(Players[oldp]), IsBuildingType()));
+			} else {
+				Select(pos1, pos2, table, HasSamePlayerAndTypeAs(Players[oldp], *type));
+			}
+			for (size_t i = 0; i != table.size() && cnt > 0; ++i) {
+				table[i]->ChangeOwner(Players[newp]);
+				assignedCnt++;
+				cnt--;
+			}
+		} else {
+			std::vector<CUnit *> table;
+			for (std::vector<CUnit *>::const_iterator it = Players[oldp].UnitBegin(); it != Players[oldp].UnitEnd() && cnt > 0; ++it) {
+				CUnit *unit = *it;
+				if (any || (onlyUnits && !unit->Type->Building) || (onlyBuildings && unit->Type->Building) || (type == unit->Type)) {
+					table.push_back(unit);
+				}
+			}
+			for (auto unit : table) {
+				unit->ChangeOwner(Players[newp]);
+			}
+			assignedCnt = table.size();
+		}
+	}
+
+	lua_pushnumber(l, assignedCnt);
+	return 1;
 }
 
 /**
@@ -376,7 +505,7 @@ static int CclChangeUnitsOwner(lua_State *l)
 **
 ** Example:
 **
-** <div class="example"><code>GetThisPlayer()</code></div>
+** <div class="example"><code><strong>GetThisPlayer</strong>()</code></div>
 */
 static int CclGetThisPlayer(lua_State *l)
 {
@@ -416,11 +545,11 @@ static int CclSetThisPlayer(lua_State *l)
 ** Example:
 **
 ** <div class="example"><code>-- 9 units can be selected together.
-**		  SetMaxSelectable(9)
+**		  <strong>SetMaxSelectable</strong>(9)
 **		  -- 18 units can be selected together.
-**		  SetMaxSelectable(18)
+**		  <strong>SetMaxSelectable</strong>(18)
 **		  -- 50 units can be selected together.
-**		  SetMaxSelectable(50)</code></div>
+**		  <strong>SetMaxSelectable</strong>(50)</code></div>
 */
 static int CclSetMaxSelectable(lua_State *l)
 {
@@ -440,7 +569,7 @@ static int CclSetMaxSelectable(lua_State *l)
 **
 ** Example:
 **
-** <div class="example"><code>SetAllPlayersUnitLimit(200)</code></div>
+** <div class="example"><code><strong>SetAllPlayersUnitLimit</strong>(200)</code></div>
 */
 static int CclSetAllPlayersUnitLimit(lua_State *l)
 {
@@ -462,7 +591,7 @@ static int CclSetAllPlayersUnitLimit(lua_State *l)
 **
 ** Example:
 **
-** <div class="example"><code>SetAllPlayersBuildingLimit(200)</code></div>
+** <div class="example"><code><strong>SetAllPlayersBuildingLimit</strong>(200)</code></div>
 */
 static int CclSetAllPlayersBuildingLimit(lua_State *l)
 {
@@ -484,7 +613,7 @@ static int CclSetAllPlayersBuildingLimit(lua_State *l)
 **
 ** Example:
 **
-** <div class="example"><code>SetAllPlayersTotalUnitLimit(400)</code></div>
+** <div class="example"><code><strong>SetAllPlayersTotalUnitLimit</strong>(400)</code></div>
 */
 static int CclSetAllPlayersTotalUnitLimit(lua_State *l)
 {
@@ -508,11 +637,11 @@ static int CclSetAllPlayersTotalUnitLimit(lua_State *l)
 **
 ** Example:
 **
-** <div class="example"><code>SetDiplomacy(0,"allied",1)
-**		SetDiplomacy(1,"allied",0)
+** <div class="example"><code><strong>SetDiplomacy</strong>(0,"allied",1)
+**		<strong>SetDiplomacy</strong>(1,"allied",0)
 **		
-**		SetDiplomacy(0,"enemy",2)
-**		SetDiplomacy(1,"enemy",2)</code></div>
+**		<strong>SetDiplomacy</strong>(0,"enemy",2)
+**		<strong>SetDiplomacy</strong>(1,"enemy",2)</code></div>
 */
 static int CclSetDiplomacy(lua_State *l)
 {
@@ -554,7 +683,6 @@ static int CclGetDiplomacy(lua_State *l)
 	LuaCheckArgs(l, 2);
 	const int base = LuaToNumber(l, 1);
 	const int plynr = LuaToNumber(l, 2);
-	const char *state;
 
 	if (Players[base].IsEnemy(plynr)) {
 		if (Players[base].IsAllied(plynr)) {
@@ -582,11 +710,11 @@ static int CclGetDiplomacy(lua_State *l)
 **
 ** Example:
 **
-** <div class="example"><code>SetSharedVision(0,true,1)
-**		SetSharedVision(1,true,0)
+** <div class="example"><code><strong>SetSharedVision</strong>(0,true,1)
+**		<strong>SetSharedVision</strong>(1,true,0)
 **		
-**		SetSharedVision(0,false,2)
-**		SetSharedVision(1,false,2)</code></div>
+**		<strong>SetSharedVision</strong>(0,false,2)
+**		<strong>SetSharedVision</strong>(1,false,2)</code></div>
 */
 static int CclSetSharedVision(lua_State *l)
 {
@@ -622,9 +750,9 @@ static int CclSharedVision(lua_State *l)
 **
 ** Example:
 **
-** <div class="example"><code>SetRevelationType("no-revelation")
-** 		SetRevelationType("buildings-only")
-** 		SetRevelationType("all-units")</code></div>
+** <div class="example"><code><strong>SetRevelationType</strong>("no-revelation")
+** 		<strong>SetRevelationType</strong>("buildings-only")
+** 		<strong>SetRevelationType</strong>("all-units")</code></div>
 **
 */
 static int CclSetRevelationType(lua_State *l)
@@ -700,13 +828,14 @@ static int CclDefineRaceNames(lua_State *l)
 /**
 ** <b>Description</b>
 **
-**  Define player colors
+**  Define player colors. Pass "false" as an optional second
+**  argument to add the colors to the existing ones.
 **
 **  @param l  Lua state.
 **
 ** Example:
 **
-** <div class="example"><code>DefinePlayerColors({
+** <div class="example"><code><strong>DefinePlayerColors</strong>({
 **		"red", {{164, 0, 0}, {124, 0, 0}, {92, 4, 0}, {68, 4, 0}},
 **		"blue", {{12, 72, 204}, {4, 40, 160}, {0, 20, 116}, {0, 4, 76}},
 **		"green", {{44, 180, 148}, {20, 132, 92}, {4, 84, 44}, {0, 40, 12}},
@@ -727,14 +856,28 @@ static int CclDefineRaceNames(lua_State *l)
 */
 static int CclDefinePlayerColors(lua_State *l)
 {
-	LuaCheckArgs(l, 1);
+	int nargs = lua_gettop(l);
+	if (nargs < 1 || nargs > 2) {
+		LuaError(l, "wrong number of arguments");
+	}
 	if (!lua_istable(l, 1)) {
 		LuaError(l, "incorrect argument");
 	}
-
+	bool defaultNeutralPlayer = false;
 	const int args = lua_rawlen(l, 1);
+	if (nargs < 2 || LuaToBoolean(l, 2)) {
+		PlayerColorNames.clear();
+		PlayerColorsRGB.clear();
+		if (args / 2 < PlayerMax - 1) { // accept no color for neutral player
+			LuaError(l, "You need to define at least %d colors" _C_ PlayerMax - 1);
+		}
+		if (args / 2 < PlayerMax) {
+			defaultNeutralPlayer = true;
+		}
+	}
+
 	for (int i = 0; i < args; ++i) {
-		PlayerColorNames[i / 2] = LuaToString(l, 1, i + 1);
+		PlayerColorNames.push_back(LuaToString(l, 1, i + 1));
 		++i;
 		lua_rawgeti(l, 1, i + 1);
 		if (!lua_istable(l, -1)) {
@@ -744,15 +887,29 @@ static int CclDefinePlayerColors(lua_State *l)
 		if (numcolors != PlayerColorIndexCount) {
 			LuaError(l, "You should use %d colors (See DefinePlayerColorIndex())" _C_ PlayerColorIndexCount);
 		}
+		std::vector<CColor> newColors;
 		for (int j = 0; j < numcolors; ++j) {
 			lua_rawgeti(l, -1, j + 1);
-			PlayerColorsRGB[i / 2][j].Parse(l);
+			CColor newColor;
+			newColor.Parse(l);
+			newColors.push_back(newColor);
 			lua_pop(l, 1);
 		}
+		PlayerColorsRGB.push_back(newColors);
+	}
+
+	if (defaultNeutralPlayer) {
+		PlayerColorNames.push_back("neutral-black");
+		std::vector<CColor> neutralColors;
+		for (int j = 0; j < PlayerColorIndexCount; ++j) {
+			CColor neutralColor;
+			neutralColors.push_back(neutralColor);
+		}
+		PlayerColorsRGB.push_back(neutralColors);
 	}
 
 	return 0;
-}
+} 
 
 /**
 **  Make new player colors
@@ -778,12 +935,7 @@ static int CclDefinePlayerColorIndex(lua_State *l)
 	PlayerColorIndexStart = LuaToNumber(l, 1);
 	PlayerColorIndexCount = LuaToNumber(l, 2);
 
-	for (int i = 0; i < PlayerMax; ++i) {
-		PlayerColorsRGB[i].clear();
-		PlayerColorsRGB[i].resize(PlayerColorIndexCount);
-		PlayerColors[i].clear();
-		PlayerColors[i].resize(PlayerColorIndexCount, 0);
-	}
+	PlayerColorsRGB.clear();
 	return 0;
 }
 
@@ -798,7 +950,7 @@ static int CclDefinePlayerColorIndex(lua_State *l)
 **
 ** Example:
 **
-** <div class="example"><code>GetPlayerData(0,"TotalNumUnits")</code></div>
+** <div class="example"><code><strong>GetPlayerData</strong>(0,"TotalNumUnits")</code></div>
 */
 static int CclGetPlayerData(lua_State *l)
 {
@@ -959,9 +1111,12 @@ static int CclGetPlayerData(lua_State *l)
 **
 ** Example:
 **
-** <div class="example"><code>SetPlayerData(0,"Name","Nation of Stromgarde")
-**		SetPlayerData(0,"RaceName","human")
-** 		SetPlayerData(0,"Resources","gold",1700)</code></div>
+** <div class="example"><code>
+**  <strong>SetPlayerData</strong>(0,"Name","Nation of Stromgarde") -- set the name of this player
+**	<strong>SetPlayerData</strong>(0,"RaceName","human") -- the the race to human
+** 	<strong>SetPlayerData</strong>(0,"Resources","gold",1700) -- set the player to have 1700 gold
+**  <strong>SetPlayerData</strong>(0, "Allow", "upgrade-paladin", "R") -- give the player the Paladin upgrade
+** </code></div>
 */
 static int CclSetPlayerData(lua_State *l)
 {
@@ -1076,7 +1231,7 @@ static int CclSetPlayerData(lua_State *l)
 ** Example: 
 ** 
 ** <div class="example"> <code> -- Player 1 has a passive A.I 
-**		  SetAiType(1, "Passive")</code></div>
+**		  <strong>SetAiType</strong>(1, "Passive")</code></div>
 */
 static int CclSetAiType(lua_State *l)
 {
@@ -1103,6 +1258,7 @@ void PlayerCclRegister()
 {
 	lua_register(Lua, "Player", CclPlayer);
 	lua_register(Lua, "ChangeUnitsOwner", CclChangeUnitsOwner);
+	lua_register(Lua, "GiveUnitsToPlayer", CclGiveUnitsToPlayer);
 	lua_register(Lua, "GetThisPlayer", CclGetThisPlayer);
 	lua_register(Lua, "SetThisPlayer", CclSetThisPlayer);
 

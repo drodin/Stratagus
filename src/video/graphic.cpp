@@ -306,11 +306,11 @@ void CGraphic::DrawFrameClipCustomMod(unsigned frame, int x, int y,
 **  @param y       y coordinate on the target surface
 **	@param surface target surface
 */
-void CPlayerColorGraphic::DrawPlayerColorFrameClip(int player, unsigned frame,
+void CPlayerColorGraphic::DrawPlayerColorFrameClip(int colorIndex, unsigned frame,
 												   int x, int y,
 												   SDL_Surface *surface /*= TheScreen*/)
 {
-	GraphicPlayerPixels(Players[player], *this);
+	GraphicPlayerPixels(colorIndex, *this);
 	DrawFrameClip(frame, x, y, surface);
 }
 
@@ -397,11 +397,11 @@ void CGraphic::DrawFrameClipTransX(unsigned frame, int x, int y, int alpha,
 **  @param y       y coordinate on the target surface
 **  @param surface target surface
 */
-void CPlayerColorGraphic::DrawPlayerColorFrameClipX(int player, unsigned frame,
+void CPlayerColorGraphic::DrawPlayerColorFrameClipX(int colorIndex, unsigned frame,
 													int x, int y,
 													SDL_Surface *surface /*= TheScreen*/)
 {
-	GraphicPlayerPixels(Players[player], *this);
+	GraphicPlayerPixels(colorIndex, *this);
 	DrawFrameClipX(frame, x, y, surface);
 }
 
@@ -1044,6 +1044,100 @@ void CGraphic::SetPaletteColor(int idx, int r, int g, int b) {
 	SDL_SetPaletteColors(Surface->format->palette, &color, idx, 1);
 }
 
+void CGraphic::OverlayGraphic(CGraphic *other, bool mask)
+{
+	this->Load();
+	other->Load();
+	if (!Surface) {
+		PrintOnStdOut("ERROR: Graphic %s not loaded in call to OverlayGraphic" _C_ this->File.c_str());
+		return;
+	}
+	if (!other->Surface) {
+		PrintOnStdOut("ERROR: Graphic %s not loaded in call to OverlayGraphic" _C_ other->File.c_str());
+		return;
+	}
+	if (Surface->w != other->Surface->w || Surface->h != other->Surface->h) {
+		PrintOnStdOut("ERROR: Graphic %s has different size than %s OverlayGraphic" _C_ File.c_str() _C_ other->File.c_str());
+		return;
+	}
+
+	int bpp = Surface->format->BytesPerPixel;
+	unsigned int srcColorKey;
+	unsigned int dstColorKey;
+
+	if (!((bpp == 1 && SDL_GetColorKey(other->Surface, &srcColorKey) == 0 && SDL_GetColorKey(Surface, &dstColorKey) == 0) || bpp == 4)) {
+		PrintOnStdOut("ERROR: OverlayGraphic only supported for 8-bit graphics with transparency or RGBA graphics (%s)" _C_ File.c_str());
+		return;
+	}
+	if ((bpp != other->Surface->format->BytesPerPixel)) {
+		PrintOnStdOut("ERROR: OverlayGraphic only supported graphics with same depth (%s depth != %s depth)" _C_ File.c_str() _C_ other->File.c_str());
+		return;
+	}
+
+	SDL_LockSurface(Surface);
+	SDL_LockSurface(other->Surface);
+
+	switch (bpp) {
+		case 1: {
+			uint8_t *dst = (uint8_t *)Surface->pixels;
+			uint8_t *src = (uint8_t *)other->Surface->pixels;
+
+			for (int x = 0; x < Surface->w; x++) {
+				for (int y = 0; y < Surface->h; y++) {
+					uint8_t* src = ((uint8_t*)(other->Surface->pixels)) + x + y * other->Surface->pitch;
+					uint8_t* dst = ((uint8_t*)(Surface->pixels)) + x + y * Surface->pitch;
+					if (*src != srcColorKey) {
+						if (!mask) {
+							*dst = *src;
+						} else {
+							*dst = dstColorKey;
+						}
+					}
+				}
+			}
+			break;
+		}
+		case 4: {
+			uint32_t *dst = (uint32_t *)Surface->pixels;
+			uint32_t *src = (uint32_t *)other->Surface->pixels;
+
+			for (int x = 0; x < Surface->w; x++) {
+				for (int y = 0; y < Surface->h; y++) {
+					uint32_t* src = ((uint32_t*)(other->Surface->pixels)) + x + y * other->Surface->pitch;
+					uint32_t* dst = ((uint32_t*)(Surface->pixels)) + x + y * Surface->pitch;
+					double alphaSrc = (*src & other->Surface->format->Amask) / 255.0;
+					if (mask) {
+						alphaSrc = 1 - alphaSrc;
+					}
+					double alphaDst = (*dst & Surface->format->Amask) / 255.0;
+					uint8_t rSrc = *src & other->Surface->format->Rmask;
+					uint8_t rDst = *dst & Surface->format->Rmask;
+					uint8_t gSrc = *src & other->Surface->format->Gmask;
+					uint8_t gDst = *dst & Surface->format->Gmask;
+					uint8_t bSrc = *src & other->Surface->format->Bmask;
+					uint8_t bDst = *dst & Surface->format->Bmask;
+
+					double aOut = std::min(1.0, alphaSrc + alphaDst * (1 - alphaSrc));
+					uint8_t rOut = static_cast<uint8_t>((rSrc * alphaSrc + rDst * alphaDst * (1 - alphaSrc)) / aOut);
+					uint8_t gOut = static_cast<uint8_t>((gSrc * alphaSrc + gDst * alphaDst * (1 - alphaSrc)) / aOut);
+					uint8_t bOut = static_cast<uint8_t>((bSrc * alphaSrc + bDst * alphaDst * (1 - alphaSrc)) / aOut);
+
+					*dst = (static_cast<uint8_t>(aOut * 255) << Surface->format->Ashift) |
+						(rOut << Surface->format->Rshift) |
+						(gOut << Surface->format->Gshift) |
+						(bOut << Surface->format->Bshift);
+				}
+			}
+			break;
+		}
+		default:
+			break;
+	}
+
+	SDL_UnlockSurface(Surface);
+	SDL_UnlockSurface(other->Surface);
+}
+
 static inline void dither(SDL_Surface *Surface) {
 	for (int x = 0; x < Surface->w; x++) {
 		for (int y = 0; y < Surface->h; y++) {
@@ -1055,25 +1149,97 @@ static inline void dither(SDL_Surface *Surface) {
 	}
 }
 
+static void applyAlphaGrayscaleToSurface(SDL_Surface **src, int alpha)
+{
+	SDL_Surface *alphaSurface = SDL_CreateRGBSurface(0, (*src)->w, (*src)->h, 32, RMASK, GMASK, BMASK, AMASK);
+	if (!alphaSurface) {
+		DebugPrint("%s\n" _C_ SDL_GetError());
+		Assert(false);
+	}
+	SDL_BlitSurface(*src, NULL, alphaSurface, NULL);
+	SDL_SetSurfaceAlphaMod(alphaSurface, alpha);
+	SDL_SetSurfaceColorMod(alphaSurface, 0, 0, 0);
+	SDL_FreeSurface(*src);
+	*src = alphaSurface;
+}
+
+static void shrinkSurfaceFramesInY(SDL_Surface **src, int shrink, int numFrames, CGraphic::frame_pos_t *frameMap, int frameW, int frameH)
+{
+	shrink = std::abs(shrink);
+	SDL_Surface *alphaSurface = SDL_CreateRGBSurface(0, (*src)->w, (*src)->h, 32, RMASK, GMASK, BMASK, AMASK);
+	if (!alphaSurface) {
+		DebugPrint("%s\n" _C_ SDL_GetError());
+		Assert(false);
+	}
+	for (int f = 0; f < numFrames; f++) {
+		int frameX = frameMap[f].x;
+		int frameY = frameMap[f].y;
+		const SDL_Rect srcRect = { frameX, frameY, frameW, frameH };
+		SDL_Rect dstRect = { frameX, frameY + shrink / 2, frameW, frameH - (shrink - shrink / 2) };
+		SDL_BlitScaled(*src, &srcRect, alphaSurface, &dstRect);
+	}
+	SDL_FreeSurface(*src);
+	*src = alphaSurface;
+}
+
+static void shearSurface(SDL_Surface *surface, int xOffset, int yOffset, int numFrames, CGraphic::frame_pos_t *frameMap, int frameW, int frameH)
+{
+	if (yOffset || xOffset) {
+		SDL_LockSurface(surface);
+		uint32_t* pixels = (uint32_t *)surface->pixels;
+		int pitch = surface->pitch / sizeof(uint32_t);
+		for (int f = 0; f < numFrames; f++) {
+			int frameX = frameMap[f].x;
+			int frameY = frameMap[f].y;
+			for (int x = xOffset > 0 ? 0 : frameW - 1; xOffset > 0 ? x < frameW : x >= 0; xOffset > 0 ? x++ : x--) {
+				for (int y = yOffset > 0 ? 0 : frameH - 1; yOffset > 0 ? y < frameH : y >= 0; yOffset > 0 ? y++ : y--) {
+					int xNew = x + xOffset * y / frameH;
+					int yNew = y + yOffset * x / frameW;
+					if (xNew < 0 || yNew < 0 || xNew >= frameW || yNew >= frameH) {
+						pixels[x + frameX + (y + frameY) * pitch] = 0;
+					} else {
+						pixels[x + frameX + (y + frameY) * pitch] = pixels[xNew + frameX + (yNew + frameY) * pitch];
+					}
+				}
+			}
+		}
+		SDL_UnlockSurface(surface);
+	}
+}
+
 /**
 **  Make shadow sprite
 **
 **  @todo FIXME: 32bpp
 */
-void CGraphic::MakeShadow()
+void CGraphic::MakeShadow(int xOffset, int yOffset)
 {
-	if (Surface->format->BytesPerPixel == 1) {
-		SDL_Color colors[256];
+	VideoPaletteListRemove(Surface);
+	applyAlphaGrayscaleToSurface(&Surface, 80);
+	if (SurfaceFlip) {
+		VideoPaletteListRemove(SurfaceFlip);
+		applyAlphaGrayscaleToSurface(&SurfaceFlip, 80);
+	}
 
-		// Set all colors in the palette to black and use dithering for alpha
-		memset(colors, 0, sizeof(colors));
-		SDL_SetPaletteColors(Surface->format->palette, colors, 0, 256);
-		dither(Surface);
+	// BEGIN HACK: XXX: FIXME: positive yOffset is used for fliers for now, these should not get shearing.
+	// We need to find a better way to communicate that. The rest of the code already supports shearing
+	// in both directions for y.
+	yOffset = std::min(0, yOffset);
+	// END HACK
 
-		if (SurfaceFlip) {
-			SDL_SetPaletteColors(SurfaceFlip->format->palette, colors, 0, 256);
-			dither(Surface);
-		}
+	// Apply shearing effect. same angle for Surface and SurfaceFlip!
+	// The sun shines from the same angle on to both normal and flipped sprites :)
+
+	// 1. Shrink each frame in y-direction based on the x offset
+	shrinkSurfaceFramesInY(&Surface, xOffset, NumFrames, frame_map, Width, Height);
+	if (SurfaceFlip) {
+		shrinkSurfaceFramesInY(&SurfaceFlip, xOffset, NumFrames, frameFlip_map, Width, Height);
+	}
+
+	// 2. Apply shearing
+	shearSurface(Surface, xOffset, yOffset, NumFrames, frame_map, Width, Height);
+	if (SurfaceFlip) {
+		shearSurface(SurfaceFlip, xOffset, yOffset, NumFrames, frameFlip_map, Width, Height);
 	}
 }
 

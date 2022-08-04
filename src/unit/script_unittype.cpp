@@ -120,6 +120,8 @@ static const char PIERCINGDAMAGE_KEY[] = "PiercingDamage";
 static const char BASICDAMAGE_KEY[] = "BasicDamage";
 static const char POSX_KEY[] = "PosX";
 static const char POSY_KEY[] = "PosY";
+static const char POS_RIGHT_KEY[] = "PosRight";
+static const char POS_BOTTOM_KEY[] = "PosBottom";
 static const char TARGETPOSX_KEY[] = "TargetPosX";
 static const char TARGETPOSY_KEY[] = "TargetPosY";
 static const char RADARRANGE_KEY[] = "RadarRange";
@@ -174,7 +176,7 @@ CUnitTypeVar::CVariableKeys::CVariableKeys()
 							   RESEARCH_KEY, TRAINING_KEY, UPGRADETO_KEY, GIVERESOURCE_KEY,
 							   CARRYRESOURCE_KEY, XP_KEY, KILL_KEY,	SUPPLY_KEY, DEMAND_KEY, ARMOR_KEY,
 							   SIGHTRANGE_KEY, ATTACKRANGE_KEY, PIERCINGDAMAGE_KEY,
-							   BASICDAMAGE_KEY, POSX_KEY, POSY_KEY, TARGETPOSX_KEY, TARGETPOSY_KEY, RADARRANGE_KEY,
+							   BASICDAMAGE_KEY, POSX_KEY, POSY_KEY, POS_RIGHT_KEY, POS_BOTTOM_KEY, TARGETPOSX_KEY, TARGETPOSY_KEY, RADARRANGE_KEY,
 							   RADARJAMMERRANGE_KEY, AUTOREPAIRRANGE_KEY, BLOODLUST_KEY, HASTE_KEY,
 							   SLOW_KEY, INVISIBLE_KEY, UNHOLYARMOR_KEY, SLOT_KEY, SHIELD_KEY, POINTS_KEY,
 							   MAXHARVESTERS_KEY, POISON_KEY, SHIELDPERMEABILITY_KEY, SHIELDPIERCING_KEY, ISALIVE_KEY, PLAYER_KEY,
@@ -483,6 +485,9 @@ static int CclDefineUnitType(lua_State *l)
 	// Slot identifier
 	const char *str = LuaToString(l, 1);
 	CUnitType *type = UnitTypeByIdent(str);
+
+	constexpr int redefineSprite = 2;
+
 	int redefine;
 	if (type) {
 		redefine = 1;
@@ -490,10 +495,9 @@ static int CclDefineUnitType(lua_State *l)
 	} else {
 		type = NewUnitTypeSlot(str);
 		redefine = 0;
+		type->NumDirections = 0;
+		type->Flip = 1;
 	}
-
-	type->NumDirections = 0;
-	type->Flip = 1;
 
 	//  Parse the list: (still everything could be changed!)
 	for (lua_pushnil(l); lua_next(l, 2); lua_pop(l, 1)) {
@@ -511,6 +515,8 @@ static int CclDefineUnitType(lua_State *l)
 
 				if (!strcmp(value, "file")) {
 					type->File = LuaToString(l, -1, k + 1);
+				} else if (!strcmp(value, "alt-file")) {
+					type->AltFile = LuaToString(l, -1, k + 1);
 				} else if (!strcmp(value, "size")) {
 					lua_rawgeti(l, -1, k + 1);
 					CclGetPos(l, &type->Width, &type->Height);
@@ -519,9 +525,22 @@ static int CclDefineUnitType(lua_State *l)
 					LuaError(l, "Unsupported image tag: %s" _C_ value);
 				}
 			}
-			if (redefine && type->Sprite) {
-				CGraphic::Free(type->Sprite);
-				type->Sprite = NULL;
+			if (redefine) {
+				if (type->Sprite && type->Sprite->File != type->File) {
+					redefine |= redefineSprite;
+					CGraphic::Free(type->Sprite);
+					type->Sprite = NULL;
+				}
+				if (type->AltSprite && type->AltSprite->File != type->AltFile) {
+					redefine |= redefineSprite;
+					CGraphic::Free(type->AltSprite);
+					type->AltSprite = NULL;
+				}
+				if (redefine && type->ShadowSprite) {
+					redefine |= redefineSprite;
+					CGraphic::Free(type->ShadowSprite);
+					type->ShadowSprite = NULL;
+				}
 			}
 			if (type->ShadowFile == shadowMarker) {
 				type->ShadowFile = type->File;
@@ -566,6 +585,7 @@ static int CclDefineUnitType(lua_State *l)
 				}
 			}
 			if (redefine && type->ShadowSprite) {
+				redefine |= redefineSprite;
 				CGraphic::Free(type->ShadowSprite);
 				type->ShadowSprite = NULL;
 			}
@@ -581,18 +601,31 @@ static int CclDefineUnitType(lua_State *l)
 		} else if (!strcmp(value, "Icon")) {
 			type->Icon.Name = LuaToString(l, -1);
 			type->Icon.Icon = NULL;
-#ifdef USE_MNG
 		} else if (!strcmp(value, "Portrait")) {
+#ifdef USE_MNG
 			if (!lua_istable(l, -1)) {
 				LuaError(l, "incorrect argument");
 			}
 			const int subargs = lua_rawlen(l, -1);
-			type->Portrait.Num = subargs;
+			int number = 0;
+			for (int k = 0; k < subargs; ++k) {
+				const char *s = LuaToString(l, -1, k + 1);
+				if (strcmp("talking", s)) {
+					number++;
+				}
+			}
+			type->Portrait.Num = number;
+			type->Portrait.Talking = 0;
 			type->Portrait.Files = new std::string[type->Portrait.Num];
 			type->Portrait.Mngs = new Mng *[type->Portrait.Num];
 			memset(type->Portrait.Mngs, 0, type->Portrait.Num * sizeof(Mng *));
 			for (int k = 0; k < subargs; ++k) {
-				type->Portrait.Files[k] = LuaToString(l, -1, k + 1);
+				const char *s = LuaToString(l, -1, k + 1);
+				if (!strcmp("talking", s)) {
+					type->Portrait.Talking = k;
+				} else {
+					type->Portrait.Files[k - (type->Portrait.Talking ? 1 : 0)] = s;
+				}
 			}
 #endif
 		} else if (!strcmp(value, "Costs")) {
@@ -1194,8 +1227,220 @@ static int CclDefineUnitType(lua_State *l)
 	}
 	UpdateDefaultBoolFlags(*type);
 	if (!CclInConfigFile) {
+		if (redefine & redefineSprite) {
+			LoadUnitTypeSprite(*type);
+		}
 		UpdateUnitStats(*type, 1);
 	}
+	return 0;
+}
+
+/**
+** <b>Description</b>
+**
+**  Copy a unit type.
+**
+**  @param l  Lua state.
+**
+** Example:
+**
+** <div class="example"><code><strong>CopyUnitType</strong>("unit-peasant", "unit-peasant-copy")</code></div>
+*/
+static int CclCopyUnitType(lua_State *l)
+{
+	LuaCheckArgs(l, 2);
+
+	// Slot identifier
+	const char* fromName = LuaToString(l, 1);
+	CUnitType *from = UnitTypeByIdent(fromName);
+	const char* toName = LuaToString(l, 2);
+	CUnitType *to = UnitTypeByIdent(toName);
+	if (to) {
+		DebugPrint("Redefining unit-type '%s'\n" _C_ toName);
+	} else {
+		to = NewUnitTypeSlot(toName);
+	}
+	if (!from) {
+		LuaError(l, "Unknown unit-type '%s'\n" _C_ fromName);
+	}
+
+	to->Flip = from->Flip;
+	to->Name = toName;
+	to->File = from->File;
+	to->AltFile = from->AltFile;
+	to->Width = from->Width;
+	to->Height = from->Height;
+	if (to->Sprite) {
+		CGraphic::Free(to->Sprite);
+		to->Sprite = NULL;
+	}
+	if (to->AltSprite) {
+		CGraphic::Free(to->AltSprite);
+		to->AltSprite = NULL;
+	}
+	to->ShadowFile = from->ShadowFile;
+	to->ShadowWidth = from->ShadowWidth;
+	to->ShadowHeight = from->ShadowHeight;
+	to->ShadowOffsetX = from->ShadowOffsetX;
+	to->ShadowOffsetY = from->ShadowOffsetY;
+	to->ShadowSpriteFrame = from->ShadowSpriteFrame;
+	to->ShadowScale = from->ShadowScale;
+	if (to->ShadowSprite) {
+		CGraphic::Free(to->ShadowSprite);
+		to->ShadowSprite = NULL;
+	}
+	to->OffsetX = from->OffsetX;
+	to->OffsetY = from->OffsetY;
+	to->Animations = from->Animations;
+	to->Icon.Name = from->Icon.Name;
+	to->Icon.Icon = NULL;
+#ifdef USE_MNG
+	to->Portrait.Num = from->Portrait.Num;
+	to->Portrait.Talking = from->Portrait.Talking;
+	to->Portrait.Files = new std::string[to->Portrait.Num];
+	for (int i = 0; i < to->Portrait.Num; i++) {
+		to->Portrait.Files[i] = from->Portrait.Files[i];
+	}
+	to->Portrait.Mngs = new Mng *[to->Portrait.Num];
+	memset(to->Portrait.Mngs, 0, to->Portrait.Num * sizeof(Mng *));
+#endif
+	memcpy(to->DefaultStat.Costs, from->DefaultStat.Costs, sizeof(from->DefaultStat.Costs));
+	memcpy(to->DefaultStat.Storing, from->DefaultStat.Storing, sizeof(from->DefaultStat.Storing));
+	memcpy(to->DefaultStat.ImproveIncomes, from->DefaultStat.ImproveIncomes, sizeof(from->DefaultStat.ImproveIncomes));
+	to->Construction = from->Construction;
+	to->DrawLevel = from->DrawLevel;
+	to->MaxOnBoard = from->MaxOnBoard;
+	to->BoardSize = from->BoardSize;
+	to->ButtonLevelForTransporter = from->ButtonLevelForTransporter;
+	to->StartingResources = from->StartingResources;
+	to->DefaultStat.Variables[HP_INDEX].Increase = from->DefaultStat.Variables[HP_INDEX].Increase;
+	to->DefaultStat.Variables[HP_INDEX].IncreaseFrequency = from->DefaultStat.Variables[HP_INDEX].IncreaseFrequency;
+	to->BurnPercent = from->BurnPercent;
+	to->BurnDamageRate = from->BurnDamageRate;
+	to->PoisonDrain = from->PoisonDrain;
+	to->DefaultStat.Variables[SHIELD_INDEX].Max = from->DefaultStat.Variables[SHIELD_INDEX].Max;
+	to->DefaultStat.Variables[SHIELD_INDEX].Value = from->DefaultStat.Variables[SHIELD_INDEX].Value;
+	to->DefaultStat.Variables[SHIELD_INDEX].Increase = from->DefaultStat.Variables[SHIELD_INDEX].Increase;
+	to->DefaultStat.Variables[SHIELD_INDEX].Enable = from->DefaultStat.Variables[SHIELD_INDEX].Enable;
+	to->TileWidth = from->TileWidth;
+	to->TileHeight = from->TileHeight;
+	to->NeutralMinimapColorRGB = from->NeutralMinimapColorRGB;
+	to->Neutral = from->Neutral;
+	to->BoxWidth = from->BoxWidth;
+	to->BoxHeight = from->BoxHeight;
+	to->BoxOffsetX = from->BoxOffsetX;
+	to->BoxOffsetY = from->BoxOffsetY;
+	to->NumDirections = from->NumDirections;
+	to->ReactRangeComputer = from->ReactRangeComputer;
+	to->ReactRangePerson = from->ReactRangePerson;
+	to->Missile.Name = from->Missile.Name;
+	to->Missile.Missile = NULL; // filled in later
+	to->MinAttackRange = from->MinAttackRange;
+	to->DefaultStat.Variables[ATTACKRANGE_INDEX].Value = from->DefaultStat.Variables[ATTACKRANGE_INDEX].Value;
+	to->DefaultStat.Variables[ATTACKRANGE_INDEX].Max = from->DefaultStat.Variables[ATTACKRANGE_INDEX].Max;
+	to->DefaultStat.Variables[ATTACKRANGE_INDEX].Enable = from->DefaultStat.Variables[ATTACKRANGE_INDEX].Enable;
+	to->DefaultStat.Variables[MAXHARVESTERS_INDEX].Value = from->DefaultStat.Variables[MAXHARVESTERS_INDEX].Value;
+	to->DefaultStat.Variables[MAXHARVESTERS_INDEX].Max = from->DefaultStat.Variables[MAXHARVESTERS_INDEX].Max;
+	to->DefaultStat.Variables[PRIORITY_INDEX].Value = from->DefaultStat.Variables[PRIORITY_INDEX].Value;
+	to->DefaultStat.Variables[PRIORITY_INDEX].Max = from->DefaultStat.Variables[PRIORITY_INDEX].Max;
+	to->AnnoyComputerFactor = from->AnnoyComputerFactor;
+	to->AiAdjacentRange = from->AiAdjacentRange;
+	to->DecayRate = from->DecayRate;
+	to->CorpseName = from->CorpseName;
+	to->CorpseType = from->CorpseType;
+	to->DamageType = from->DamageType;
+	to->ExplodeWhenKilled = from->ExplodeWhenKilled;
+	to->Explosion.Name = from->Explosion.Name;
+	to->Explosion.Missile = NULL; // filled later
+	to->TeleportCost = from->TeleportCost;
+	to->TeleportEffectIn = from->TeleportEffectIn;
+	to->TeleportEffectOut = from->TeleportEffectOut;
+	to->OnDeath = from->OnDeath;
+	to->OnHit = from->OnHit;
+	to->OnEachCycle = from->OnEachCycle;
+	to->OnEachSecond = from->OnEachSecond;
+	to->OnInit = from->OnInit;
+	to->OnReady = from->OnReady;
+	to->UnitType = from->UnitType;
+	for (int k = 0; k < MaxAttackPos; ++k) {
+		for (int m = 0; m < UnitSides; ++m) {
+			to->MissileOffsets[m][k].x = from->MissileOffsets[m][k].x;
+			to->MissileOffsets[m][k].y = from->MissileOffsets[m][k].y;
+		}
+	}
+	for (int i = 0; i < ANIMATIONS_DEATHTYPES + 2; i++) {
+		to->Impact[i].Name = from->Impact[i].Name;
+		to->Impact[i].Missile = from->Impact[i].Missile;
+	}
+	to->MouseAction = from->MouseAction;
+	to->CanAttack = from->CanAttack;
+	to->RepairRange = from->RepairRange;
+	to->RepairHP = from->RepairHP;
+	memcpy(to->RepairCosts, from->RepairCosts, sizeof(from->RepairCosts));
+	to->CanTarget = from->CanTarget;
+	to->Building = from->Building;
+	to->BuildingRules.clear();
+	if (!from->BuildingRules.empty()) {
+		printf("WARNING: unit type copy %s of %s does not inherit BuildingRules\n", fromName, toName);
+	}
+	// XXX: should copy, not share, this will crash
+	// for (auto rule : from->BuildingRules) {
+	// 	to->BuildingRules.push_back(rule);
+	// }
+	to->AiBuildingRules.clear();
+	if (!from->AiBuildingRules.empty()) {
+		printf("WARNING: unit type copy %s of %s does not inherit AiBuildingRules\n", fromName, toName);
+	}
+	// XXX: should copy, not share, this would crash
+	// for (auto rule : from->AiBuildingRules) {
+	// 	to->AiBuildingRules.push_back(rule);
+	// }
+	to->AutoBuildRate = from->AutoBuildRate;
+	to->LandUnit = from->LandUnit;
+	to->AirUnit = from->AirUnit;
+	to->SeaUnit = from->SeaUnit;
+	to->RandomMovementProbability = from->RandomMovementProbability;
+	to->RandomMovementDistance = from->RandomMovementDistance;
+	to->ClicksToExplode = from->ClicksToExplode;
+	to->MaxOnBoard = from->MaxOnBoard;
+	for (unsigned int i = 0; i < from->BoolFlag.size(); i++) {
+		to->BoolFlag[i].value = from->BoolFlag[i].value;
+		to->BoolFlag[i].CanTransport = from->BoolFlag[i].CanTransport;
+		to->BoolFlag[i].CanTargetFlag = from->BoolFlag[i].CanTargetFlag;
+		to->BoolFlag[i].AiPriorityTarget = from->BoolFlag[i].AiPriorityTarget;
+	}
+	memcpy(to->ResInfo, from->ResInfo, sizeof(from->ResInfo));
+	to->GivesResource = from->GivesResource;
+	memcpy(to->CanStore, from->CanStore, sizeof(from->CanStore));
+	to->CanCastSpell = from->CanCastSpell;
+	to->AutoCastActive = from->AutoCastActive;
+	to->Sound.Selected.Name = from->Sound.Selected.Name;
+	to->Sound.Acknowledgement.Name = from->Sound.Acknowledgement.Name;
+	to->Sound.Attack.Name = from->Sound.Attack.Name;
+	to->Sound.Build.Name = from->Sound.Build.Name;
+	to->Sound.Ready.Name = from->Sound.Ready.Name;
+	to->Sound.Repair.Name = from->Sound.Repair.Name;
+	for (int i = 0; i < MaxCosts; i++) {
+		to->Sound.Harvest[i].Name = from->Sound.Harvest[i].Name;
+	}
+	to->Sound.Help.Name = from->Sound.Help.Name;
+	to->Sound.WorkComplete.Name = from->Sound.WorkComplete.Name;
+	for (unsigned int i = 0; i < ANIMATIONS_DEATHTYPES + 1; i++) {
+		to->Sound.Dead[i].Name = from->Sound.Dead[i].Name;
+	}
+	for (unsigned int i = 0; i < UnitTypeVar.GetNumberVariable(); i++) {
+		to->DefaultStat.Variables[i].Enable = from->DefaultStat.Variables[i].Enable;
+		to->DefaultStat.Variables[i].Value = from->DefaultStat.Variables[i].Value;
+		to->DefaultStat.Variables[i].Max = from->DefaultStat.Variables[i].Max;
+		to->DefaultStat.Variables[i].Increase = from->DefaultStat.Variables[i].Increase;
+		to->DefaultStat.Variables[i].IncreaseFrequency = from->DefaultStat.Variables[i].IncreaseFrequency;
+	}
+
+	UpdateDefaultBoolFlags(*to);
+	if (!CclInConfigFile) {
+		UpdateUnitStats(*to, 1);
+	}
+	LoadUnitTypes();
 	return 0;
 }
 
@@ -1778,6 +2023,8 @@ static int CclDefineDecorations(lua_State *l)
 		bool HideNeutral;
 		bool HideAllied;
 		bool ShowOpponent;
+		bool BoolFlagInvert;
+		int BoolFlag;
 	} tmp;
 
 	const int nargs = lua_gettop(l);
@@ -1831,6 +2078,12 @@ static int CclDefineDecorations(lua_State *l)
 							decovarbar->Height = LuaToNumber(l, -1);
 						} else if (!strcmp(key, "Width")) {
 							decovarbar->Width = LuaToNumber(l, -1);
+						} else if (!strcmp(key, "MinValue")) {
+							decovarbar->MinValue = LuaToNumber(l, -1);
+						} else if (!strcmp(key, "MaxValue")) {
+							decovarbar->MaxValue = LuaToNumber(l, -1);
+						} else if (!strcmp(key, "Invert")) {
+							decovarbar->Invert = LuaToBoolean(l, -1);
 						} else if (!strcmp(key, "Orientation")) {
 							key = LuaToString(l, -1);
 							if (!strcmp(key, "horizontal")) {
@@ -1900,12 +2153,29 @@ static int CclDefineDecorations(lua_State *l)
 						decovarstaticsprite->FadeValue = LuaToNumber(l, -1, 3);
 					}
 					decovar = decovarstaticsprite;
+				} else if (!strcmp(key, "animated-sprite")) {
+					CDecoVarAnimatedSprite *decovarspritebar = new CDecoVarAnimatedSprite;
+					decovarspritebar->NSprite = GetSpriteIndex(LuaToString(l, -1, 1));
+					if (decovarspritebar->NSprite == -1) {
+						LuaError(l, "invalid sprite-name '%s' for Method in DefineDecorations" _C_ LuaToString(l, -1, 1));
+					}
+					decovarspritebar->WaitFrames = LuaToNumber(l, -1, 2);
+					if (decovarspritebar->WaitFrames <= 0) {
+						LuaError(l, "invalid wait-frames, must be > 0");
+					}
+					decovar = decovarspritebar;
 				} else { // Error
 					LuaError(l, "invalid method '%s' for Method in DefineDecorations" _C_ key);
 				}
 				lua_pop(l, 2); // MethodName and data
-			} else { // Error
-				LuaError(l, "invalid key '%s' for DefineDecorations" _C_ key);
+			} else {
+				tmp.BoolFlag = UnitTypeVar.BoolFlagNameLookup[key];
+				if (tmp.BoolFlag != -1) {
+					tmp.BoolFlagInvert = LuaToBoolean(l, -1);
+				} else {
+					// Error
+					LuaError(l, "invalid key '%s' for DefineDecorations" _C_ key);
+				}
 			}
 			lua_pop(l, 1); // Pop the value
 		}
@@ -1924,6 +2194,8 @@ static int CclDefineDecorations(lua_State *l)
 		decovar->HideNeutral = tmp.HideNeutral;
 		decovar->HideAllied = tmp.HideAllied;
 		decovar->ShowOpponent = tmp.ShowOpponent;
+		decovar->BoolFlag = tmp.BoolFlag;
+		decovar->BoolFlagInvert = tmp.BoolFlagInvert;
 		UnitTypeVar.DecoVar.push_back(decovar);
 	}
 	Assert(lua_gettop(l));
@@ -1948,6 +2220,83 @@ static int CclDefineExtraDeathTypes(lua_State *l)
 	}
 	return 0;
 }
+
+static int CclDefinePaletteSwap(lua_State *l)
+{
+	LuaCheckArgs(l, 2);
+	const char *iconName = LuaToString(l, 1);
+	CIcon *icon = CIcon::Get(iconName);
+	if (!icon) {
+		LuaError(l, "icon %s not found" _C_ iconName);
+	}
+
+	if (!lua_istable(l, 2)) {
+		LuaError(l, "incorrect argument");
+	}
+	const int subargs = lua_rawlen(l, 2);
+	std::vector<PaletteSwap> newSwaps;
+	for (int k = 0; k < subargs; k += 2) {
+		const char *value = LuaToString(l, 2, k + 1);
+		int index = UnitTypeVar.VariableNameLookup[value];
+		if (index == -1) {
+			LuaError(l, "unknown variable name %s" _C_ value);
+		}
+
+		lua_rawgeti(l, 2, k + 2); // swap table
+		if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 2) {
+			LuaError(l, "incorrect argument, need length 2 table with {startColorIndex, { ... color steps ... }");
+		}
+		int startColorIndex = LuaToNumber(l, -1, 1);
+
+		lua_rawgeti(l, -1, 2); // swap table, steps table
+		if (!lua_istable(l, -1)) {
+			LuaError(l, "incorrect argument, need table with color steps");
+		}
+
+		int steps = lua_rawlen(l, -1);
+		std::vector<CColor> colors;
+		int colorCount = 0;
+		int alternativesCount = 0;
+		for (int step = 0; step < steps; step++) {
+			lua_rawgeti(l, -1, step + 1); // swap table, steps table, alternatives table
+			if (alternativesCount) {
+				if (lua_rawlen(l, -1) != alternativesCount) {
+					LuaError(l, "incorrect argument, need table with %d alternatives, got %zu" _C_ alternativesCount _C_ lua_rawlen(l, -1));
+				}
+			} else {
+				alternativesCount = lua_rawlen(l, -1);
+			}
+			for (int alt = 0; alt < alternativesCount; alt++) {
+				lua_rawgeti(l, -1, alt + 1); // swap table, steps table, alternatives table, color table
+				if (!lua_istable(l, -1)) {
+					LuaError(l, "incorrect argument, need table with colors");
+				}
+				if (colorCount) {
+					if (lua_rawlen(l, -1) != colorCount) {
+						LuaError(l, "incorrect argument, need table with %d colors, got %zu" _C_ colorCount _C_ lua_rawlen(l, -1));
+					}
+				} else {
+					colorCount = lua_rawlen(l, -1);
+				}
+				for (int color = 0; color < colorCount; color++) {
+					lua_rawgeti(l, -1, color + 1);
+					CColor c;
+					c.Parse(l);
+					colors.push_back(c);
+					lua_pop(l, 1);
+				}
+				lua_pop(l, 1); // swap table, steps table, alternatives table
+			}
+			lua_pop(l, 1);  // swap table, steps table
+		}
+		lua_pop(l, 1); // swap table
+		lua_pop(l, 1); // <emtpy>
+		newSwaps.emplace_back(index, startColorIndex, colorCount, steps, alternativesCount, colors);
+	}
+	icon->SetPaletteSwaps(newSwaps);
+	return 0;
+}
+
 // ----------------------------------------------------------------------------
 
 /**
@@ -2009,6 +2358,10 @@ void UpdateUnitVariables(CUnit &unit)
 	unit.Variable[POSX_INDEX].Max = Map.Info.MapWidth;
 	unit.Variable[POSY_INDEX].Value = unit.tilePos.y;
 	unit.Variable[POSY_INDEX].Max = Map.Info.MapHeight;
+	unit.Variable[POS_RIGHT_INDEX].Value = unit.tilePos.x + unit.Type->TileWidth;
+	unit.Variable[POS_RIGHT_INDEX].Max = Map.Info.MapWidth;
+	unit.Variable[POS_BOTTOM_INDEX].Value = unit.tilePos.y + unit.Type->TileHeight;
+	unit.Variable[POS_BOTTOM_INDEX].Max = Map.Info.MapHeight;
 
 	// Target Position
 	const Vec2i goalPos = unit.CurrentOrder()->GetGoalPos();
@@ -2027,7 +2380,7 @@ void UpdateUnitVariables(CUnit &unit)
 
 	// SlotNumber
 	unit.Variable[SLOT_INDEX].Value = UnitNumber(unit);
-	unit.Variable[SLOT_INDEX].Max = UnitManager.GetUsedSlotCount();
+	unit.Variable[SLOT_INDEX].Max = UnitManager->GetUsedSlotCount();
 
 	// Is Alive
 	unit.Variable[ISALIVE_INDEX].Value = unit.IsAlive() ? 1 : 0;
@@ -2169,10 +2522,12 @@ void SetMapSound(std::string ident, std::string sound, std::string sound_type, s
 void UnitTypeCclRegister()
 {
 	lua_register(Lua, "DefineUnitType", CclDefineUnitType);
+	lua_register(Lua, "CopyUnitType", CclCopyUnitType);
 	lua_register(Lua, "DefineUnitStats", CclDefineUnitStats);
 	lua_register(Lua, "DefineBoolFlags", CclDefineBoolFlags);
 	lua_register(Lua, "DefineVariables", CclDefineVariables);
 	lua_register(Lua, "DefineDecorations", CclDefineDecorations);
+	lua_register(Lua, "DefinePaletteSwap", CclDefinePaletteSwap);
 
 	lua_register(Lua, "DefineExtraDeathTypes", CclDefineExtraDeathTypes);
 

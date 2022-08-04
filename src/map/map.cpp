@@ -53,9 +53,9 @@
 ----------------------------------------------------------------------------*/
 
 CMap Map;                   /// The current map
-int FlagRevealMap;          /// Flag must reveal the map
+MapRevealModes FlagRevealMap;          /// Flag must reveal the map
 int ReplayRevealMap;        /// Reveal Map is replay
-int ForestRegeneration;     /// Forest regeneration
+unsigned int ForestRegeneration;     /// Forest regeneration
 int ForestRegenerationFrequency;     /// Forest regeneration frequency (every how many seconds we apply 1 point of regeneration)
 char CurrentMapPath[1024];  /// Path of the current map
 
@@ -130,15 +130,16 @@ void CMap::MarkSeenTile(CMapField &mf)
 /**
 **  Reveal the entire map.
 */
-void CMap::Reveal(const int mode /* = MapRevealModes::cKnown */ )
+void CMap::Reveal(MapRevealModes mode /* = MapRevealModes::cKnown */ )
 {
 	/// We can't do "unrevealing" yet
-	if (mode < GameSettings.RevealMap || mode >= MapRevealModes::cNumOfModes) {
+	if (static_cast<int>(mode) < static_cast<int>(GameSettings.RevealMap)
+		|| static_cast<int>(mode) >= static_cast<int>(MapRevealModes::cNumOfModes)) {
 		return;
 	}
 
 	//  Mark every explored tile as visible. 1 turns into 2.
-	if (mode >= MapRevealModes::cExplored) {
+	if (static_cast<int>(mode) >= static_cast<int>(MapRevealModes::cExplored)) {
 		for (int i = 0; i != this->Info.MapWidth * this->Info.MapHeight; ++i) {
 			CMapField &mf = *this->Field(i);
 			CMapFieldPlayerInfo &playerInfo = mf.playerInfo;
@@ -150,11 +151,11 @@ void CMap::Reveal(const int mode /* = MapRevealModes::cKnown */ )
 	}
 
 	//  Global seen recount. Simple and effective.
-	for (CUnit *unit : UnitManager.GetUnits()) {
+	for (CUnit *unit : UnitManager->GetUnits()) {
 		//  Reveal neutral buildings. Gold mines:)
-		if (unit->Player->Type == PlayerNeutral) {
+		if (unit->Player->Type == PlayerTypes::PlayerNeutral) {
 			for (const CPlayer &player : Players) {
-				if (player.Type != PlayerNobody && (!(unit->Seen.ByPlayer & (1 << player.Index )))) {
+				if (player.Type != PlayerTypes::PlayerNobody && (!(unit->Seen.ByPlayer & (1 << player.Index )))) {
 					UnitGoesOutOfFog(*unit, player);
 					UnitGoesUnderFog(*unit, player);
 				}
@@ -255,8 +256,10 @@ bool UnitTypeCanBeAt(const CUnitType &type, const Vec2i &pos)
 
 	for (int addy = 0; addy < type.TileHeight; ++addy) {
 		for (int addx = 0; addx < type.TileWidth; ++addx) {
-			if (Map.Info.IsPointOnMap(pos.x + addx, pos.y + addy) == false
-				|| Map.Field(pos.x + addx + index)->CheckMask(mask) == true) {
+			if (!Map.Info.IsPointOnMap(pos.x + addx, pos.y + addy)) {
+				return false;
+			}
+			if (!type.BoolFlag[NONSOLID_INDEX].value && Map.Field(pos.x + addx + index)->CheckMask(mask)) {
 				return false;
 			}
 		}
@@ -276,9 +279,6 @@ bool UnitTypeCanBeAt(const CUnitType &type, const Vec2i &pos)
 bool UnitCanBeAt(const CUnit &unit, const Vec2i &pos)
 {
 	Assert(unit.Type);
-	if (unit.Type->BoolFlag[NONSOLID_INDEX].value) {
-		return true;
-	}
 	return UnitTypeCanBeAt(*unit.Type, pos);
 }
 
@@ -318,14 +318,19 @@ void CMapInfo::Clear()
 	this->MapUID = 0;
 }
 
-CMap::CMap() : Fields(NULL), NoFogOfWar(false), TileGraphic(NULL)
+CMap::CMap() : Fields(NULL), NoFogOfWar(false), TileGraphic(NULL), Tileset(NULL)
 {
-	Tileset = new CTileset;
 }
 
 CMap::~CMap()
 {
 	delete Tileset;
+}
+
+void CMap::AllocateTileset()
+{
+	Assert(!Tileset);
+	Tileset = new CTileset();
 }
 
 /**
@@ -344,7 +349,7 @@ void CMap::Create()
 */
 void CMap::Init()
 {
-	FogOfWar.Init();
+	FogOfWar->Init();
 	this->isMapInitialized = true;
 }
 
@@ -372,7 +377,7 @@ void CMap::Clean(const bool isHardClean /* = false*/)
 
 	FieldOfView.Clean();
 	
-	FogOfWar.Clean(isHardClean);
+	FogOfWar->Clean(isHardClean);
 	for (CViewport *vp = UI.Viewports; vp < UI.Viewports + UI.NumViewports; ++vp) {
 		vp->Clean();
 	}
@@ -451,7 +456,7 @@ void CMap::FixTile(unsigned short type, int seen, const Vec2i &pos)
 	int flags;
 	if (type == MapFieldForest) {
 		removedtile = this->Tileset->getRemovedTreeTile();
-		flags = (MapFieldForest | MapFieldUnpassable);
+		flags = (MapFieldCost4 | MapFieldCost5 | MapFieldCost6 | MapFieldForest | MapFieldUnpassable);
 	} else { // (type == MapFieldRocks)
 		removedtile = this->Tileset->getRemovedRockTile();
 		flags = (MapFieldRocks | MapFieldUnpassable);
@@ -571,7 +576,7 @@ void CMap::ClearWoodTile(const Vec2i &pos)
 	CMapField &mf = *this->Field(pos);
 
 	mf.setGraphicTile(this->Tileset->getRemovedTreeTile());
-	mf.Flags &= ~(MapFieldForest | MapFieldUnpassable);
+	mf.Flags &= ~(MapFieldCost4 | MapFieldCost5 | MapFieldCost6 | MapFieldForest | MapFieldUnpassable);
 	mf.Value = 0;
 
 	UI.Minimap.UpdateXY(pos);
@@ -641,7 +646,7 @@ void CMap::RegenerateForestTile(const Vec2i &pos)
 		topMf.setTileIndex(*Map.Tileset, Map.Tileset->getDefaultWoodTileIndex(), 0);
 		topMf.setGraphicTile(Map.Tileset->getTopOneTreeTile());
 		topMf.playerInfo.SeenTile = topMf.getGraphicTile();
-		topMf.Value = 0;
+		topMf.Value = 100; // TODO: Should be DefaultResourceAmounts[WoodCost] once all games are migrated
 		topMf.Flags |= MapFieldForest | MapFieldUnpassable;
 		UI.Minimap.UpdateSeenXY(pos + offset);
 		UI.Minimap.UpdateXY(pos + offset);
@@ -650,7 +655,7 @@ void CMap::RegenerateForestTile(const Vec2i &pos)
 		mf.setTileIndex(*Map.Tileset, Map.Tileset->getDefaultWoodTileIndex(), 0);
 		mf.setGraphicTile(Map.Tileset->getBottomOneTreeTile());
 		mf.playerInfo.SeenTile = mf.getGraphicTile();
-		mf.Value = 0;
+		mf.Value = 100; // TODO: Should be DefaultResourceAmounts[WoodCost] once all games are migrated
 		mf.Flags |= MapFieldForest | MapFieldUnpassable;
 		UI.Minimap.UpdateSeenXY(pos);
 		UI.Minimap.UpdateXY(pos);
@@ -689,8 +694,9 @@ void CMap::RegenerateForest()
 **  Load the map presentation
 **
 **  @param mapname  map filename
+**  @return true on successful load, else false
 */
-void LoadStratagusMapInfo(const std::string &mapname)
+bool LoadStratagusMapInfo(const std::string &mapname)
 {
 	// Set the default map setup by replacing .smp with .sms
 	size_t loc = mapname.find(".smp");
@@ -699,7 +705,7 @@ void LoadStratagusMapInfo(const std::string &mapname)
 		Map.Info.Filename.replace(loc, 4, ".sms");
 	}
 
-	LuaLoadFile(mapname);
+	return LuaLoadFile(mapname) == 0;
 }
 
 //@}

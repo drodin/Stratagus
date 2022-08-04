@@ -148,7 +148,7 @@ void CMinimap::Create()
 
     SDL_SetSurfaceBlendMode(MinimapFogSurface, SDL_BLENDMODE_BLEND);
 	
-	const uint32_t fogColorSolid = FogOfWar.GetFogColorSDL() | (uint32_t(0xFF) << ASHIFT);
+	const uint32_t fogColorSolid = FogOfWar->GetFogColorSDL() | (uint32_t(0xFF) << ASHIFT);
 	SDL_FillRect(MinimapFogSurface, NULL, fogColorSolid);
 	
 	UpdateTerrain();
@@ -339,7 +339,7 @@ static void DrawUnitOn(CUnit &unit, int red_phase)
 			color = ColorGreen;
 		}
 	} else {
-		color = PlayerColors[GameSettings.Presets[unit.Player->Index].PlayerColor][0];
+		color = PlayerColorsRGB[GameSettings.Presets[unit.Player->Index].PlayerColor][0];
 	}
 
 	int mx = 1 + UI.Minimap.XOffset + Map2MinimapX[unit.tilePos.x];
@@ -392,7 +392,7 @@ void CMinimap::Update()
 	if (WithTerrain) {
 		SDL_BlitSurface(MinimapTerrainSurface, NULL, MinimapSurface, NULL);
 	}
-	const uint32_t fogColorSDL = FogOfWar.GetFogColorSDL();
+	const uint32_t fogColorSDL = FogOfWar->GetFogColorSDL();
 	if (!ReplayRevealMap) {
 		uint32_t *const minimapFog = static_cast<uint32_t *>(MinimapFogSurface->pixels);
 		size_t index = 0;
@@ -400,9 +400,9 @@ void CMinimap::Update()
 			for (uint16_t mx = 0; mx < W; ++mx) {
 
 				const Vec2i tilePos(Minimap2MapX[mx], Minimap2MapY[my] / Map.Info.MapWidth);
-				const uint8_t vis = FogOfWar.GetVisibilityForTile(tilePos); 
+				const uint8_t vis = FogOfWar->GetVisibilityForTile(tilePos); 
 
-				const uint32_t fogAlpha = vis == 0 ? (GameSettings.RevealMap ? Settings.FogRevealedOpacity : Settings.FogUnseenOpacity)
+				const uint32_t fogAlpha = vis == 0 ? (GameSettings.RevealMap != MapRevealModes::cHidden ? Settings.FogRevealedOpacity : Settings.FogUnseenOpacity)
 											   	   : vis == 1 ? Settings.FogExploredOpacity 
 										   		   			  : Settings.FogVisibleOpacity;
 
@@ -417,7 +417,7 @@ void CMinimap::Update()
 	//
 	// Draw units on map
 	//
-	for (CUnitManager::Iterator it = UnitManager.begin(); it != UnitManager.end(); ++it) {
+	for (CUnitManager::Iterator it = UnitManager->begin(); it != UnitManager->end(); ++it) {
 		CUnit &unit = **it;
 		if (unit.IsVisibleOnMinimap() && !unit.Removed && !unit.Type->BoolFlag[REVEALER_INDEX].value) {
 			DrawUnitOn(unit, red_phase);
@@ -490,17 +490,19 @@ PixelPos CMinimap::TilePosToScreenPos(const Vec2i &tilePos) const
 */
 void CMinimap::Destroy()
 {
-	VideoPaletteListRemove(MinimapTerrainSurface);
-	SDL_FreeSurface(MinimapTerrainSurface);
-	MinimapTerrainSurface = NULL;
+	if (MinimapTerrainSurface) {
+		VideoPaletteListRemove(MinimapTerrainSurface);
+		SDL_FreeSurface(MinimapTerrainSurface);
+		MinimapTerrainSurface = NULL;
+	}
 	if (MinimapSurface) {
 		VideoPaletteListRemove(MinimapSurface);
 		SDL_FreeSurface(MinimapSurface);
 		MinimapSurface = NULL;
 	}
-	if (MinimapFogSurface) {
+	if (MinimapFogSurface && MinimapFogSurface->format != NULL) {
 		SDL_FreeSurface(MinimapFogSurface);
-		MinimapSurface = NULL;
+		MinimapFogSurface = NULL;
 	}
 	delete[] Minimap2MapX;
 	Minimap2MapX = NULL;

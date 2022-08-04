@@ -300,7 +300,7 @@ private:
 	void DoClicked_Train(int button);
 	void DoClicked_UpgradeTo(int button);
 	void DoClicked_Research(int button);
-	void DoClicked_CallbackAction(int button);
+	void DoClicked_CallbackAction(int button, int clickingPlayer);
 
 
 public:
@@ -408,7 +408,7 @@ public:
 
 	CInfoPanel InfoPanel;               /// Info panel
 	std::vector<CUnitInfoPanel *> InfoPanelContents;/// Info panel contents
-
+	std::string DefaultUnitPortrait;    /// Name of the unit portrait to show when there is no selection
 	std::vector<CPopup *> ButtonPopups; /// Popup windows for buttons
 
 	CUIButton *SingleSelectedButton;    /// Button for single selected unit

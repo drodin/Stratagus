@@ -536,7 +536,7 @@ CUnitType::CUnitType() :
 	CanAttack(0),
 	Neutral(0),
 	GivesResource(0), PoisonDrain(0), FieldFlags(0), MovementMask(0),
-	Sprite(NULL), ShadowSprite(NULL), ShadowSpriteFrame(0), ShadowScale(1)
+	Sprite(NULL), AltSprite(NULL), ShadowSprite(NULL), ShadowSpriteFrame(0), ShadowScale(1)
 {
 #ifdef USE_MNG
 	memset(&Portrait, 0, sizeof(Portrait));
@@ -588,12 +588,14 @@ CUnitType::~CUnitType()
 	}
 
 	CGraphic::Free(Sprite);
+	CGraphic::Free(AltSprite);
 	CGraphic::Free(ShadowSprite);
 #ifdef USE_MNG
 	if (this->Portrait.Num) {
-		for (int j = 0; j < this->Portrait.Num; ++j) {
-			delete this->Portrait.Mngs[j];
-			// delete[] this->Portrait.Files[j];
+		if (this->Portrait.Mngs[0]) {
+			for (int j = 0; j < this->Portrait.Num; ++j) {
+				Mng::Free(this->Portrait.Mngs[j]);
+			}
 		}
 		delete[] this->Portrait.Mngs;
 		delete[] this->Portrait.Files;
@@ -652,7 +654,7 @@ void UpdateUnitStats(CUnitType &type, int reset)
 		if (type.Building) {
 			if (type.BoolFlag[DECORATION_INDEX].value && type.MapDefaultStat.Variables[HP_INDEX].Max == 0) {
 				// special case, a decoration with no HP can always be built over
-				type.MovementMask = 0;
+				type.MovementMask = MapFieldNoBuilding;
 				type.FieldFlags = 0;
 			} else {
 				type.MovementMask = MapFieldLandUnit |
@@ -824,7 +826,7 @@ void SaveUnitTypes(CFile &file)
 		bool somethingSaved = false;
 
 		for (int j = 0; j < PlayerMax; ++j) {
-			if (Players[j].Type != PlayerNobody) {
+			if (Players[j].Type != PlayerTypes::PlayerNobody) {
 				somethingSaved |= SaveUnitStats(type.Stats[j], type, j, file);
 			}
 		}
@@ -891,7 +893,7 @@ CUnitType *NewUnitTypeSlot(const std::string &ident)
 **  @todo  Do screen position caculation in high level.
 **         Better way to handle in x mirrored sprites.
 */
-void DrawUnitType(const CUnitType &type, CPlayerColorGraphic *sprite, int player, int frame, const PixelPos &screenPos)
+void DrawUnitType(const CUnitType &type, CPlayerColorGraphic *sprite, int colorIndex, int frame, const PixelPos &screenPos)
 {
 	PixelPos pos = screenPos;
 	// FIXME: move this calculation to high level.
@@ -902,9 +904,9 @@ void DrawUnitType(const CUnitType &type, CPlayerColorGraphic *sprite, int player
 
 	if (type.Flip) {
 		if (frame < 0) {
-			sprite->DrawPlayerColorFrameClipX(player, -frame - 1, pos.x, pos.y);
+			sprite->DrawPlayerColorFrameClipX(colorIndex, -frame - 1, pos.x, pos.y);
 		} else {
-			sprite->DrawPlayerColorFrameClip(player, frame, pos.x, pos.y);
+			sprite->DrawPlayerColorFrameClip(colorIndex, frame, pos.x, pos.y);
 		}
 	} else {
 		const int row = type.NumDirections / 2 + 1;
@@ -914,7 +916,7 @@ void DrawUnitType(const CUnitType &type, CPlayerColorGraphic *sprite, int player
 		} else {
 			frame = (frame / row) * type.NumDirections + frame % row;
 		}
-		sprite->DrawPlayerColorFrameClip(player, frame, pos.x, pos.y);
+		sprite->DrawPlayerColorFrameClip(colorIndex, frame, pos.x, pos.y);
 	}
 }
 
@@ -993,7 +995,7 @@ void LoadUnitTypeSprite(CUnitType &type)
 			if (type.Flip) {
 				type.ShadowSprite->Flip();
 			}
-			type.ShadowSprite->MakeShadow();
+			type.ShadowSprite->MakeShadow(type.ShadowOffsetX, type.ShadowOffsetY);
 		}
 	}
 
@@ -1030,11 +1032,19 @@ void LoadUnitTypeSprite(CUnitType &type)
 		}
 	}
 
+	if (!type.AltFile.empty()) {
+		type.AltSprite = CPlayerColorGraphic::New(type.AltFile, type.Width, type.Height);
+		type.AltSprite->Load();
+		if (type.Flip) {
+			type.AltSprite->Flip();
+		}
+	}
+
 #ifdef USE_MNG
 	if (type.Portrait.Num) {
 		for (int i = 0; i < type.Portrait.Num; ++i) {
-			type.Portrait.Mngs[i] = new Mng;
-			type.Portrait.Mngs[i]->Load(type.Portrait.Files[i]);
+			type.Portrait.Mngs[i] = Mng::New(type.Portrait.Files[i]);
+			type.Portrait.Mngs[i]->Load();
 		}
 		// FIXME: should be configurable
 		type.Portrait.CurrMng = 0;

@@ -127,7 +127,7 @@ public:
 	static CFontColor *Get(const std::string &ident);
 
 	std::string Ident;
-	CColor Colors[MaxFontColors];
+	SDL_Color *Colors;
 };
 
 /*----------------------------------------------------------------------------
@@ -155,6 +155,7 @@ extern CFont &GetSmallFont();  /// Small font used in stats
 extern CFont &GetGameFont();   /// Normal font used in game
 extern bool IsGameFontReady(); /// true when GameFont is provided
 
+extern int FontCodePage;
 
 /// Set the default text colors for normal and reverse text
 extern void SetDefaultTextColors(const std::string &normal, const std::string &reverse);

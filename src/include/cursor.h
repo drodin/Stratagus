@@ -106,7 +106,7 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-
+#include <SDL.h>
 #include <vec2i.h>
 
 /*----------------------------------------------------------------------------
@@ -127,17 +127,26 @@ public:
 	CCursor() : HotPos(0, 0),
 		SpriteFrame(0), FrameRate(0), G(NULL) {}
 
+	~CCursor();
+
 	std::string Ident;  /// Identifier to reference it
 	std::string Race;   /// Race name
 
 	PixelPos HotPos;     /// Hot point
 
-	int SpriteFrame;  /// Current displayed cursor frame
+	unsigned int SpriteFrame;  /// Current displayed cursor frame
 	int FrameRate;    /// Rate of changing the frames
 
 	// --- FILLED UP ---
 
 	CGraphic *G; /// Cursor sprite image
+
+	SDL_Cursor *GetSDLCursor();
+	void Reset(); // Clear all cursor surfaces
+
+private:
+	std::vector<SDL_Cursor*> SdlCursors;
+	std::vector<SDL_Surface*> SdlCursorSurfaces;
 };
 
 /// Cursor config reference

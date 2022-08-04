@@ -150,23 +150,31 @@ bool CBuildRestrictionDistance::Check(const CUnit *builder, const CUnitType &typ
 				case GreaterThan :
 				case GreaterThanEqual :
 					if (MapDistanceBetweenTypes(type, pos, *table[i]->Type, table[i]->tilePos) <= distance) {
-						return Diagonal ? false : !(pos.x != table[i]->tilePos.x || pos.y != table[i]->tilePos.y);
+						if (Diagonal || pos.x == table[i]->tilePos.x || pos.y == table[i]->tilePos.y) {
+							return false;
+						}
 					}
 					break;
 				case LessThan :
 				case LessThanEqual :
 					if (MapDistanceBetweenTypes(type, pos, *table[i]->Type, table[i]->tilePos) <= distance) {
-						return Diagonal || pos.x == table[i]->tilePos.x || pos.y == table[i]->tilePos.y;
+						if (Diagonal || pos.x == table[i]->tilePos.x || pos.y == table[i]->tilePos.y) {
+							return true;
+						};
 					}
 					break;
 				case Equal :
 					if (MapDistanceBetweenTypes(type, pos, *table[i]->Type, table[i]->tilePos) == distance) {
-						return Diagonal || pos.x == table[i]->tilePos.x || pos.y == table[i]->tilePos.y;
+						if (Diagonal || pos.x == table[i]->tilePos.x || pos.y == table[i]->tilePos.y) {
+							return true;
+						};
 					}
 					break;
 				case NotEqual :
 					if (MapDistanceBetweenTypes(type, pos, *table[i]->Type, table[i]->tilePos) == distance) {
-						return Diagonal ? false : !(pos.x != table[i]->tilePos.x || pos.y != table[i]->tilePos.y);
+						if (Diagonal || pos.x == table[i]->tilePos.x || pos.y == table[i]->tilePos.y) {
+							return false;
+						};
 					}
 					break;
 			}
@@ -445,22 +453,24 @@ CUnit *CanBuildHere(const CUnit *unit, const CUnitType &type, const Vec2i &pos)
 		}
 	}
 
-	size_t count = type.BuildingRules.size();
-	if (count > 0) {
-		for (unsigned int i = 0; i < count; ++i) {
-			CBuildRestriction *rule = type.BuildingRules[i];
-			CUnit *ontoptarget = NULL;
-			// All checks processed, did we really have success
-			if (rule->Check(unit, type, pos, ontoptarget)) {
-				// We passed a full ruleset return
-				if (unit == NULL) {
-					return ontoptarget ? ontoptarget : (CUnit *)1;
-				} else {
-					return ontoptarget ? ontoptarget : const_cast<CUnit *>(unit);
+	if (GameCycle != 0) {
+		size_t count = type.BuildingRules.size();
+		if (count > 0) {
+			for (unsigned int i = 0; i < count; ++i) {
+				CBuildRestriction *rule = type.BuildingRules[i];
+				CUnit *ontoptarget = NULL;
+				// All checks processed, did we really have success
+				if (rule->Check(unit, type, pos, ontoptarget)) {
+					// We passed a full ruleset return
+					if (unit == NULL) {
+						return ontoptarget ? ontoptarget : (CUnit *)1;
+					} else {
+						return ontoptarget ? ontoptarget : const_cast<CUnit *>(unit);
+					}
 				}
 			}
+			return NULL;
 		}
-		return NULL;
 	}
 
 	return (unit == NULL) ? (CUnit *)1 : const_cast<CUnit *>(unit);
@@ -508,7 +518,7 @@ CUnit *CanBuildUnitType(const CUnit *unit, const CUnitType &type, const Vec2i &p
 
 	CPlayer *player = NULL;
 
-	if (unit && unit->Player->Type == PlayerPerson) {
+	if (unit && unit->Player->Type == PlayerTypes::PlayerPerson) {
 		player = unit->Player;
 	}
 	int testmask;

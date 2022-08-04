@@ -59,9 +59,15 @@ CMapField::CMapField() :
 
 bool CMapField::IsTerrainResourceOnMap(int resource) const
 {
-	// TODO: Hard coded stuff.
-	if (resource == WoodCost) {
-		return this->ForestOnMap();
+	switch (resource) {
+		case WoodCost:
+			return ForestOnMap();
+		case Cost4:
+			return Cost4OnMap();
+		case Cost5:
+			return Cost5OnMap();
+		case Cost6:
+			return Cost6OnMap();
 	}
 	return false;
 }
@@ -88,6 +94,17 @@ void CMapField::setTileIndex(const CTileset &tileset, unsigned int tileIndex, in
 					 MapFieldWaterAllowed | MapFieldNoBuilding | MapFieldUnpassable |
 					 MapFieldWall | MapFieldRocks | MapFieldForest);
 	this->Flags |= tile.flag;
+	if (!value && (tile.flag & MapFieldForest)) {
+		if ((tile.flag & MapFieldCost4) == MapFieldCost4) {
+			this->Value = DefaultResourceAmounts[Cost4];
+		} else if ((tile.flag & MapFieldCost5) == MapFieldCost5) {
+			this->Value = DefaultResourceAmounts[Cost4];
+		} else if ((tile.flag & MapFieldCost6) == MapFieldCost6) {
+			this->Value = DefaultResourceAmounts[Cost4];
+		} else if (tile.flag & MapFieldForest) {
+			this->Value = 100; // TODO: should be DefaultResourceAmounts[WoodCost] once all games are migrated
+		}
+	}
 #endif
 	this->cost = 1 << (tile.flag & MapFieldSpeedMask);
 #ifdef DEBUG
@@ -132,6 +149,15 @@ void CMapField::Save(CFile &file) const
 	}
 	if (Flags & MapFieldForest) {
 		file.printf(", \"wood\"");
+	}
+	if (Cost4OnMap()) {
+		file.printf(", \"cost4\"");
+	}
+	if (Cost5OnMap()) {
+		file.printf(", \"cost5\"");
+	}
+	if (Cost6OnMap()) {
+		file.printf(", \"cost6\"");
 	}
 #if 1
 	// Not Required for save
@@ -195,6 +221,12 @@ void CMapField::parse(lua_State *l)
 			this->Flags |= MapFieldRocks;
 		} else if (!strcmp(value, "wood")) {
 			this->Flags |= MapFieldForest;
+		} else if (!strcmp(value, "cost4")) {
+			this->Flags |= MapFieldCost4;
+		} else if (!strcmp(value, "cost5")) {
+			this->Flags |= MapFieldCost5;
+		} else if (!strcmp(value, "cost6")) {
+			this->Flags |= MapFieldCost6;
 		} else if (!strcmp(value, "ground")) {
 			this->Flags |= MapFieldLandUnit;
 		} else if (!strcmp(value, "air")) {
@@ -238,10 +270,31 @@ bool CMapField::CoastOnMap() const
 	return CheckMask(MapFieldCoastAllowed);
 }
 
-/// Returns true, if water on the map tile field
+/// Returns true, if forest on the map tile field
 bool CMapField::ForestOnMap() const
 {
 	return CheckMask(MapFieldForest);
+}
+
+/// Returns true, if any terrain resource giving Cost4 on the map tile field
+/// Cannot use CheckMask, since two bits need to be tested.
+bool CMapField::Cost4OnMap() const
+{
+	return (this->Flags & MapFieldCost4) == MapFieldCost4;
+}
+
+/// Returns true, if any terrain resource giving Cost5 on the map tile field
+/// Cannot use CheckMask, since two bits need to be tested.
+bool CMapField::Cost5OnMap() const
+{
+	return (this->Flags & MapFieldCost5) == MapFieldCost5;
+}
+
+/// Returns true, if any terrain resource giving Cost6 on the map tile field
+/// Cannot use CheckMask, since two bits need to be tested.
+bool CMapField::Cost6OnMap() const
+{
+	return (this->Flags & MapFieldCost6) == MapFieldCost6;
 }
 
 /// Returns true, if coast on the map tile field

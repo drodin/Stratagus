@@ -227,8 +227,23 @@ void CTileset::clear()
 
 unsigned int CTileset::getDefaultTileIndex() const
 {
-	// TODO: remove hardcoded value.
-	return 0x50;
+	const int n = tiles.size();
+    int solid = 0;
+    for (int i = 0; i < n;) {
+		const CTile &tile = tiles[i];
+		const CTileInfo &tileinfo = tile.tileinfo;
+		if (tileinfo.BaseTerrain && tileinfo.MixTerrain) {
+			i += 256;
+		} else {
+			if (tileinfo.BaseTerrain != 0 && tileinfo.MixTerrain == 0) {
+				if (tile.flag & MapFieldLandAllowed) {
+					return i;
+				}
+			}
+			i += 16;
+		}
+    }
+    return 0x50;
 }
 
 unsigned int CTileset::getDefaultWoodTileIndex() const
@@ -596,8 +611,9 @@ unsigned int CTileset::getTileNumber(int basic, bool random, bool filler) const
 			while (++i < 16 && !tiles[tile + i].tile) {
 			}
 		} while (i < 16 && n--);
-		Assert(i != 16);
-		return tile + i;
+		if (i != 16) {
+			return tile + i;
+		}
 	}
 	if (filler) {
 		int i = 0;

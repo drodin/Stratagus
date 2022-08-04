@@ -114,7 +114,7 @@ void ShowLoadProgress(const char *fmt, ...)
 */
 bool IsDemoMode()
 {
-	return GameRunning && ThisPlayer->Type == PlayerNobody;
+	return GameRunning && ThisPlayer->Type == PlayerTypes::PlayerNobody;
 }
 
 CUnitInfoPanel::~CUnitInfoPanel()
@@ -204,6 +204,11 @@ void InitUserInterface()
 {
 	UI.Offset640X = (Video.Width - 640) / 2;
 	UI.Offset480Y = (Video.Height - 480) / 2;
+
+	UI.LifeBarColorsInt.clear();
+	for(std::vector<std::string>::iterator it = UI.LifeBarColorNames.begin(); it != UI.LifeBarColorNames.end(); ++it) {
+		UI.LifeBarColorsInt.push_back(IndexToColor(GetColorIndexByName((*it).c_str())));
+	}
 
 	//
 	// Calculations

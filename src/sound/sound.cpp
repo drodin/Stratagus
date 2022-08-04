@@ -304,6 +304,14 @@ void PlayUnitSound(const CUnit &unit, UnitVoiceGroup voice, bool sampleUnique)
 	}
 	SetChannelVolume(channel, CalculateVolume(false, ViewPointDistanceToUnit(unit), sound->Range));
 	SetChannelStereo(channel, CalculateStereo(unit));
+#ifdef USE_MNG
+	const CUnitType &type = *unit.Type;
+	if (type.Portrait.Num && type.Portrait.Talking && type.Portrait.Mngs[0]) {
+		type.Portrait.Mngs[type.Portrait.CurrMng]->Reset();
+		type.Portrait.CurrMng = (MyRand() % (type.Portrait.Num - type.Portrait.Talking)) + type.Portrait.Talking;
+		type.Portrait.NumIterations = 1;
+	}
+#endif
 }
 
 /**
@@ -390,6 +398,7 @@ void PlayGameSound(CSound *sound, unsigned char volume, bool always)
 }
 
 static std::map<int, LuaActionListener *> ChannelMap;
+static std::map<int, Mix_Chunk *> SampleMap;
 
 /**
 **  Callback for PlaySoundFile
@@ -397,15 +406,17 @@ static std::map<int, LuaActionListener *> ChannelMap;
 static void PlaySoundFileCallback(int channel)
 {
 	LuaActionListener *listener = ChannelMap[channel];
+	ChannelMap[channel] = NULL;
+	// free any previously loaded sample that was playing on this channel before
+	if (SampleMap[channel]) {
+		FreeSample(SampleMap[channel]);
+		SampleMap[channel] = NULL;
+	}
 	if (listener != NULL) {
 		listener->action("");
-		ChannelMap[channel] = NULL;
-	}
-	Mix_Chunk *sample = GetChannelSample(channel);
-	if (sample) {
-		Mix_FreeChunk(sample);
 	}
 }
+
 
 /**
 **  Play a sound file
@@ -421,11 +432,13 @@ int PlayFile(const std::string &name, LuaActionListener *listener)
 	Mix_Chunk *sample = LoadSample(name);
 
 	if (sample) {
-		channel = PlaySample(sample, NULL);
+		channel = PlaySample(sample, PlaySoundFileCallback);
 		if (channel != -1) {
+			SampleMap[channel] = sample;
 			SetChannelVolume(channel, MaxVolume);
-			SetChannelFinishedCallback(channel, PlaySoundFileCallback);
 			ChannelMap[channel] = listener;
+		} else {
+			FreeSample(sample);
 		}
 	}
 	return channel;
@@ -464,7 +477,7 @@ CSound *RegisterSound(const std::vector<std::string> &files)
 	if (number > 1) { // load a sound group
 		id->Sound.OneGroup = new Mix_Chunk *[number];
 		memset(id->Sound.OneGroup, 0, sizeof(Mix_Chunk *) * number);
-		id->Number = number;
+		id->Number = static_cast<unsigned char>(number);
 		for (unsigned int i = 0; i < number; ++i) {
 			id->Sound.OneGroup[i] = LoadSample(files[i]);
 			if (!id->Sound.OneGroup[i]) {
@@ -582,13 +595,13 @@ CSound::~CSound()
 {
 	if (this->Number == ONE_SOUND) {
 		if (Sound.OneSound) {
-			Mix_FreeChunk(Sound.OneSound);
+			FreeSample(Sound.OneSound);
 		}
 	} else if (this->Number == TWO_GROUPS) {
 	} else {
 		for (int i = 0; i < this->Number; ++i) {
 			if (this->Sound.OneGroup[i]) {
-				Mix_FreeChunk(this->Sound.OneGroup[i]);
+				FreeSample(this->Sound.OneGroup[i]);
 			}
 			this->Sound.OneGroup[i] = NULL;
 		}

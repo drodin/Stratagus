@@ -897,9 +897,7 @@ bool IsButtonAllowed(const CUnit &unit, const ButtonAction &buttonaction)
 			}
 			break;
 		case ButtonReturn:
-		    if (unit.CurrentResource
-		        && ((unit.ResourcesHeld > 0 && !unit.Type->ResInfo[unit.CurrentResource]->TerrainHarvester)
-		            || (unit.ResourcesHeld >= unit.Type->ResInfo[unit.CurrentResource]->ResourceCapacity))) {
+		    if (unit.CurrentResource && unit.ResourcesHeld > 0) {
 				res = true;
 			}
 			break;
@@ -1083,8 +1081,8 @@ void CButtonPanel::Update()
 	}
 
 	CUnit &unit = *Selected[0];
-	// foreign unit
-	if (unit.Player != ThisPlayer && !ThisPlayer->IsTeamed(unit)) {
+	// foreign unit, but not *the* neutral player
+	if (unit.Player != ThisPlayer && !ThisPlayer->IsTeamed(unit) && unit.Player->Index != PlayerMax - 1) {
 		CurrentButtons.clear();
 		return;
 	}
@@ -1388,11 +1386,12 @@ void CButtonPanel::DoClicked_Research(int button)
 	}
 }
 
-void CButtonPanel::DoClicked_CallbackAction(int button)
+void CButtonPanel::DoClicked_CallbackAction(int button, int clickingPlayer)
 {
 	LuaCallback* callback = (LuaCallback*)(CurrentButtons[button].Payload);
 	callback->pushPreamble();
 	callback->pushInteger(UnitNumber(*Selected[0]));
+	callback->pushInteger(clickingPlayer);
 	callback->run();
 }
 
@@ -1415,7 +1414,7 @@ void CButtonPanel::DoClicked(int button)
 	//  Button not available.
 	//  or Not Teamed
 	//
-	if (CurrentButtons[button].Pos == -1 || !ThisPlayer->IsTeamed(*Selected[0])) {
+	if (CurrentButtons[button].Pos == -1 || !(ThisPlayer->IsTeamed(*Selected[0]) || Selected[0]->Player->Index == PlayerMax - 1)) {
 		return;
 	}
 	PlayGameSound(GameSounds.Click.Sound, MaxSampleVolume);
@@ -1446,7 +1445,7 @@ void CButtonPanel::DoClicked(int button)
 		case ButtonTrain: { DoClicked_Train(button); break; }
 		case ButtonUpgradeTo: { DoClicked_UpgradeTo(button); break; }
 		case ButtonResearch: { DoClicked_Research(button); break; }
-		case ButtonCallbackAction: { DoClicked_CallbackAction(button); break; }
+		case ButtonCallbackAction: { DoClicked_CallbackAction(button, ThisPlayer->Index); break; }
 	}
 }
 

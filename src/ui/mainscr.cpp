@@ -219,7 +219,7 @@ static bool CanShowContent(const ConditionPanel *condition, const CUnit &unit)
 		return true;
 	}
 	if ((condition->ShowOnlySelected && !unit.Selected)
-		|| (unit.Player->Type == PlayerNeutral && condition->HideNeutral)
+		|| (unit.Player->Type == PlayerTypes::PlayerNeutral && condition->HideNeutral)
 		|| (ThisPlayer->IsEnemy(unit) && !condition->ShowOpponent)
 		|| ((ThisPlayer->IsAllied(unit) || unit.Player == ThisPlayer) && condition->HideAllied)) {
 		return false;
@@ -229,8 +229,31 @@ static bool CanShowContent(const ConditionPanel *condition, const CUnit &unit)
 	}
 	if (condition->Variables) {
 		for (unsigned int i = 0; i < UnitTypeVar.GetNumberVariable(); ++i) {
-			if (condition->Variables[i] != CONDITION_TRUE) {
-				if ((condition->Variables[i] == CONDITION_ONLY) ^ unit.Variable[i].Enable) {
+			char v = condition->Variables[i];
+			if (v < 0) {
+				// only show for less than -v%
+				if (unit.Variable[i].Enable) {
+					const int f = (100 * unit.Variable[i].Value) / unit.Variable[i].Max;
+					if (f >= -v) {
+						return false;
+					}
+				} else if (v != -1) {
+					// special case: the condition "<1" should apply
+					// to units that do not have the variable at all
+					return false;
+				}
+			} else if (v > CONDITION_ONLY) {
+				// only show for more than (v-CONDITION_ONLY)%
+				if (unit.Variable[i].Enable) {
+					const int f = (100 * unit.Variable[i].Value) / unit.Variable[i].Max;
+					if (f <= v - CONDITION_ONLY) {
+						return false;
+					}
+				} else {
+					return false;
+				}
+			} else if (v != CONDITION_TRUE) {
+				if ((v == CONDITION_ONLY) ^ unit.Variable[i].Enable) {
 					return false;
 				}
 			}
@@ -421,24 +444,39 @@ static void DrawUnitInfo_Training(const CUnit &unit)
 	}
 }
 
-static void DrawUnitInfo_portrait(const CUnit &unit)
-{
-	const CUnitType &type = *unit.Type;
 #ifdef USE_MNG
-	if (type.Portrait.Num) {
+static bool DrawTypePortrait(const CUnitType &type)
+{
+	if (UI.SingleSelectedButton && type.Portrait.Num) {
+#ifdef DYNAMIC_LOAD
+		if (!type.Sprite) {
+			LoadUnitTypeSprite(const_cast<CUnitType &>(type));
+		}
+#endif
 		type.Portrait.Mngs[type.Portrait.CurrMng]->Draw(
 			UI.SingleSelectedButton->X, UI.SingleSelectedButton->Y);
 		if (type.Portrait.Mngs[type.Portrait.CurrMng]->iteration == type.Portrait.NumIterations) {
 			type.Portrait.Mngs[type.Portrait.CurrMng]->Reset();
 			// FIXME: should be configurable
 			if (type.Portrait.CurrMng == 0) {
-				type.Portrait.CurrMng = (MyRand() % (type.Portrait.Num - 1)) + 1;
+				type.Portrait.CurrMng = (MyRand() % (type.Portrait.Num - type.Portrait.Talking - 1)) + 1;
 				type.Portrait.NumIterations = 1;
 			} else {
 				type.Portrait.CurrMng = 0;
 				type.Portrait.NumIterations = MyRand() % 16 + 1;
 			}
 		}
+		return true;
+	}
+	return false;
+}
+#endif
+
+static void DrawUnitInfo_portrait(const CUnit &unit)
+{
+	const CUnitType &type = *unit.Type;
+#ifdef USE_MNG
+	if (DrawTypePortrait(type)) {
 		return;
 	}
 #endif
@@ -447,9 +485,7 @@ static void DrawUnitInfo_portrait(const CUnit &unit)
 		const int flag = (ButtonAreaUnderCursor == ButtonAreaSelected && ButtonUnderCursor == 0) ?
 						 (IconActive | (MouseButtons & LeftButton)) : 0;
 
-		type.Icon.Icon->DrawUnitIcon(*UI.SingleSelectedButton->Style, flag, pos, "", unit.RescuedFrom
-			? GameSettings.Presets[unit.RescuedFrom->Index].PlayerColor
-			: GameSettings.Presets[unit.Player->Index].PlayerColor);
+		type.Icon.Icon->DrawSingleSelectionIcon(*UI.SingleSelectedButton->Style, flag, pos, "", unit);
 	}
 }
 
@@ -505,19 +541,22 @@ static void DrawUnitInfo_transporter(CUnit &unit)
 		CIcon &icon = *uins->Type->Icon.Icon;
 		int flag = (ButtonAreaUnderCursor == ButtonAreaTransporting && static_cast<size_t>(ButtonUnderCursor) == j) ?
 				   (IconActive | (MouseButtons & LeftButton)) : 0;
-		const PixelPos pos(UI.TransportingButtons[j].X, UI.TransportingButtons[j].Y);
-		icon.DrawUnitIcon(*UI.TransportingButtons[j].Style, flag, pos, "", uins->RescuedFrom
-			? GameSettings.Presets[uins->RescuedFrom->Index].PlayerColor
-			: GameSettings.Presets[uins->Player->Index].PlayerColor);
+		const PixelPos posIcon(UI.TransportingButtons[j].X, UI.TransportingButtons[j].Y);
+		icon.DrawContainedIcon(*UI.TransportingButtons[j].Style, flag, posIcon, "", *uins);
+		int lastOccupiedButton = j + uins->Type->BoardSize - 1;
+		const PixelPos pos = PixelPos(UI.TransportingButtons[lastOccupiedButton].X, UI.TransportingButtons[lastOccupiedButton].Y);
 		UiDrawLifeBar(*uins, pos.x, pos.y);
 		if (uins->Type->CanCastSpell && uins->Variable[MANA_INDEX].Max) {
 			UiDrawManaBar(*uins, pos.x, pos.y);
 		}
-		if (ButtonAreaUnderCursor == ButtonAreaTransporting
-			&& static_cast<size_t>(ButtonUnderCursor) == j) {
-			UI.StatusLine.Set(uins->Type->Name);
+		if (ButtonAreaUnderCursor == ButtonAreaTransporting) {
+			for (int sub_j = j; sub_j <= lastOccupiedButton; sub_j++) {
+				if (static_cast<size_t>(ButtonUnderCursor) == sub_j) {
+					UI.StatusLine.Set(uins->Type->Name);
+				}
+			}
 		}
-		++j;
+		j = lastOccupiedButton + 1;
 	}
 }
 
@@ -578,7 +617,7 @@ void DrawResources()
 	CLabel label(GetGameFont());
 
 	// Draw all icons of resource.
-	for (int i = 0; i <= FreeWorkersCount; ++i) {
+	for (int i = 0; i < FreeWorkersCount; ++i) {
 		if (UI.Resources[i].G) {
 			UI.Resources[i].G->DrawFrameClip(UI.Resources[i].IconFrame,
 											 UI.Resources[i].IconX, UI.Resources[i].IconY);
@@ -619,10 +658,22 @@ void DrawResources()
 		label.Draw(UI.Resources[ScoreCost].TextX, UI.Resources[ScoreCost].TextY + (score > 99999) * 3, score);
 	}
 	if (UI.Resources[FreeWorkersCount].TextX != -1) {
-		const int workers = ThisPlayer->FreeWorkers.size();
-
+		const int workers = ThisPlayer->GetFreeWorkersCount();
+		int textX = UI.Resources[FreeWorkersCount].TextX;
+		if (textX < 0) {
+			// XXX: this is hacky, but what use is that bit otherwise
+			if (workers == 0) {
+				return;
+			} else {
+				textX = -textX;
+			}
+		}
+		if (UI.Resources[FreeWorkersCount].G) {
+			UI.Resources[FreeWorkersCount].G->DrawFrameClip(UI.Resources[FreeWorkersCount].IconFrame,
+											 UI.Resources[FreeWorkersCount].IconX, UI.Resources[FreeWorkersCount].IconY);
+		}
 		label.SetFont(GetGameFont());
-		label.Draw(UI.Resources[FreeWorkersCount].TextX, UI.Resources[FreeWorkersCount].TextY, workers);
+		label.Draw(textX, UI.Resources[FreeWorkersCount].TextY, workers);
 	}
 }
 
@@ -636,6 +687,7 @@ static char MessagesEvent[MESSAGES_MAX][256];  /// Array of event messages
 static Vec2i MessagesEventPos[MESSAGES_MAX];   /// coordinate of event
 static int MessagesEventCount;                 /// Number of event messages
 static int MessagesEventIndex;                 /// FIXME: docu
+static int MaxMessagesCount = MESSAGES_MAX;
 
 class MessagesDisplay
 {
@@ -665,7 +717,6 @@ protected:
 private:
 	char Messages[MESSAGES_MAX][256];         /// Array of messages
 	int  MessagesCount;                       /// Number of messages
-	int  MessagesSameCount;                   /// Counts same message repeats
 	int  MessagesScrollY;
 	unsigned long MessagesFrameTimeout;       /// Frame to expire message
 	bool show;
@@ -784,9 +835,6 @@ void MessagesDisplay::DrawMessages()
 					PopClipping();
 				}
 			}
-			if (MessagesCount < 1) {
-				MessagesSameCount = 0;
-			}
 #ifdef DEBUG
 		}
 #endif
@@ -807,7 +855,7 @@ void MessagesDisplay::AddMessage(const char *msg)
 		MessagesFrameTimeout = ticks + UI.MessageScrollSpeed * 1000;
 	}
 
-	if (MessagesCount == MESSAGES_MAX) {
+	if (MessagesCount == MaxMessagesCount) {
 		// Out of space to store messages, can't scroll smoothly
 		ShiftMessages();
 		MessagesFrameTimeout = ticks + UI.MessageScrollSpeed * 1000;
@@ -879,18 +927,35 @@ bool MessagesDisplay::CheckRepeatMessage(const char *msg)
 	if (MessagesCount < 1) {
 		return false;
 	}
-	if (!strcmp(msg, Messages[MessagesCount - 1])) {
-		++MessagesSameCount;
-		return true;
-	}
-	if (MessagesSameCount > 0) {
-		char temp[256];
-		int n = MessagesSameCount;
+	size_t sz = strlen(msg);
+	for (int i = 0; i < MessagesCount; i++) {
+		const char *pMsg = Messages[i];
+		if (!strncmp(msg, pMsg, sz)) {
 
-		MessagesSameCount = 0;
-		// NOTE: vladi: yep it's a tricky one, but should work fine prbably :)
-		snprintf(temp, sizeof(temp), _("Last message repeated ~<%d~> times"), n + 1);
-		AddMessage(temp);
+			size_t msgSz = strlen(pMsg);
+			int n = 0;
+
+			if (msgSz == sz || sscanf(pMsg + sz, " (~<%d~>", &n) == 1) {
+				// This exact message was printed already.
+				// n now holds the previous repeat count.
+				if (n < 10) {
+					// 1. Shift all following messages down
+					for (int z = i; z < MessagesCount - 1; ++z) {
+						strcpy_s(Messages[z], sizeof(Messages[z]), Messages[z + 1]);
+					}
+
+					// Update the message and append it to the end with the
+					// new repeat count
+					char temp[256];
+					snprintf(temp, sizeof(temp), "%s (~<%d~>%s)", msg, n + 1, n == 9 ? "+" : "");
+					MessagesCount--;
+					AddMessage(temp);
+				} else {
+					return true; // skip so many repeated messages
+				}
+			}
+			return true;
+		}
 	}
 	return false;
 }
@@ -911,7 +976,6 @@ void MessagesDisplay::AddUniqueMessage(const char *s)
 void MessagesDisplay::CleanMessages()
 {
 	MessagesCount = 0;
-	MessagesSameCount = 0;
 	MessagesScrollY = 0;
 	MessagesFrameTimeout = 0;
 
@@ -998,7 +1062,7 @@ void SetMessageEvent(const Vec2i &pos, const char *fmt, ...)
 	va_end(va);
 	allmessages.AddUniqueMessage(temp);
 
-	if (MessagesEventCount == MESSAGES_MAX) {
+	if (MessagesEventCount == MaxMessagesCount) {
 		ShiftMessagesEvent();
 	}
 
@@ -1037,6 +1101,14 @@ void ToggleShowBuilListMessages()
 }
 #endif
 
+void SetMaxMessageCount(int newMax)
+{
+	MaxMessagesCount = std::min(MESSAGES_MAX, newMax);
+	allmessages.CleanMessages();
+	MessagesEventCount = 0;
+	MessagesEventIndex = 0;
+}
+
 /*----------------------------------------------------------------------------
 --  INFO PANEL
 ----------------------------------------------------------------------------*/
@@ -1060,40 +1132,50 @@ static void InfoPanel_draw_no_selection()
 		&& !UnitUnderCursor->Type->BoolFlag[ISNOTSELECTABLE_INDEX].value) {
 		// FIXME: not correct for enemies units
 		DrawUnitInfo(*UnitUnderCursor);
-	} else if (Preference.ShowNoSelectionStats) {
-		// FIXME: need some cool ideas for this.
-		int x = UI.InfoPanel.X + 16;
-		int y = UI.InfoPanel.Y + 8;
+	} else {
+#ifdef USE_MNG
+		if (UI.DefaultUnitPortrait.size() > 0) {
+			CUnitType *type = UnitTypeByIdent(UI.DefaultUnitPortrait);
+			if (type) {
+				DrawTypePortrait(*type);
+			}
+		}
+#endif
+		if (Preference.ShowNoSelectionStats) {
+			// FIXME: need some cool ideas for this.
+			int x = UI.InfoPanel.X + 16;
+			int y = UI.InfoPanel.Y + 8;
 
-		CLabel label(GetGameFont());
-		label.Draw(x, y, "Stratagus");
-		y += 16;
-		label.Draw(x, y,  _("Cycle:"));
-		label.Draw(x + 48, y, GameCycle);
-		label.Draw(x + 110, y, CYCLES_PER_SECOND * VideoSyncSpeed / 100);
-		y += 20;
+			CLabel label(GetGameFont());
+			label.Draw(x, y, "Stratagus");
+			y += 16;
+			label.Draw(x, y,  _("Cycle:"));
+			label.Draw(x + 48, y, GameCycle);
+			label.Draw(x + 110, y, CYCLES_PER_SECOND * VideoSyncSpeed / 100);
+			y += 20;
 
-		std::string nc;
-		std::string rc;
+			std::string nc;
+			std::string rc;
 
-		GetDefaultTextColors(nc, rc);
-		for (int i = 0; i < PlayerMax - 1; ++i) {
-			if (Players[i].Type != PlayerNobody) {
-				if (ThisPlayer->IsAllied(Players[i])) {
-					label.SetNormalColor(FontGreen);
-				} else if (ThisPlayer->IsEnemy(Players[i])) {
-					label.SetNormalColor(FontRed);
-				} else {
-					label.SetNormalColor(nc);
+			GetDefaultTextColors(nc, rc);
+			for (int i = 0; i < PlayerMax - 1; ++i) {
+				if (Players[i].Type != PlayerTypes::PlayerNobody) {
+					if (ThisPlayer->IsAllied(Players[i])) {
+						label.SetNormalColor(FontGreen);
+					} else if (ThisPlayer->IsEnemy(Players[i])) {
+						label.SetNormalColor(FontRed);
+					} else {
+						label.SetNormalColor(nc);
+					}
+					label.Draw(x + 15, y, i);
+
+					Video.DrawRectangleClip(ColorWhite, x, y, 12, 12);
+					Video.FillRectangleClip(PlayerColorsRGB[GameSettings.Presets[i].PlayerColor][0], x + 1, y + 1, 10, 10);
+
+					label.Draw(x + 27, y, Players[i].Name);
+					label.Draw(x + 117, y, Players[i].Score);
+					y += 14;
 				}
-				label.Draw(x + 15, y, i);
-
-				Video.DrawRectangleClip(ColorWhite, x, y, 12, 12);
-				Video.FillRectangleClip(PlayerColors[GameSettings.Presets[i].PlayerColor][0], x + 1, y + 1, 10, 10);
-
-				label.Draw(x + 27, y, Players[i].Name);
-				label.Draw(x + 117, y, Players[i].Score);
-				y += 14;
 			}
 		}
 	}
@@ -1133,15 +1215,20 @@ static void InfoPanel_draw_multiple_selection()
 {
 	//  If there are more units selected draw their pictures and a health bar
 	DrawInfoPanelBackground(0);
+
+#ifdef USE_MNG
+	if (Selected[0]->Type->Portrait.Num) {
+		DrawUnitInfo_portrait(*Selected[0]);
+	}
+#endif
+
 	for (size_t i = 0; i != std::min(Selected.size(), UI.SelectedButtons.size()); ++i) {
 		const CIcon &icon = *Selected[i]->Type->Icon.Icon;
 		const PixelPos pos(UI.SelectedButtons[i].X, UI.SelectedButtons[i].Y);
-		icon.DrawUnitIcon(*UI.SelectedButtons[i].Style,
+		icon.DrawGroupSelectionIcon(*UI.SelectedButtons[i].Style,
 						  (ButtonAreaUnderCursor == ButtonAreaSelected && ButtonUnderCursor == (int)i) ?
 						  (IconActive | (MouseButtons & LeftButton)) : 0,
-						  pos, "", Selected[i]->RescuedFrom
-						  ? GameSettings.Presets[Selected[i]->RescuedFrom->Index].PlayerColor
-						  : GameSettings.Presets[Selected[i]->Player->Index].PlayerColor);
+						  pos, "", *Selected[i]);
 		UiDrawLifeBar(*Selected[i], UI.SelectedButtons[i].X, UI.SelectedButtons[i].Y);
 
 		if (ButtonAreaUnderCursor == ButtonAreaSelected && ButtonUnderCursor == (int) i) {

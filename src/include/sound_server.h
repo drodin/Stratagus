@@ -54,8 +54,6 @@
 extern int SetChannelVolume(int channel, int volume);
 /// Set the channel stereo
 extern void SetChannelStereo(int channel, int stereo);
-/// Set the channel's callback for when a sound finishes playing
-extern void SetChannelFinishedCallback(int channel, void (*callback)(int channel));
 /// Get the sample playing on a channel
 extern Mix_Chunk *GetChannelSample(int channel);
 /// Stop a channel
@@ -71,8 +69,11 @@ extern bool SampleIsPlaying(Mix_Chunk *sample);
 extern Mix_Music *LoadMusic(const std::string &name);
 /// Load a sample
 extern Mix_Chunk *LoadSample(const std::string &name);
+extern void FreeSample(Mix_Chunk *sample);
 /// Play a sample
 extern int PlaySample(Mix_Chunk *sample, Origin *origin = NULL);
+/// Play a sample, registering a "finished" callback
+extern int PlaySample(Mix_Chunk *sample, void (*callback)(int channel));
 /// Play a sound file
 extern int PlaySoundFile(const std::string &name);
 
@@ -87,8 +88,6 @@ extern bool IsEffectsEnabled();
 
 /// Set the music finished callback
 void SetMusicFinishedCallback(void (*callback)());
-/// Play a music file
-extern int PlayMusic(Mix_Music *sample);
 /// Play a music file
 extern int PlayMusic(const std::string &file);
 /// Stop music playing
@@ -110,6 +109,9 @@ extern bool SoundEnabled();
 extern int InitSound();
 ///  Cleanup sound.
 extern void QuitSound();
+
+extern uint32_t SDL_SOUND_FINISHED;
+extern void HandleSoundEvent(SDL_Event &event);
 
 //@}
 

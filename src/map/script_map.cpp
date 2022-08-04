@@ -144,7 +144,7 @@ static int CclRevealMap(lua_State *l)
 {
 	LuaCheckArgs(l, 1);
 
-	int newMode;
+	MapRevealModes newMode;
 	const char *revealMode = LuaToString(l, 1);
 	if (!strcmp(revealMode, "hidden")) {
 		newMode = MapRevealModes::cHidden;
@@ -346,9 +346,9 @@ static int CclSetFieldOfViewType(lua_State *l)
 	if (!strcmp(type_name, "shadow-casting")) {
 		new_type = FieldOfViewTypes::cShadowCasting;
 		/// Tiled types of FOW don't work with shadow casting
-		if (FogOfWar.GetType() != FogOfWarTypes::cEnhanced) {
-			FogOfWar.SetType(FogOfWarTypes::cEnhanced);
-		}	
+		if (FogOfWar->GetType() != FogOfWarTypes::cEnhanced) {
+			FogOfWar->SetType(FogOfWarTypes::cEnhanced);
+		}
 	} else if (!strcmp(type_name, "simple-radial")) {
 		new_type = FieldOfViewTypes::cSimpleRadial;
 	} else {
@@ -501,7 +501,7 @@ static int CclSetFogOfWarType(lua_State *l)
 		fprintf(stdout, "Accessible Fog of War types: \"tiled\", \"enhanced\" and \"fast\".\n");
 		return 1;
 	}
-	FogOfWar.SetType(new_type);
+	FogOfWar->SetType(new_type);
 	return 0;
 }
 
@@ -511,7 +511,7 @@ static int CclSetFogOfWarType(lua_State *l)
 static int CclGetFogOfWarType(lua_State *l)
 {
 	LuaCheckArgs(l, 0);
-	lua_pushinteger(l, int(FogOfWar.GetType()));
+	lua_pushinteger(l, int(FogOfWar->GetType()));
 	return 1;
 }
 
@@ -544,7 +544,7 @@ static int CclSetFogOfWarOpacityLevels(lua_State *l)
 		return 1;
 	}
 
-	FogOfWar.SetOpacityLevels(explored, revealed, unseen);
+	FogOfWar->SetOpacityLevels(explored, revealed, unseen);
 
 	return 0;	
 }
@@ -577,7 +577,7 @@ static int CclSetFogOfWarBlur(lua_State *l)
 		PrintFunction();
 		fprintf(stdout, "Number of box blur iterations should be greater than 0. Blur is disabled.\n");
 	}
-	FogOfWar.InitBlurer(radiusSimple, radiusBilinear, iterations);
+	FogOfWar->InitBlurer(radiusSimple, radiusBilinear, iterations);
 	return 0;
 }
 
@@ -591,7 +591,7 @@ static int CclSetFogOfWarBlur(lua_State *l)
 static int CclSetFogOfWarBilinear(lua_State *l)
 {
 	LuaCheckArgs(l, 1);
-	FogOfWar.EnableBilinearUpscale(LuaToBoolean(l, 1));
+	FogOfWar->EnableBilinearUpscale(LuaToBoolean(l, 1));
 	return 0;
 }
 
@@ -601,7 +601,7 @@ static int CclSetFogOfWarBilinear(lua_State *l)
 static int CclGetIsFogOfWarBilinear(lua_State *l)
 {
 	LuaCheckArgs(l, 0);
-	lua_pushboolean(l, FogOfWar.IsBilinearUpscaleEnabled());
+	lua_pushboolean(l, FogOfWar->IsBilinearUpscaleEnabled());
 	return 1;
 }
 
@@ -668,7 +668,7 @@ static int CclSetFogOfWarColor(lua_State *l)
 		LuaError(l, "Arguments must be in the range 0-255");
 	}
 
-	FogOfWar.SetFogColor(r, g, b);
+	FogOfWar->SetFogColor(r, g, b);
 
 	return 0;
 }
@@ -760,10 +760,6 @@ void SetTile(unsigned int tileIndex, const Vec2i &pos, int value)
 		fprintf(stderr, "Invalid tile number: %u\n", tileIndex);
 		return;
 	}
-	if (value < 0 || value >= 256) {
-		fprintf(stderr, "Invalid tile number: %u\n", tileIndex);
-		return;
-	}
 
 	if (Map.Fields) {
 		CMapField &mf = *Map.Field(pos);
@@ -791,26 +787,26 @@ static int CclDefinePlayerTypes(lua_State *l)
 		}
 		const char *type = LuaToString(l, i + 1);
 		if (!strcmp(type, "neutral")) {
-			Map.Info.PlayerType[i] = PlayerNeutral;
+			Map.Info.PlayerType[i] = PlayerTypes::PlayerNeutral;
 		} else if (!strcmp(type, "nobody")) {
-			Map.Info.PlayerType[i] = PlayerNobody;
+			Map.Info.PlayerType[i] = PlayerTypes::PlayerNobody;
 		} else if (!strcmp(type, "computer")) {
-			Map.Info.PlayerType[i] = PlayerComputer;
+			Map.Info.PlayerType[i] = PlayerTypes::PlayerComputer;
 		} else if (!strcmp(type, "person")) {
-			Map.Info.PlayerType[i] = PlayerPerson;
+			Map.Info.PlayerType[i] = PlayerTypes::PlayerPerson;
 		} else if (!strcmp(type, "rescue-passive")) {
-			Map.Info.PlayerType[i] = PlayerRescuePassive;
+			Map.Info.PlayerType[i] = PlayerTypes::PlayerRescuePassive;
 		} else if (!strcmp(type, "rescue-active")) {
-			Map.Info.PlayerType[i] = PlayerRescueActive;
+			Map.Info.PlayerType[i] = PlayerTypes::PlayerRescueActive;
 		} else {
 			LuaError(l, "Unsupported tag: %s" _C_ type);
 		}
 	}
 	for (int i = numplayers; i < PlayerMax - 1; ++i) {
-		Map.Info.PlayerType[i] = PlayerNobody;
+		Map.Info.PlayerType[i] = PlayerTypes::PlayerNobody;
 	}
 	if (numplayers < PlayerMax) {
-		Map.Info.PlayerType[PlayerMax - 1] = PlayerNeutral;
+		Map.Info.PlayerType[PlayerMax - 1] = PlayerTypes::PlayerNeutral;
 	}
 	return 0;
 }
@@ -925,6 +921,11 @@ static int CclGetTileTerrainHasFlag(lua_State *l)
 	LuaCheckArgs(l, 3);
 
 	const Vec2i pos(LuaToNumber(l, 1), LuaToNumber(l, 2));
+	if (pos.x >= Map.Info.MapWidth || pos.y >= Map.Info.MapHeight || pos.x < 0 || pos.y < 0) {
+		// out of bounds, doesn't have it
+		lua_pushboolean(l, 0);
+		return 1;
+	}
 
 	unsigned short flag = 0;
 	const char *flag_name = LuaToString(l, 3);
