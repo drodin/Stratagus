@@ -4,13 +4,3 @@ hunter_config(
     CMAKE_ARGS
         CMAKE_C_FLAGS=-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0
 )
-
-#fix SDL2 hidapi/android/hid.cpp linking error
-if(ANDROID AND NOT ${CMAKE_ANDROID_ARCH_ABI} STREQUAL "arm64-v8a")
-hunter_config(
-    SDL2
-    VERSION 2.0.18
-    CMAKE_ARGS
-        CMAKE_CXX_FLAGS=-fPIC
-)
-endif()
