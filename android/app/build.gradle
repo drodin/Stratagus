@@ -4,7 +4,7 @@ plugins {
 
 android {
     compileSdkVersion 32
-    ndkVersion '18.1.5063045'
+    ndkVersion '23.2.8568313'
 
     defaultConfig {
         resValue "string", "app_name", "Stratagus"
@@ -13,7 +13,7 @@ android {
         versionCode = 16
         versionName = "v3.2.0-dev1"
 
-        minSdkVersion 14
+        minSdkVersion 16
         targetSdkVersion 32
 
         ndk {
@@ -44,7 +44,7 @@ android {
         cmake {
             path file('../../CMakeLists.txt')
             buildStagingDirectory "${project.buildDir}/../.cxx"
-            version "3.18.1"
+            version "3.22.1"
         }
     }
 }
