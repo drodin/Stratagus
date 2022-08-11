@@ -15,7 +15,7 @@
 	<string name="no_file_manager">No file manager found!\nPlease install one.</string>
 
 	<string name="help">Stratagus is a real-time strategy gaming engine that supports following games:\
-Wargus, War1gus, Stargus, Aleona\'s Tales and Wyrmsun\n\
+Wargus, War1gus, Stargus and Aleona\'s Tales\n\
 To actually play anything you will need to generate \'game data files\' on your computer and copy them to your device.
 Please visit <b><i>https://drodin.com/stratagus</i></b> for instructions.\n\
 Controls: Touch/click a unit to select it, touch/click and drag to select multiple units.\
