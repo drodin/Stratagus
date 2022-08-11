@@ -33,6 +33,8 @@
 -- Includes
 ----------------------------------------------------------------------------*/
 
+#include <atomic>
+
 #include "stratagus.h"
 
 
@@ -51,11 +53,31 @@
 -- Variables
 ----------------------------------------------------------------------------*/
 
-bool CallbackMusic;                       /// flag true callback ccl if stops
+/// flag is set when a MusicFinishedCallback was enqueued in the event loop and should be handled, and unset when the handler has run.
+static std::atomic_flag MusicFinishedEventQueued = ATOMIC_FLAG_INIT;
+static volatile bool IsCallbackEnabled = false;
 
 /*----------------------------------------------------------------------------
 -- Functions
 ----------------------------------------------------------------------------*/
+
+/**
+**  Check if music is finished and play the next song
+*/
+static void CheckMusicFinished()
+{
+	if (SoundEnabled() && IsMusicEnabled()) {
+		lua_getglobal(Lua, "MusicStopped");
+		if (!lua_isfunction(Lua, -1)) {
+			fprintf(stderr, "No MusicStopped function in Lua\n");
+		} else {
+			DebugPrint("Calling MusicStopped callback at %ul\n" _C_ SDL_GetTicks());
+			LuaCall(0, 1);
+		}
+	}
+	// clear the flag after handling the event, so the next event can be enqueued
+	MusicFinishedEventQueued.clear();
+}
 
 /**
 **  Callback for when music has finished
@@ -63,27 +85,21 @@ bool CallbackMusic;                       /// flag true callback ccl if stops
 */
 static void MusicFinishedCallback()
 {
+	if (!IsCallbackEnabled) {
+		return;
+	}
+	if (MusicFinishedEventQueued.test_and_set()) {
+		// don't queue more than one of these events at a time
+		return;
+	}
 	SDL_Event event;
 	SDL_zero(event);
 	event.type = SDL_SOUND_FINISHED;
 	event.user.code = 1;
 	event.user.data1 = (void*) CheckMusicFinished;
-	SDL_PeepEvents(&event, 1, SDL_ADDEVENT, SDL_FIRSTEVENT, SDL_LASTEVENT);
-}
-
-/**
-**  Check if music is finished and play the next song
-*/
-void CheckMusicFinished(int force)
-{
-	if (!(SoundEnabled() && IsMusicEnabled() && CallbackMusic)) {
-		return;
-	}
-	lua_getglobal(Lua, "MusicStopped");
-	if (!lua_isfunction(Lua, -1)) {
-		fprintf(stderr, "No MusicStopped function in Lua\n");
-	} else {
-		LuaCall(0, 1);
+	if (SDL_PeepEvents(&event, 1, SDL_ADDEVENT, SDL_FIRSTEVENT, SDL_LASTEVENT) <= 0) {
+		// if we failed to enqueue the event, clear the flag again
+		MusicFinishedEventQueued.clear();
 	}
 }
 
@@ -93,9 +109,22 @@ void CheckMusicFinished(int force)
 void InitMusic()
 {
 	SetMusicFinishedCallback(MusicFinishedCallback);
+	CallbackMusicEnable();
 #ifdef USE_FLUIDSYNTH
 	InitFluidSynth();
 #endif
+}
+
+void CallbackMusicEnable() {
+	IsCallbackEnabled = true;
+}
+
+void CallbackMusicDisable() {
+	IsCallbackEnabled = false;
+}
+
+void CallbackMusicTrigger() {
+	MusicFinishedCallback();
 }
 
 //@}
