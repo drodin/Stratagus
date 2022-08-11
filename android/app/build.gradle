@@ -3,7 +3,7 @@ plugins {
 }
 
 android {
-    compileSdkVersion 30
+    compileSdkVersion 32
     ndkVersion '18.1.5063045'
 
     defaultConfig {
@@ -14,7 +14,7 @@ android {
         versionName = "v3.2.0-dev1"
 
         minSdkVersion 14
-        targetSdkVersion 30
+        targetSdkVersion 32
 
         ndk {
             //abiFilters 'armeabi-v7a'
@@ -50,6 +50,6 @@ android {
 }
 
 dependencies {
-    implementation 'androidx.constraintlayout:constraintlayout:2.1.2'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
 }
 

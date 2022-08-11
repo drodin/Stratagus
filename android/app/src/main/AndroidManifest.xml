@@ -12,7 +12,8 @@
 			android:configChanges="keyboardHidden|orientation|screenSize"
 			android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
 		</activity>
-		<activity android:name=".StartMenu">
+		<activity android:name=".StartMenu"
+			android:exported="true">
 			<intent-filter>
 				<action android:name="android.intent.action.MAIN" />
 				<action android:name="android.intent.action.VIEW" />
