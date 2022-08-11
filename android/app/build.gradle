@@ -10,8 +10,8 @@ android {
         resValue "string", "app_name", "Stratagus"
 
         applicationId "com.drodin.stratagus"
-        versionCode = 18
-        versionName = "v3.3.1-dev1"
+        versionCode = 19
+        versionName = "v3.3.2-dev1"
 
         minSdkVersion 16
         targetSdkVersion 32
