@@ -41,7 +41,11 @@
 #include <stdlib.h>
 #include <stdarg.h>
 
+#ifdef __APPLE__
+#include <stdlib.h>
+#else
 #include <malloc.h>
+#endif
 #ifdef WIN32
 #include <windows.h>
 #include <intrin.h>
@@ -632,7 +636,7 @@ void *aligned_malloc(size_t alignment, size_t size)
 {
 #ifdef WIN32
 	return _aligned_malloc(size, alignment);
-#elif _ISOC11_SOURCE
+#elif defined(_ISOC11_SOURCE) || defined(__APPLE__)
 	return aligned_alloc(alignment, size);
 #else
 	return memalign(alignment, size);
